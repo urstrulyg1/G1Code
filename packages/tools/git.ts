@@ -1,2 +1,24 @@
-import { AgentTool } from './types'; import { safePath } from './workspace'; import { spawnCommand } from './command';
-export function gitTools(): AgentTool[] { return ['status', 'diff', 'branch', 'log'].map((action) => ({ name: `git_${action}`, description: `Read-only git ${action} information for the workspace.`, permission: 'safe' as const, inputSchema: { type: 'object', properties: {} }, execute: async (_input, context) => { const cwd = safePath(context.workspace, '.'); const result = await spawnCommand(`git --no-pager ${action}`, cwd, context.signal).wait(); return { content: JSON.stringify(result), isError: result.exitCode !== 0, exitCode: result.exitCode }; } })); }
+import { AgentTool } from "./types";
+import { safePath } from "./workspace";
+import { spawnCommand } from "./command";
+export function gitTools(): AgentTool[] {
+  return ["status", "diff", "branch", "log"].map((action) => ({
+    name: `git_${action}`,
+    description: `Read-only git ${action} information for the workspace.`,
+    permission: "safe" as const,
+    inputSchema: { type: "object", properties: {} },
+    execute: async (_input, context) => {
+      const cwd = safePath(context.workspace, ".");
+      const result = await spawnCommand(
+        `git --no-pager ${action}`,
+        cwd,
+        context.signal,
+      ).wait();
+      return {
+        content: JSON.stringify(result),
+        isError: result.exitCode !== 0,
+        exitCode: result.exitCode,
+      };
+    },
+  }));
+}

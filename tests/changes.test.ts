@@ -1,2 +1,37 @@
-import assert from 'node:assert/strict'; import { mkdtemp, readFile, writeFile } from 'node:fs/promises'; import { tmpdir } from 'node:os'; import path from 'node:path'; import { test } from 'node:test'; import { applyApprovedChange, contentHash, revertAppliedChange, unifiedDiff } from '../packages/tools/changes';
-test('safe change application detects concurrent edits and reverts only unchanged files', async () => { const workspace = await mkdtemp(path.join(tmpdir(), 'g1code-')); const file = path.join(workspace, 'sample.txt'); const original = 'one\ntwo\n'; const proposed = 'one\nthree\n'; await writeFile(file, original); const applied = await applyApprovedChange(workspace, 'sample.txt', contentHash(original), original, proposed); assert.equal(applied.status, 'APPLIED'); assert.match(unifiedDiff('sample.txt', original, proposed), /-two/); await writeFile(file, 'user change\n'); const conflict = await revertAppliedChange(workspace, 'sample.txt', applied.proposedHash, original, proposed); assert.equal(conflict.status, 'CONFLICT'); assert.equal(await readFile(file, 'utf8'), 'user change\n'); });
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import {
+  applyApprovedChange,
+  contentHash,
+  revertAppliedChange,
+  unifiedDiff,
+} from "../packages/tools/changes";
+test("safe change application detects concurrent edits and reverts only unchanged files", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "g1code-"));
+  const file = path.join(workspace, "sample.txt");
+  const original = "one\ntwo\n";
+  const proposed = "one\nthree\n";
+  await writeFile(file, original);
+  const applied = await applyApprovedChange(
+    workspace,
+    "sample.txt",
+    contentHash(original),
+    original,
+    proposed,
+  );
+  assert.equal(applied.status, "APPLIED");
+  assert.match(unifiedDiff("sample.txt", original, proposed), /-two/);
+  await writeFile(file, "user change\n");
+  const conflict = await revertAppliedChange(
+    workspace,
+    "sample.txt",
+    applied.proposedHash,
+    original,
+    proposed,
+  );
+  assert.equal(conflict.status, "CONFLICT");
+  assert.equal(await readFile(file, "utf8"), "user change\n");
+});

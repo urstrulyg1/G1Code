@@ -8,7 +8,8 @@
     "dev": "concurrently -k \"vite --config apps/desktop/vite.config.ts\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "tsc -p apps/desktop/tsconfig.json && vite build --config apps/desktop/vite.config.ts && tsc -p apps/desktop/tsconfig.electron.json",
     "start": "electron .",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,html,md}\" \"!package-lock.json\""
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -25,6 +26,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^9.0.1",
+    "prettier": "^3.9.6",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
     "vite": "^5.4.8",

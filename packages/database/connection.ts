@@ -1,13 +1,13 @@
-import Database from 'better-sqlite3';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
-import { app } from 'electron';
+import Database from "better-sqlite3";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { app } from "electron";
 
 export function openDatabase() {
-  const directory = app.getPath('userData');
+  const directory = app.getPath("userData");
   void fs.mkdir(directory, { recursive: true });
-  const database = new Database(path.join(directory, 'g1code.sqlite'));
-  database.pragma('journal_mode = WAL');
+  const database = new Database(path.join(directory, "g1code.sqlite"));
+  database.pragma("journal_mode = WAL");
   database.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL); INSERT INTO schema_version SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
     CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL, mode TEXT NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
