@@ -1,0 +1,2 @@
+import assert from 'node:assert/strict'; import { test } from 'node:test'; import { spawnCommand } from '../packages/tools/command';
+test('streaming command can be cancelled and returns bounded result', async () => { const controller = new AbortController(); const execution = spawnCommand(process.platform === 'win32' ? 'ping 127.0.0.1 -n 10' : 'sleep 10', process.cwd(), controller.signal); controller.abort(); const result = await execution.wait(); assert.notEqual(result.exitCode, 0); });
