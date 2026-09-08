@@ -13,13 +13,18 @@ import { safeRealPath, workspaceTools } from "./packages/tools/workspace";
 import { gitTools } from "./packages/tools/git";
 import { testingTools } from "./packages/testing/tool";
 import { ToolRegistry } from "./packages/tools/types";
-import { AgentRuntime, type AgentEvent, type ChangeApprovalResult } from "./packages/agent/runtime";
+import {
+  AgentRuntime,
+  type AgentEvent,
+  type ChangeApprovalResult,
+} from "./packages/agent/runtime";
 import {
   readSettings,
   saveSettings,
   configuredProvider,
   type Settings,
 } from "./packages/settings/storage";
+import { ModelCatalog } from "./packages/ai/models";
 
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.PORT) || 3131;
@@ -65,7 +70,10 @@ function broadcastSSE(data: unknown) {
 
 function setCorsHeaders(res: http.ServerResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS",
+  );
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
@@ -79,7 +87,9 @@ function sendError(res: http.ServerResponse, status: number, message: string) {
   sendJson(res, status, { error: message });
 }
 
-async function parseJsonBody<T = unknown>(req: http.IncomingMessage): Promise<T> {
+async function parseJsonBody<T = unknown>(
+  req: http.IncomingMessage,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (chunk) => {
@@ -107,6 +117,17 @@ function validWorkspace(input?: unknown): string {
   return selectedWorkspace;
 }
 
+// A single strict workspace authority for file/index/change operations. The
+// server is the only privileged boundary; the renderer passes the selected
+// workspace, and every handler must agree before touching the filesystem.
+function checkedWorkspace(inputWorkspace: string | undefined): string {
+  const candidate = validWorkspace(inputWorkspace);
+  if (path.resolve(candidate) !== path.resolve(selectedWorkspace)) {
+    throw new Error("Workspace mismatch; refusing cross-workspace access");
+  }
+  return candidate;
+}
+
 const server = http.createServer(async (req, res) => {
   setCorsHeaders(res);
 
@@ -116,7 +137,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  const url = new URL(
+    req.url || "/",
+    `http://${req.headers.host || "localhost"}`,
+  );
   const pathname = url.pathname;
 
   try {
@@ -169,21 +193,31 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Workspace list entries
-    if ((pathname === "/api/workspace/list" && req.method === "POST") || (pathname === "/api/workspace/list" && req.method === "GET")) {
-      const directoryParam = req.method === "POST"
-        ? (await parseJsonBody<{ directory?: string }>(req)).directory
-        : url.searchParams.get("directory") || selectedWorkspace;
+    if (
+      (pathname === "/api/workspace/list" && req.method === "POST") ||
+      (pathname === "/api/workspace/list" && req.method === "GET")
+    ) {
+      const directoryParam =
+        req.method === "POST"
+          ? (await parseJsonBody<{ directory?: string }>(req)).directory
+          : url.searchParams.get("directory") || selectedWorkspace;
 
       const targetDir = directoryParam || selectedWorkspace;
-      const relDir = path.isAbsolute(targetDir) ? path.relative(selectedWorkspace, targetDir) : targetDir;
+      const relDir = path.isAbsolute(targetDir)
+        ? path.relative(selectedWorkspace, targetDir)
+        : targetDir;
       const safeDir = await safeRealPath(selectedWorkspace, relDir);
       const entries = await fs.readdir(safeDir, { withFileTypes: true });
 
       const mapped = entries
-        .filter((entry) => !entry.name.startsWith(".") || entry.name === ".g1code")
+        .filter(
+          (entry) => !entry.name.startsWith(".") || entry.name === ".g1code",
+        )
         .map((entry) => ({
           name: entry.name,
-          kind: entry.isDirectory() ? ("directory" as const) : ("file" as const),
+          kind: entry.isDirectory()
+            ? ("directory" as const)
+            : ("file" as const),
         }))
         .sort(
           (a, b) =>
@@ -200,7 +234,9 @@ const server = http.createServer(async (req, res) => {
       if (!body.filePath || typeof body.filePath !== "string") {
         return sendError(res, 400, "filePath required");
       }
-      const relPath = path.isAbsolute(body.filePath) ? path.relative(selectedWorkspace, body.filePath) : body.filePath;
+      const relPath = path.isAbsolute(body.filePath)
+        ? path.relative(selectedWorkspace, body.filePath)
+        : body.filePath;
       const safePath = await safeRealPath(selectedWorkspace, relPath);
       const content = await fs.readFile(safePath, "utf8");
       return sendJson(res, 200, { content });
@@ -208,11 +244,15 @@ const server = http.createServer(async (req, res) => {
 
     // File write
     if (pathname === "/api/file/write" && req.method === "POST") {
-      const body = await parseJsonBody<{ filePath: string; contents: string }>(req);
+      const body = await parseJsonBody<{ filePath: string; contents: string }>(
+        req,
+      );
       if (!body.filePath || typeof body.contents !== "string") {
         return sendError(res, 400, "filePath and contents required");
       }
-      const relPath = path.isAbsolute(body.filePath) ? path.relative(selectedWorkspace, body.filePath) : body.filePath;
+      const relPath = path.isAbsolute(body.filePath)
+        ? path.relative(selectedWorkspace, body.filePath)
+        : body.filePath;
       const safePath = await safeRealPath(selectedWorkspace, relPath);
       await fs.writeFile(safePath, body.contents, "utf8");
       return sendJson(res, 200, { success: true });
@@ -225,18 +265,29 @@ const server = http.createServer(async (req, res) => {
         return sendError(res, 400, "command required");
       }
       const cwdTarget = body.cwd ? body.cwd : selectedWorkspace;
-      const relCwd = path.isAbsolute(cwdTarget) ? path.relative(selectedWorkspace, cwdTarget) : cwdTarget;
+      const relCwd = path.isAbsolute(cwdTarget)
+        ? path.relative(selectedWorkspace, cwdTarget)
+        : cwdTarget;
       const safeCwd = await safeRealPath(selectedWorkspace, relCwd);
 
       try {
         const result = await execFileAsync(
           process.platform === "win32" ? "cmd.exe" : "sh",
-          process.platform === "win32" ? ["/d", "/s", "/c", body.command] : ["-lc", body.command],
+          process.platform === "win32"
+            ? ["/d", "/s", "/c", body.command]
+            : ["-lc", body.command],
           { cwd: safeCwd, timeout: 120000, maxBuffer: 2 * 1024 * 1024 },
         );
-        return sendJson(res, 200, { output: `${result.stdout}${result.stderr}`, exitCode: 0 });
+        return sendJson(res, 200, {
+          output: `${result.stdout}${result.stderr}`,
+          exitCode: 0,
+        });
       } catch (error) {
-        const failure = error as { stdout?: string; stderr?: string; code?: number };
+        const failure = error as {
+          stdout?: string;
+          stderr?: string;
+          code?: number;
+        };
         return sendJson(res, 200, {
           output: `${failure.stdout ?? ""}${failure.stderr ?? String(error)}`,
           exitCode: failure.code ?? 1,
@@ -251,28 +302,140 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/api/settings" && req.method === "POST") {
-      const body = await parseJsonBody<Partial<Settings> & { apiKey?: string }>(req);
+      const body = await parseJsonBody<Partial<Settings> & { apiKey?: string }>(
+        req,
+      );
       const updated = await saveSettings(body);
       return sendJson(res, 200, updated);
     }
 
-    // Provider models
-    if (pathname === "/api/provider/models" && req.method === "GET") {
-      const { provider } = await configuredProvider();
-      const models = await provider.getModels();
-      return sendJson(res, 200, models);
+    // Provider models (all or free)
+    // Provider models (all or free)
+    if (pathname === "/api/provider/models/free" && req.method === "GET") {
+      const providerParam = url.searchParams.get("provider") || undefined;
+      try {
+        const { provider } = await configuredProvider(undefined, providerParam);
+        if ("getFreeModels" in provider && typeof (provider as any).getFreeModels === "function") {
+          const freeModels = await (provider as any).getFreeModels();
+          return sendJson(res, 200, freeModels);
+        }
+        const models = await provider.getModels();
+        const freeModels = models.filter((m) => m.isPromotional);
+        return sendJson(res, 200, freeModels);
+      } catch {
+        const catalog = new ModelCatalog();
+        return sendJson(res, 200, catalog.getFreeModels(providerParam));
+      }
     }
 
-    // Provider test
+    if (pathname === "/api/provider/models" && req.method === "GET") {
+      const providerParam = url.searchParams.get("provider") || undefined;
+      const isFreeOnly = url.searchParams.get("free") === "true";
+      try {
+        const { provider } = await configuredProvider(undefined, providerParam);
+        if (isFreeOnly) {
+          if ("getFreeModels" in provider && typeof (provider as any).getFreeModels === "function") {
+            const freeModels = await (provider as any).getFreeModels();
+            return sendJson(res, 200, freeModels);
+          }
+        }
+        const models = await provider.getModels();
+        if (isFreeOnly) {
+          return sendJson(res, 200, models.filter((m) => m.isPromotional));
+        }
+        return sendJson(res, 200, models);
+      } catch {
+        const catalog = new ModelCatalog();
+        const models = isFreeOnly
+          ? catalog.getFreeModels(providerParam)
+          : catalog.getModels(providerParam);
+        return sendJson(res, 200, models);
+      }
+    }
+
+    // Provider verify connection
+    if (pathname === "/api/provider/verify" && req.method === "POST") {
+      try {
+        const body = await parseJsonBody<{ provider?: string }>(req).catch(() => ({} as any));
+        const { provider } = await configuredProvider(undefined, body?.provider);
+        if (provider.verifyConnection) {
+          const result = await provider.verifyConnection();
+          return sendJson(res, 200, result);
+        }
+        const models = await provider.getModels();
+        return sendJson(res, 200, {
+          connected: true,
+          modelCount: models.length,
+          message: `Connected successfully. ${models.length} models available.`,
+        });
+      } catch (err) {
+        return sendJson(res, 400, {
+          connected: false,
+          modelCount: 0,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Provider test model
     if (pathname === "/api/provider/test" && req.method === "POST") {
-      const body = await parseJsonBody<{ model?: string }>(req);
-      const { provider, settings } = await configuredProvider();
-      const models = await provider.getModels();
-      return sendJson(res, 200, {
-        connected: true,
-        model: body.model || settings.model || models[0]?.id,
-        models,
-      });
+      try {
+        const body = await parseJsonBody<{ model?: string; provider?: string }>(req);
+        const { provider, settings } = await configuredProvider(undefined, body.provider);
+        const targetModel = body.model || settings.model || "gpt-6-astra";
+
+        if (provider.testModel) {
+          const result = await provider.testModel(targetModel);
+          return sendJson(res, 200, {
+            connected: true,
+            model: targetModel,
+            ...result,
+          });
+        }
+
+        const startTime = Date.now();
+        const chatRes = await provider.chat({
+          model: targetModel,
+          messages: [{ role: "user", content: "Reply with exactly: OK" }],
+          maxTokens: 10,
+        });
+        const latency = Date.now() - startTime;
+        return sendJson(res, 200, {
+          connected: true,
+          model: targetModel,
+          working: true,
+          latencyMs: latency,
+          ttftMs: latency,
+          output: chatRes.message.content.trim(),
+        });
+      } catch (err) {
+        return sendJson(res, 400, {
+          connected: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Provider refresh catalog
+    if (pathname === "/api/provider/refresh" && req.method === "POST") {
+      try {
+        const body = await parseJsonBody<{ provider?: string }>(req).catch(() => ({} as any));
+        const { provider } = await configuredProvider(undefined, body?.provider);
+        const models = await provider.getModels();
+        return sendJson(res, 200, {
+          success: true,
+          models,
+          count: models.length,
+        });
+      } catch {
+        const catalog = new ModelCatalog();
+        const models = catalog.getModels(body?.provider);
+        return sendJson(res, 200, {
+          success: true,
+          models,
+          count: models.length,
+        });
+      }
     }
 
     // Sessions list
@@ -287,7 +450,9 @@ const server = http.createServer(async (req, res) => {
       const workspace = validWorkspace(url.searchParams.get("workspace"));
       const sessionId = url.searchParams.get("sessionId");
       if (!sessionId) return sendError(res, 400, "sessionId required");
-      const session = store.recentSessions(workspace, 100).find((s) => s.id === sessionId);
+      const session = store
+        .recentSessions(workspace, 100)
+        .find((s) => s.id === sessionId);
       if (!session) return sendError(res, 404, "Session not found");
       return sendJson(res, 200, {
         session,
@@ -332,20 +497,40 @@ const server = http.createServer(async (req, res) => {
         if (waiter) {
           service.approveChange(body.id);
           const applied = await service.applyChange(body.id);
-          const status = applied.status === "APPLIED" || applied.status === "CONFLICT" ? applied.status : "REJECTED";
-          const message = status === "APPLIED" ? "Change applied successfully." : "Change conflicted.";
-          store.addEvent(waiter.sessionId, `CHANGE_${status}`, { changeId: body.id, status, message });
-          broadcastSSE({ type: "approval", sessionId: waiter.sessionId, changeId: body.id, message, result: { status } });
+          const status =
+            applied.status === "APPLIED" || applied.status === "CONFLICT"
+              ? applied.status
+              : "REJECTED";
+          const message =
+            status === "APPLIED"
+              ? "Change applied successfully."
+              : "Change conflicted.";
+          store.addEvent(waiter.sessionId, `CHANGE_${status}`, {
+            changeId: body.id,
+            status,
+            message,
+          });
+          broadcastSSE({
+            type: "approval",
+            sessionId: waiter.sessionId,
+            changeId: body.id,
+            message,
+            result: { status },
+          });
           approvalWaiters.delete(body.id);
           waiter.resolve({ approved: status === "APPLIED", status, message });
           return sendJson(res, 200, applied);
         } else {
           service.approveChange(body.id);
           const applied = await service.applyChange(body.id);
-          store.addEvent(change.sessionId, applied.status === "APPLIED" ? "CHANGE_APPLIED" : "CHANGE_CONFLICT", {
-            changeId: body.id,
-            status: applied.status,
-          });
+          store.addEvent(
+            change.sessionId,
+            applied.status === "APPLIED" ? "CHANGE_APPLIED" : "CHANGE_CONFLICT",
+            {
+              changeId: body.id,
+              status: applied.status,
+            },
+          );
           return sendJson(res, 200, applied);
         }
       }
@@ -354,10 +539,23 @@ const server = http.createServer(async (req, res) => {
         const waiter = approvalWaiters.get(body.id);
         if (waiter) {
           const rejected = service.rejectChange(body.id);
-          store.addEvent(waiter.sessionId, "CHANGE_REJECTED", { changeId: body.id, status: "REJECTED" });
-          broadcastSSE({ type: "approval", sessionId: waiter.sessionId, changeId: body.id, message: "Change rejected.", result: { status: "REJECTED" } });
+          store.addEvent(waiter.sessionId, "CHANGE_REJECTED", {
+            changeId: body.id,
+            status: "REJECTED",
+          });
+          broadcastSSE({
+            type: "approval",
+            sessionId: waiter.sessionId,
+            changeId: body.id,
+            message: "Change rejected.",
+            result: { status: "REJECTED" },
+          });
           approvalWaiters.delete(body.id);
-          waiter.resolve({ approved: false, status: "REJECTED", message: "Change rejected by user." });
+          waiter.resolve({
+            approved: false,
+            status: "REJECTED",
+            message: "Change rejected by user.",
+          });
           return sendJson(res, 200, rejected);
         } else {
           return sendJson(res, 200, service.rejectChange(body.id));
@@ -377,7 +575,10 @@ const server = http.createServer(async (req, res) => {
 
     // Approve all changes
     if (pathname === "/api/agent/approve-all" && req.method === "POST") {
-      const body = await parseJsonBody<{ workspace?: string; sessionId: string }>(req);
+      const body = await parseJsonBody<{
+        workspace?: string;
+        sessionId: string;
+      }>(req);
       const workspace = validWorkspace(body.workspace);
       const changes = store.pendingChanges(body.sessionId);
       const service = new ChangeService(store, workspace);
@@ -385,12 +586,19 @@ const server = http.createServer(async (req, res) => {
       for (const change of changes) {
         if (change.status === "PENDING") service.approveChange(change.id);
       }
-      const result = await service.applyBatch(body.sessionId, changes.map((c) => c.id));
+      const result = await service.applyBatch(
+        body.sessionId,
+        changes.map((c) => c.id),
+      );
       for (const change of changes) {
         const waiter = approvalWaiters.get(change.id);
         if (waiter) {
           approvalWaiters.delete(change.id);
-          waiter.resolve({ approved: true, status: "APPLIED", message: "Batch applied." });
+          waiter.resolve({
+            approved: true,
+            status: "APPLIED",
+            message: "Batch applied.",
+          });
         }
       }
       store.addEvent(body.sessionId, "CHANGE_BATCH_APPLIED", {
@@ -402,14 +610,21 @@ const server = http.createServer(async (req, res) => {
 
     // Reject all changes
     if (pathname === "/api/agent/reject-all" && req.method === "POST") {
-      const body = await parseJsonBody<{ workspace?: string; sessionId: string }>(req);
+      const body = await parseJsonBody<{
+        workspace?: string;
+        sessionId: string;
+      }>(req);
       const workspace = validWorkspace(body.workspace);
       const service = new ChangeService(store, workspace);
       const rejected = store.pendingChanges(body.sessionId).map((change) => {
         const waiter = approvalWaiters.get(change.id);
         if (waiter) {
           approvalWaiters.delete(change.id);
-          waiter.resolve({ approved: false, status: "REJECTED", message: "Rejected by user." });
+          waiter.resolve({
+            approved: false,
+            status: "REJECTED",
+            message: "Rejected by user.",
+          });
         }
         return service.rejectChange(change.id);
       });
@@ -418,25 +633,38 @@ const server = http.createServer(async (req, res) => {
 
     // Discard session
     if (pathname === "/api/agent/discard" && req.method === "POST") {
-      const body = await parseJsonBody<{ workspace?: string; sessionId: string }>(req);
+      const body = await parseJsonBody<{
+        workspace?: string;
+        sessionId: string;
+      }>(req);
       const workspace = validWorkspace(body.workspace);
       const service = new ChangeService(store, workspace);
       for (const change of store.pendingChanges(body.sessionId)) {
         if (approvalWaiters.has(change.id)) {
-          approvalWaiters.get(change.id)?.resolve({ approved: false, status: "REJECTED", message: "Session discarded." });
+          approvalWaiters
+            .get(change.id)
+            ?.resolve({
+              approved: false,
+              status: "REJECTED",
+              message: "Session discarded.",
+            });
           approvalWaiters.delete(change.id);
         }
         service.rejectChange(change.id);
       }
       manager.cancelSession(body.sessionId);
       store.updateSessionStatus(body.sessionId, "STOPPED");
-      store.addEvent(body.sessionId, "SESSION_DISCARDED", { message: "Session discarded by user." });
+      store.addEvent(body.sessionId, "SESSION_DISCARDED", {
+        message: "Session discarded by user.",
+      });
       return sendJson(res, 200, { status: "STOPPED" });
     }
 
     // Permission response
     if (pathname === "/api/agent/permission" && req.method === "POST") {
-      const body = await parseJsonBody<{ requestId: string; allowed: boolean }>(req);
+      const body = await parseJsonBody<{ requestId: string; allowed: boolean }>(
+        req,
+      );
       const waiter = permissionWaiters.get(body.requestId);
       if (waiter) {
         permissionWaiters.delete(body.requestId);
@@ -456,9 +684,15 @@ const server = http.createServer(async (req, res) => {
 
     // Search symbols
     if (pathname === "/api/index/search" && req.method === "POST") {
-      const body = await parseJsonBody<{ workspace?: string; query: string }>(req);
+      const body = await parseJsonBody<{ workspace?: string; query: string }>(
+        req,
+      );
       const workspace = validWorkspace(body.workspace);
-      return sendJson(res, 200, store.searchSymbols(workspace, body.query || ""));
+      return sendJson(
+        res,
+        200,
+        store.searchSymbols(workspace, body.query || ""),
+      );
     }
 
     // Start agent
@@ -467,6 +701,7 @@ const server = http.createServer(async (req, res) => {
         workspace?: string;
         prompt: string;
         mode: "ask" | "plan" | "agent";
+        model?: string;
       }>(req);
 
       if (!body.prompt || !["ask", "plan", "agent"].includes(body.mode)) {
@@ -474,9 +709,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const { provider, settings } = await configuredProvider();
-      if (!settings.model) {
-        return sendError(res, 400, "Select a model before starting an AI task");
-      }
+      const selectedModel = body.model || settings.model || "gpt-6-astra";
 
       const workspace = validWorkspace(body.workspace);
       const instructions = await fs
@@ -496,7 +729,7 @@ const server = http.createServer(async (req, res) => {
         workspaceId: workspace,
         title: body.prompt.slice(0, 80),
         mode: body.mode,
-        model: settings.model,
+        model: selectedModel,
         provider: settings.provider,
         status: "RUNNING",
       });
@@ -510,7 +743,14 @@ const server = http.createServer(async (req, res) => {
         if (agentEvent.type === "tool" && agentEvent.toolCallId) {
           const key = `${sessionId}:${agentEvent.toolCallId}`;
           if (agentEvent.input !== undefined && !activeToolCalls.has(key)) {
-            activeToolCalls.set(key, store.addToolCall(sessionId, agentEvent.toolName ?? "unknown", agentEvent.input));
+            activeToolCalls.set(
+              key,
+              store.addToolCall(
+                sessionId,
+                agentEvent.toolName ?? "unknown",
+                agentEvent.input,
+              ),
+            );
           }
           if (agentEvent.result !== undefined) {
             const recordId = activeToolCalls.get(key);
@@ -518,7 +758,10 @@ const server = http.createServer(async (req, res) => {
               store.finishToolCall(
                 recordId,
                 agentEvent.result,
-                agentEvent.result && typeof agentEvent.result === "object" && "isError" in agentEvent.result && agentEvent.result.isError
+                agentEvent.result &&
+                  typeof agentEvent.result === "object" &&
+                  "isError" in agentEvent.result &&
+                  agentEvent.result.isError
                   ? "FAILED"
                   : "COMPLETED",
               );
@@ -532,26 +775,52 @@ const server = http.createServer(async (req, res) => {
         if (agentEvent.state === "WAITING_FOR_CHANGE_APPROVAL") {
           store.updateSessionStatus(sessionId, "WAITING_FOR_APPROVAL");
         }
-        if (agentEvent.state === "EXECUTING") store.updateSessionStatus(sessionId, "RUNNING");
-        if (agentEvent.state === "COMPLETED") store.updateSessionStatus(sessionId, "COMPLETED");
-        if (agentEvent.state === "FAILED") store.updateSessionStatus(sessionId, "FAILED");
-        if (agentEvent.state === "STOPPED") store.updateSessionStatus(sessionId, "STOPPED");
-        if (agentEvent.state === "CANCELLED") store.updateSessionStatus(sessionId, "CANCELLED");
+        if (agentEvent.state === "EXECUTING")
+          store.updateSessionStatus(sessionId, "RUNNING");
+        if (agentEvent.state === "COMPLETED")
+          store.updateSessionStatus(sessionId, "COMPLETED");
+        if (agentEvent.state === "FAILED")
+          store.updateSessionStatus(sessionId, "FAILED");
+        if (agentEvent.state === "STOPPED")
+          store.updateSessionStatus(sessionId, "STOPPED");
+        if (agentEvent.state === "CANCELLED")
+          store.updateSessionStatus(sessionId, "CANCELLED");
 
-        if (["COMPLETED", "FAILED", "CANCELLED", "STOPPED"].includes(agentEvent.state ?? "")) {
+        if (
+          ["COMPLETED", "FAILED", "CANCELLED", "STOPPED"].includes(
+            agentEvent.state ?? "",
+          )
+        ) {
           void (async () => {
             const data = store.sessionSummaryData(sessionId);
             const base = data.baseline;
             let currentStatus = "";
-            if (base) currentStatus = await captureGitBaseline(workspace).then((v) => v.status).catch(() => "");
+            if (base)
+              currentStatus = await captureGitBaseline(workspace)
+                .then((v) => v.status)
+                .catch(() => "");
             const attribution = base
-              ? attributeFiles(base, data.changes.filter((c) => ["APPLIED", "REVERTED"].includes(c.status)).map((c) => c.path), currentStatus)
+              ? attributeFiles(
+                  base,
+                  data.changes
+                    .filter((c) => ["APPLIED", "REVERTED"].includes(c.status))
+                    .map((c) => c.path),
+                  currentStatus,
+                )
               : { preExisting: [], agent: [], overlapping: [] };
             store.saveTaskSummary(
               sessionId,
               body.prompt,
-              agentEvent.state === "COMPLETED" ? "COMPLETED" : agentEvent.state ?? "FAILED",
-              JSON.stringify({ task: body.prompt, filesChanged: data.changes, tests: data.tests, repairs: data.repairs, attribution }),
+              agentEvent.state === "COMPLETED"
+                ? "COMPLETED"
+                : (agentEvent.state ?? "FAILED"),
+              JSON.stringify({
+                task: body.prompt,
+                filesChanged: data.changes,
+                tests: data.tests,
+                repairs: data.repairs,
+                attribution,
+              }),
             );
           })();
         }
@@ -565,10 +834,14 @@ const server = http.createServer(async (req, res) => {
         streamChat: (reqChat: Parameters<typeof provider.streamChat>[0]) =>
           provider.streamChat({
             ...reqChat,
-            model: settings.model,
+            model: reqChat.model || selectedModel,
             temperature: settings.temperature,
             maxTokens: settings.maxTokens,
           }),
+        supportsTools: (m: string) =>
+          provider.supportsTools ? provider.supportsTools(m) : true,
+        supportsVision: (m: string) =>
+          provider.supportsVision ? provider.supportsVision(m) : false,
       };
 
       const runtime = new AgentRuntime(
@@ -577,13 +850,12 @@ const server = http.createServer(async (req, res) => {
         workspace,
         emit,
         async (tool, value) => {
-          if (tool.permission === "safe") return true;
+          const key = `${sessionId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
           return new Promise<boolean>((resolve) => {
-            const requestId = `${sessionId}-${Date.now()}`;
-            permissionWaiters.set(requestId, { resolve });
+            permissionWaiters.set(key, { resolve });
             broadcastSSE({
               type: "permission:request",
-              requestId,
+              requestId: key,
               tool: tool.name,
               input: value,
               sessionId,
@@ -609,8 +881,12 @@ const server = http.createServer(async (req, res) => {
             approvalStatus: "NOT_PROPOSED",
             result: attempt.result,
           });
-          store.addEvent(sessionId, "REPAIR_ATTEMPT_RECORDED", { id, ...attempt });
+          store.addEvent(sessionId, "REPAIR_ATTEMPT_RECORDED", {
+            id,
+            ...attempt,
+          });
         },
+        selectedModel,
       );
 
       manager.startSession(sessionId, runtime, (signal) =>
@@ -631,13 +907,144 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { success: true });
     }
 
+    // Switch model for existing session
+    if (pathname === "/api/agent/session-model" && req.method === "POST") {
+      const body = await parseJsonBody<{ sessionId: string; model: string }>(
+        req,
+      );
+      if (!body.sessionId || !body.model) {
+        return sendError(res, 400, "sessionId and model are required");
+      }
+      try {
+        store.addEvent(body.sessionId, "MODEL_CHANGED", {
+          message: `Model switched to ${body.model}`,
+          model: body.model,
+        });
+        return sendJson(res, 200, { success: true, model: body.model });
+      } catch (err) {
+        return sendError(res, 500, String(err));
+      }
+    }
+
+    // Git Commit
+    if (pathname === "/api/git/commit" && req.method === "POST") {
+      const body = await parseJsonBody<{ workspace?: string; message: string }>(
+        req,
+      );
+      const workspace = validWorkspace(body.workspace);
+      if (!body.message || !body.message.trim()) {
+        return sendError(res, 400, "Commit message cannot be empty");
+      }
+      try {
+        await execFileAsync("git", ["add", "-A"], { cwd: workspace });
+        const { stdout } = await execFileAsync(
+          "git",
+          ["commit", "-m", body.message.trim()],
+          { cwd: workspace },
+        );
+        return sendJson(res, 200, { success: true, output: stdout });
+      } catch (err) {
+        const failure = err as {
+          stdout?: string;
+          stderr?: string;
+          message?: string;
+        };
+        return sendError(
+          res,
+          400,
+          failure.stderr ||
+            failure.stdout ||
+            failure.message ||
+            "Git commit failed",
+        );
+      }
+    }
+
+    // Git AI Generate Commit Message
+    if (pathname === "/api/git/generate-commit-msg" && req.method === "POST") {
+      const body = await parseJsonBody<{ workspace?: string; model?: string }>(
+        req,
+      );
+      const workspace = validWorkspace(body.workspace);
+      try {
+        const { stdout: statusOut } = await execFileAsync(
+          "git",
+          ["status", "--short"],
+          { cwd: workspace },
+        ).catch(() => ({ stdout: "" }));
+        const { stdout: diffOut } = await execFileAsync(
+          "git",
+          ["diff", "--stat"],
+          { cwd: workspace },
+        ).catch(() => ({ stdout: "" }));
+
+        if (!statusOut.trim()) {
+          return sendJson(res, 200, { message: "chore: update project files" });
+        }
+
+        const { provider, settings } = await configuredProvider();
+        const model = body.model || settings.model || "gpt-6-astra";
+        const prompt = `Based on these Git changes, write a concise, conventional Git commit message (single line header, e.g. "feat: ...", "fix: ...", "refactor: ..."): \nStatus:\n${statusOut.slice(0, 1000)}\nDiff summary:\n${diffOut.slice(0, 1000)}`;
+
+        const chatRes = await provider.chat({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          maxTokens: 50,
+        });
+
+        const cleanMsg = chatRes.message.content
+          .trim()
+          .replace(/^["']|["']$/g, "")
+          .split("\n")[0];
+        return sendJson(res, 200, {
+          message: cleanMsg || "chore: update codebase",
+        });
+      } catch {
+        return sendJson(res, 200, { message: "chore: update codebase" });
+      }
+    }
+
+    // Workspace Full-Text Search
+    if (pathname === "/api/workspace/search" && req.method === "GET") {
+      const workspace = validWorkspace(url.searchParams.get("workspace"));
+      const query = url.searchParams.get("query") || "";
+      if (!query.trim()) return sendJson(res, 200, []);
+
+      try {
+        const { stdout } = await execFileAsync(
+          "grep",
+          ["-rnI", "-m", "50", query, "."],
+          {
+            cwd: workspace,
+            maxBuffer: 2 * 1024 * 1024,
+          },
+        );
+        const lines = stdout.trim().split("\n").filter(Boolean);
+        const results = lines.map((l) => {
+          const parts = l.split(":");
+          return {
+            file: parts[0]?.replace(/^\.\//, ""),
+            line: Number(parts[1]) || 1,
+            content: parts.slice(2).join(":").trim(),
+          };
+        });
+        return sendJson(res, 200, results);
+      } catch {
+        return sendJson(res, 200, []);
+      }
+    }
+
     // Git Status & History
     if (pathname === "/api/git/status" && req.method === "GET") {
       const workspace = validWorkspace(url.searchParams.get("workspace"));
       const baseline = await captureGitBaseline(workspace).catch(() => null);
       let logOutput = "";
       try {
-        const { stdout } = await execFileAsync("git", ["log", "-n", "10", "--oneline"], { cwd: workspace });
+        const { stdout } = await execFileAsync(
+          "git",
+          ["log", "-n", "10", "--oneline"],
+          { cwd: workspace },
+        );
         logOutput = stdout;
       } catch {
         // Not a git repo or no commits
@@ -669,7 +1076,10 @@ const server = http.createServer(async (req, res) => {
       for (const s of recentSessions) {
         const testRuns = store.sessionTestRuns(s.id);
         for (const tr of testRuns) {
-          if (tr.passed === 0 || (tr.exitCode !== undefined && tr.exitCode !== 0)) {
+          if (
+            tr.passed === 0 ||
+            (tr.exitCode !== undefined && tr.exitCode !== 0)
+          ) {
             problems.push({
               id: `test-${tr.id}`,
               source: "test",

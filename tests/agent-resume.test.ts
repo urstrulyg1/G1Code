@@ -21,7 +21,9 @@ test("Tool classification distinguishes read-only from side-effecting tools", ()
 });
 
 test("Safe resume succeeds when workspace files match checkpoint snapshot", async () => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "g1code-resume-1-"));
+  const workspace = await fs.mkdtemp(
+    path.join(os.tmpdir(), "g1code-resume-1-"),
+  );
   try {
     const srcFile = path.join(workspace, "index.ts");
     await fs.writeFile(srcFile, "export const a = 1;\n", "utf8");
@@ -53,12 +55,16 @@ test("Safe resume succeeds when workspace files match checkpoint snapshot", asyn
     assert.equal(reconciliation.modifiedFiles.length, 0);
     assert.equal(reconciliation.replayedSideEffects, 1);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
+    await fs
+      .rm(workspace, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 });
 
 test("Safe resume detects external modifications and refuses to overwrite blindly", async () => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "g1code-resume-2-"));
+  const workspace = await fs.mkdtemp(
+    path.join(os.tmpdir(), "g1code-resume-2-"),
+  );
   try {
     const srcFile = path.join(workspace, "index.ts");
     await fs.writeFile(srcFile, "export const a = 1;\n", "utf8");
@@ -78,13 +84,21 @@ test("Safe resume detects external modifications and refuses to overwrite blindl
     };
 
     // User or external editor modifies file concurrently
-    await fs.writeFile(srcFile, "export const a = 2; // developer edited this\n", "utf8");
+    await fs.writeFile(
+      srcFile,
+      "export const a = 2; // developer edited this\n",
+      "utf8",
+    );
 
     const reconciliation = await reconcileCheckpoint(checkpoint, workspace);
     assert.equal(reconciliation.safeToResume, false);
-    assert.ok(reconciliation.reason?.includes("External modifications detected"));
+    assert.ok(
+      reconciliation.reason?.includes("External modifications detected"),
+    );
     assert.deepEqual(reconciliation.modifiedFiles, ["index.ts"]);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
+    await fs
+      .rm(workspace, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 });

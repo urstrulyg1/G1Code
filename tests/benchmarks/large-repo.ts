@@ -7,13 +7,17 @@ import { RepositoryIndexService } from "../../packages/indexing/service";
 
 async function runRepoBenchmark() {
   console.log("=== G1CODE LARGE REPOSITORY BENCHMARK ===");
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "g1code-bench-repo-"));
+  const tempDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "g1code-bench-repo-"),
+  );
 
   try {
     const FILE_COUNT = 1000;
     const DIRS = 50;
 
-    console.log(`[1/4] Generating synthetic repository: ${FILE_COUNT} files across ${DIRS} directories...`);
+    console.log(
+      `[1/4] Generating synthetic repository: ${FILE_COUNT} files across ${DIRS} directories...`,
+    );
     const genStart = Date.now();
     for (let d = 0; d < DIRS; d++) {
       const dirPath = path.join(tempDir, `pkg_${d}`, "src");
@@ -23,7 +27,12 @@ async function runRepoBenchmark() {
     const fileCreationPromises: Promise<void>[] = [];
     for (let f = 0; f < FILE_COUNT; f++) {
       const dirIndex = f % DIRS;
-      const filePath = path.join(tempDir, `pkg_${dirIndex}`, "src", `module_${f}.ts`);
+      const filePath = path.join(
+        tempDir,
+        `pkg_${dirIndex}`,
+        "src",
+        `module_${f}.ts`,
+      );
       const content = `
 export interface Module${f}Config {
   id: string;
@@ -63,12 +72,23 @@ export function helper${f}(): string {
     const indexDuration = Date.now() - indexStart;
     const memAfter = process.memoryUsage().heapUsed / 1024 / 1024;
 
-    const filesPerSec = ((indexedEntries.length / indexDuration) * 1000).toFixed(1);
-    console.log(`      Indexed ${indexedEntries.length} files in ${indexDuration}ms (${filesPerSec} files/sec)`);
+    const filesPerSec = (
+      (indexedEntries.length / indexDuration) *
+      1000
+    ).toFixed(1);
+    console.log(
+      `      Indexed ${indexedEntries.length} files in ${indexDuration}ms (${filesPerSec} files/sec)`,
+    );
     console.log(`      Heap Delta: ${(memAfter - memBefore).toFixed(2)} MB`);
 
     console.log(`[3/4] Benchmarking symbol search throughput...`);
-    const searchQueries = ["ServiceWorker", "helper", "Module10", "executeAction", "config"];
+    const searchQueries = [
+      "ServiceWorker",
+      "helper",
+      "Module10",
+      "executeAction",
+      "config",
+    ];
     const searchStart = Date.now();
     let totalMatches = 0;
     const SEARCH_ITERATIONS = 50;
@@ -80,20 +100,28 @@ export function helper${f}(): string {
     }
     const searchDuration = Date.now() - searchStart;
     const avgLatency = (searchDuration / SEARCH_ITERATIONS).toFixed(2);
-    console.log(`      Executed ${SEARCH_ITERATIONS} symbol searches in ${searchDuration}ms (avg ${avgLatency}ms/query)`);
+    console.log(
+      `      Executed ${SEARCH_ITERATIONS} symbol searches in ${searchDuration}ms (avg ${avgLatency}ms/query)`,
+    );
     console.log(`      Found ${totalMatches} total symbol matches`);
 
     console.log(`[4/4] Validating threshold criteria...`);
     if (indexedEntries.length < FILE_COUNT) {
-      throw new Error(`Expected at least ${FILE_COUNT} indexed files, got ${indexedEntries.length}`);
+      throw new Error(
+        `Expected at least ${FILE_COUNT} indexed files, got ${indexedEntries.length}`,
+      );
     }
     if (Number(avgLatency) > 50) {
-      throw new Error(`Average search latency too high: ${avgLatency}ms (limit: 50ms)`);
+      throw new Error(
+        `Average search latency too high: ${avgLatency}ms (limit: 50ms)`,
+      );
     }
 
     console.log("=== BENCHMARK PASSED SUCCESSFULLY ===");
   } finally {
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    await fs
+      .rm(tempDir, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 }
 

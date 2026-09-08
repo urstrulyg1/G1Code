@@ -15,9 +15,18 @@ export type GitAttribution = {
   overlapping: string[];
 };
 
-export function attributeFiles(baseline: GitBaseline, agentFiles: string[], currentStatus: string): GitAttribution {
+export function attributeFiles(
+  baseline: GitBaseline,
+  agentFiles: string[],
+  currentStatus: string,
+): GitAttribution {
   const before = new Set(baseline.modifiedFiles);
-  const current = new Set(currentStatus.split(/\r?\n/).filter(Boolean).map((line) => line.slice(3).trim()));
+  const current = new Set(
+    currentStatus
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => line.slice(3).trim()),
+  );
   const agent = new Set(agentFiles);
   const preExisting: string[] = [];
   const overlapping: string[] = [];
@@ -26,11 +35,21 @@ export function attributeFiles(baseline: GitBaseline, agentFiles: string[], curr
     else if (agent.has(file)) continue;
     else if (before.has(file)) preExisting.push(file);
   }
-  return { preExisting: preExisting.sort(), agent: [...agent].filter((file) => current.has(file) && !before.has(file)).sort(), overlapping: overlapping.sort() };
+  return {
+    preExisting: preExisting.sort(),
+    agent: [...agent]
+      .filter((file) => current.has(file) && !before.has(file))
+      .sort(),
+    overlapping: overlapping.sort(),
+  };
 }
 
-export async function captureGitBaseline(workspace: string, signal?: AbortSignal): Promise<GitBaseline> {
-  const run = async (command: string) => (await spawnCommand(command, workspace, signal).wait()).stdout;
+export async function captureGitBaseline(
+  workspace: string,
+  signal?: AbortSignal,
+): Promise<GitBaseline> {
+  const run = async (command: string) =>
+    (await spawnCommand(command, workspace, signal).wait()).stdout;
   const [branch, head, status, diff] = await Promise.all([
     run("git branch --show-current"),
     run("git rev-parse HEAD"),
@@ -42,7 +61,10 @@ export async function captureGitBaseline(workspace: string, signal?: AbortSignal
     head: head.trim(),
     status,
     diff,
-    modifiedFiles: status.split(/\r?\n/).filter(Boolean).map((line) => line.slice(3).trim()),
+    modifiedFiles: status
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => line.slice(3).trim()),
     capturedAt: new Date().toISOString(),
   };
 }

@@ -17,14 +17,14 @@ G1Code Overall Score: 5.1/10
 
 This is a risk-adjusted product score, not a raw feature average.
 
-| Measure | Score |
-| -- | --: |
+| Measure              |  Score |
+| -------------------- | -----: |
 | Technical capability | 6.4/10 |
-| Reliability | 4.8/10 |
-| Security | 5.6/10 |
-| Product maturity | 4.4/10 |
+| Reliability          | 4.8/10 |
+| Security             | 5.6/10 |
+| Product maturity     | 4.4/10 |
 | Production readiness | 3.6/10 |
-| Developer trust | 5.0/10 |
+| Developer trust      | 5.0/10 |
 
 The raw category average is approximately `5.4/10`. It is reduced because Electron has not launched, production dependencies have unresolved high findings, multi-file crash injection is not validated, exact agent resume is intentionally unavailable, and the renderer has not been tested against the real main process.
 
@@ -32,30 +32,30 @@ The raw category average is approximately `5.4/10`. It is reduced because Electr
 
 ## Master Scorecard
 
-| Category | Score | Confidence | Major gap |
-| -- | --: | -- | -- |
-| Architecture | 7/10 | HIGH | Migration, lifecycle, and main-process coupling debt |
-| Electron | 2/10 | HIGH | Binary unavailable; no real desktop E2E |
-| Security | 5/10 | MEDIUM | Shell authority, prompt injection, dependencies, no full IPC matrix |
-| Agent runtime | 5/10 | HIGH | Exact resume and full orchestration are incomplete |
-| Autonomous coding | 5/10 | HIGH | Golden deterministic path passes; real provider/product path unvalidated |
-| Self-repair | 4/10 | HIGH | Bounded evidence loop exists; model-driven diagnosis is not mature |
-| Change safety | 6/10 | MEDIUM | Batch journal exists; crash injection and UI recovery remain |
-| Persistence | 5/10 | HIGH | SQLite entities exist; migration/recovery/retention are immature |
-| Repository intelligence | 5/10 | MEDIUM | Incremental metadata and regex symbols; no references/watcher |
-| Context | 5/10 | MEDIUM | Hash dedup/budget/compaction exist; not integrated deeply into runtime |
-| Testing engine | 6/10 | MEDIUM | Detection and structured execution work; framework parsing/escalation incomplete |
-| Git | 5/10 | MEDIUM | Baseline and basic attribution; edge cases and final UI incomplete |
-| Session recovery | 4/10 | HIGH | Safe restore state exists; exact resume does not |
-| UI/UX | 4/10 | HIGH | Compact shell, limited diff/plan/Git/problems/testing surfaces |
-| Performance | 4/10 | LOW | No large-repository or renderer performance measurements |
-| Observability | 5/10 | MEDIUM | Persisted events/evidence exist; diagnostic export/detail views incomplete |
-| Privacy | 5/10 | MEDIUM | Key isolation and filename filtering; context/retention policy incomplete |
-| Maintainability | 5/10 | HIGH | Clear packages but duplicated validation and dense main runtime |
-| Extensibility | 6/10 | MEDIUM | Provider/tool/testing abstractions are usable; state/persistence coupling remains |
-| E2E | 2/10 | HIGH | Golden integration passes; Electron suite is blocked |
-| Production readiness | 3/10 | HIGH | P1 risk and validation blockers remain |
-| Developer trust | 5/10 | HIGH | Approval/evidence strengths offset by restart/Electron gaps |
+| Category                | Score | Confidence | Major gap                                                                         |
+| ----------------------- | ----: | ---------- | --------------------------------------------------------------------------------- |
+| Architecture            |  7/10 | HIGH       | Migration, lifecycle, and main-process coupling debt                              |
+| Electron                |  2/10 | HIGH       | Binary unavailable; no real desktop E2E                                           |
+| Security                |  5/10 | MEDIUM     | Shell authority, prompt injection, dependencies, no full IPC matrix               |
+| Agent runtime           |  5/10 | HIGH       | Exact resume and full orchestration are incomplete                                |
+| Autonomous coding       |  5/10 | HIGH       | Golden deterministic path passes; real provider/product path unvalidated          |
+| Self-repair             |  4/10 | HIGH       | Bounded evidence loop exists; model-driven diagnosis is not mature                |
+| Change safety           |  6/10 | MEDIUM     | Batch journal exists; crash injection and UI recovery remain                      |
+| Persistence             |  5/10 | HIGH       | SQLite entities exist; migration/recovery/retention are immature                  |
+| Repository intelligence |  5/10 | MEDIUM     | Incremental metadata and regex symbols; no references/watcher                     |
+| Context                 |  5/10 | MEDIUM     | Hash dedup/budget/compaction exist; not integrated deeply into runtime            |
+| Testing engine          |  6/10 | MEDIUM     | Detection and structured execution work; framework parsing/escalation incomplete  |
+| Git                     |  5/10 | MEDIUM     | Baseline and basic attribution; edge cases and final UI incomplete                |
+| Session recovery        |  4/10 | HIGH       | Safe restore state exists; exact resume does not                                  |
+| UI/UX                   |  4/10 | HIGH       | Compact shell, limited diff/plan/Git/problems/testing surfaces                    |
+| Performance             |  4/10 | LOW        | No large-repository or renderer performance measurements                          |
+| Observability           |  5/10 | MEDIUM     | Persisted events/evidence exist; diagnostic export/detail views incomplete        |
+| Privacy                 |  5/10 | MEDIUM     | Key isolation and filename filtering; context/retention policy incomplete         |
+| Maintainability         |  5/10 | HIGH       | Clear packages but duplicated validation and dense main runtime                   |
+| Extensibility           |  6/10 | MEDIUM     | Provider/tool/testing abstractions are usable; state/persistence coupling remains |
+| E2E                     |  2/10 | HIGH       | Golden integration passes; Electron suite is blocked                              |
+| Production readiness    |  3/10 | HIGH       | P1 risk and validation blockers remain                                            |
+| Developer trust         |  5/10 | HIGH       | Approval/evidence strengths offset by restart/Electron gaps                       |
 
 ## Architecture
 
@@ -99,17 +99,17 @@ Adding providers/tools/project detectors is straightforward. Adding a new durabl
 
 ### Electron sub-scores
 
-| Area | Score | Evidence |
-| -- | --: | -- |
-| Main process | 5 | Real handlers exist, but untested in launched runtime |
-| Renderer isolation | 7 | Correct BrowserWindow flags in source |
-| Preload | 6 | Narrow API, but no complete contract test |
-| Sandboxing | 7 | Enabled in source |
-| Navigation security | 3 | No comprehensive navigation/new-window policy |
-| IPC exposure | 6 | Validation/authorization exists but duplicated and incompletely tested |
-| Window lifecycle | 4 | Basic activate/close handlers only |
-| Startup reliability | 2 | Electron binary unavailable |
-| Packaging readiness | 2 | No launch/package validation |
+| Area                | Score | Evidence                                                               |
+| ------------------- | ----: | ---------------------------------------------------------------------- |
+| Main process        |     5 | Real handlers exist, but untested in launched runtime                  |
+| Renderer isolation  |     7 | Correct BrowserWindow flags in source                                  |
+| Preload             |     6 | Narrow API, but no complete contract test                              |
+| Sandboxing          |     7 | Enabled in source                                                      |
+| Navigation security |     3 | No comprehensive navigation/new-window policy                          |
+| IPC exposure        |     6 | Validation/authorization exists but duplicated and incompletely tested |
+| Window lifecycle    |     4 | Basic activate/close handlers only                                     |
+| Startup reliability |     2 | Electron binary unavailable                                            |
+| Packaging readiness |     2 | No launch/package validation                                           |
 
 ## Security
 
@@ -117,26 +117,26 @@ Adding providers/tools/project detectors is straightforward. Adding a new durabl
 
 The product has a good security direction and meaningful tests, but several boundaries remain broad or unvalidated.
 
-| Area | Score | Evidence | Main weakness |
-| -- | --: | -- | -- |
-| Filesystem security | 7 | `safePath`, `safeRealPath`, symlink tests | TOCTOU and permission edge cases remain |
-| Path traversal | 7 | Workspace containment tests | Full Windows/UNC/junction matrix absent |
-| Symlink protection | 7 | Parent and final-file symlink tests | Crash/replace races unvalidated |
-| IPC security | 6 | Validators and authorization tests | No full route-level matrix |
-| Session authorization | 7 | Change session ownership checks | Other session APIs need consistent contract layer |
-| Workspace authorization | 7 | Selected workspace checks | Repeated inline validation |
-| Command execution | 5 | Structured test commands, risk classifier | Arbitrary shell remains broad authority |
-| Shell security | 3 | Explicit shell distinction exists | Shell interpretation still enabled |
-| Environment isolation | 5 | Secret-name filtering | Heuristic, not explicit allowlist |
-| Secret handling | 5 | Encrypted API key and secret file exclusions | Output/context/retention scanning incomplete |
-| API-key protection | 7 | Main-process `safeStorage`; no renderer key | Electron runtime unvalidated |
-| Prompt injection resistance | 3 | No central trust hierarchy enforcement | Repository/output instructions can influence model context |
-| Repository trust boundaries | 3 | Content treated as context, not authority by design only | No systematic untrusted-content wrapper |
-| Terminal-output trust | 3 | Output passed as model evidence | No explicit instruction/data separation |
-| Renderer security | 7 | Isolation flags in source | No actual renderer E2E |
-| Electron security | 3 | Old Electron with audit findings | No running validation |
-| Dependency security | 3 | `npm audit` reports 3 high | Major upgrades pending |
-| Privacy/data retention | 4 | SQLite persists source/diffs/output | No retention or redaction policy |
+| Area                        | Score | Evidence                                                 | Main weakness                                              |
+| --------------------------- | ----: | -------------------------------------------------------- | ---------------------------------------------------------- |
+| Filesystem security         |     7 | `safePath`, `safeRealPath`, symlink tests                | TOCTOU and permission edge cases remain                    |
+| Path traversal              |     7 | Workspace containment tests                              | Full Windows/UNC/junction matrix absent                    |
+| Symlink protection          |     7 | Parent and final-file symlink tests                      | Crash/replace races unvalidated                            |
+| IPC security                |     6 | Validators and authorization tests                       | No full route-level matrix                                 |
+| Session authorization       |     7 | Change session ownership checks                          | Other session APIs need consistent contract layer          |
+| Workspace authorization     |     7 | Selected workspace checks                                | Repeated inline validation                                 |
+| Command execution           |     5 | Structured test commands, risk classifier                | Arbitrary shell remains broad authority                    |
+| Shell security              |     3 | Explicit shell distinction exists                        | Shell interpretation still enabled                         |
+| Environment isolation       |     5 | Secret-name filtering                                    | Heuristic, not explicit allowlist                          |
+| Secret handling             |     5 | Encrypted API key and secret file exclusions             | Output/context/retention scanning incomplete               |
+| API-key protection          |     7 | Main-process `safeStorage`; no renderer key              | Electron runtime unvalidated                               |
+| Prompt injection resistance |     3 | No central trust hierarchy enforcement                   | Repository/output instructions can influence model context |
+| Repository trust boundaries |     3 | Content treated as context, not authority by design only | No systematic untrusted-content wrapper                    |
+| Terminal-output trust       |     3 | Output passed as model evidence                          | No explicit instruction/data separation                    |
+| Renderer security           |     7 | Isolation flags in source                                | No actual renderer E2E                                     |
+| Electron security           |     3 | Old Electron with audit findings                         | No running validation                                      |
+| Dependency security         |     3 | `npm audit` reports 3 high                               | Major upgrades pending                                     |
+| Privacy/data retention      |     4 | SQLite persists source/diffs/output                      | No retention or redaction policy                           |
 
 ### Trust hierarchy
 
@@ -168,21 +168,21 @@ The implementation enforces security at the main-process tool boundary, but it d
 
 ### Agent sub-scores
 
-| Area | Score |
-| -- | --: |
-| State machine | 6 |
-| Orchestration | 5 |
-| Tool validation | 6 |
-| Iteration/tool bounds | 7 |
-| Timeouts | 6 |
-| Cancellation | 6 |
-| Error handling | 5 |
-| Retry behavior | 4 |
-| Failure recovery | 4 |
-| Persistence | 5 |
-| Checkpointing | 4 |
-| Restart behavior | 5 |
-| Observability | 6 |
+| Area                  | Score |
+| --------------------- | ----: |
+| State machine         |     6 |
+| Orchestration         |     5 |
+| Tool validation       |     6 |
+| Iteration/tool bounds |     7 |
+| Timeouts              |     6 |
+| Cancellation          |     6 |
+| Error handling        |     5 |
+| Retry behavior        |     4 |
+| Failure recovery      |     4 |
+| Persistence           |     5 |
+| Checkpointing         |     4 |
+| Restart behavior      |     5 |
+| Observability         |     6 |
 
 ## Autonomous Coding
 
@@ -190,22 +190,22 @@ The implementation enforces security at the main-process tool boundary, but it d
 
 The deterministic golden workflow passes and proves a meaningful code-change/test/repair path. It does not prove the full real product path because Electron E2E and external-provider orchestration are unavailable.
 
-| Capability | Score | Evidence |
-| -- | --: | -- |
-| Requirement understanding | 5 | Prompt enters runtime; no structured requirement model |
-| Repository analysis | 5 | Index/search/tools exist; not automatically assembled into context |
-| Planning | 3 | Plan state exists; full plan approval/editor absent |
-| Context gathering | 5 | Hash dedup/budget/index primitives |
-| Code generation | 5 | Provider tool calls and deterministic workflow |
-| Multi-file editing | 6 | Durable changes and batch journal |
-| Proposal/approval | 7 | Real persisted approval path |
-| Safe application | 6 | Hashes, symlinks, batch preflight/rollback |
-| Testing | 6 | Detection/selection/structured execution |
-| Diagnosis | 3 | State and evidence exist; diagnosis is model-dependent |
-| Repair proposal | 4 | Golden deterministic scenario; not fully provider-integrated |
-| Retesting | 5 | Real runner; runtime orchestration incomplete |
-| Verification | 4 | Evidence persisted, review incomplete |
-| Final summary | 5 | Evidence-derived summary schema exists |
+| Capability                | Score | Evidence                                                           |
+| ------------------------- | ----: | ------------------------------------------------------------------ |
+| Requirement understanding |     5 | Prompt enters runtime; no structured requirement model             |
+| Repository analysis       |     5 | Index/search/tools exist; not automatically assembled into context |
+| Planning                  |     3 | Plan state exists; full plan approval/editor absent                |
+| Context gathering         |     5 | Hash dedup/budget/index primitives                                 |
+| Code generation           |     5 | Provider tool calls and deterministic workflow                     |
+| Multi-file editing        |     6 | Durable changes and batch journal                                  |
+| Proposal/approval         |     7 | Real persisted approval path                                       |
+| Safe application          |     6 | Hashes, symlinks, batch preflight/rollback                         |
+| Testing                   |     6 | Detection/selection/structured execution                           |
+| Diagnosis                 |     3 | State and evidence exist; diagnosis is model-dependent             |
+| Repair proposal           |     4 | Golden deterministic scenario; not fully provider-integrated       |
+| Retesting                 |     5 | Real runner; runtime orchestration incomplete                      |
+| Verification              |     4 | Evidence persisted, review incomplete                              |
+| Final summary             |     5 | Evidence-derived summary schema exists                             |
 
 ## Self-Repair — 4/10
 
@@ -217,25 +217,25 @@ The deterministic golden workflow passes and proves a meaningful code-change/tes
 
 ## Change Safety — 6/10
 
-| Area | Score |
-| -- | --: |
-| ChangeService authority | 7 |
-| Authorization | 7 |
-| Lifecycle | 6 |
-| Persistence | 6 |
-| Hash validation | 7 |
-| Conflict detection | 7 |
-| Multi-file support | 6 |
-| Preflight | 7 |
-| Temporary files | 6 |
-| Atomic replacement | 6 |
-| Rollback | 5 |
-| Rollback verification | 4 |
-| Partial failure | 5 |
-| Crash recovery | 4 |
-| Revert | 6 |
-| Concurrent approval/apply | 7 |
-| Ownership/audit trail | 5 |
+| Area                      | Score |
+| ------------------------- | ----: |
+| ChangeService authority   |     7 |
+| Authorization             |     7 |
+| Lifecycle                 |     6 |
+| Persistence               |     6 |
+| Hash validation           |     7 |
+| Conflict detection        |     7 |
+| Multi-file support        |     6 |
+| Preflight                 |     7 |
+| Temporary files           |     6 |
+| Atomic replacement        |     6 |
+| Rollback                  |     5 |
+| Rollback verification     |     4 |
+| Partial failure           |     5 |
+| Crash recovery            |     4 |
+| Revert                    |     6 |
+| Concurrent approval/apply |     7 |
+| Ownership/audit trail     |     5 |
 
 ### Multi-file transaction safety — 6/10
 
@@ -259,15 +259,15 @@ SQLite WAL and transactions are used selectively. The schema can represent incon
 
 ### Symbol intelligence
 
-| Language | Score | Assessment |
-| -- | --: | -- |
-| TypeScript | 5 | Basic declarations; regex false positives/misses complex syntax |
-| JavaScript | 5 | Same lightweight extraction |
-| Python | 5 | Functions/classes by line-based regex |
-| Go | 3 | Basic `func`/struct patterns; no package semantics |
-| Rust | 3 | Basic `fn`/struct/enum patterns; no traits/references |
-| C/C++ | 2 | Very limited patterns; no parser semantics |
-| Java | 2 | Extension detected, practical Java symbol extraction weak |
+| Language   | Score | Assessment                                                      |
+| ---------- | ----: | --------------------------------------------------------------- |
+| TypeScript |     5 | Basic declarations; regex false positives/misses complex syntax |
+| JavaScript |     5 | Same lightweight extraction                                     |
+| Python     |     5 | Functions/classes by line-based regex                           |
+| Go         |     3 | Basic `func`/struct patterns; no package semantics              |
+| Rust       |     3 | Basic `fn`/struct/enum patterns; no traits/references           |
+| C/C++      |     2 | Very limited patterns; no parser semantics                      |
+| Java       |     2 | Extension detected, practical Java symbol extraction weak       |
 
 ### Search — 5/10
 
@@ -289,18 +289,18 @@ Provider abstraction, OpenAI-compatible transport, streaming, tool calls, retrie
 
 Scores:
 
-| Area | Score |
-| -- | --: |
-| Provider abstraction | 7 |
-| Streaming | 6 |
-| Tool calling | 5 |
-| Error handling | 6 |
-| Retry | 5 |
-| Timeout/cancellation | 5 |
-| Model configuration | 6 |
-| API-key security | 7 |
-| Fallback architecture | 2 |
-| Provider independence | 5 |
+| Area                  | Score |
+| --------------------- | ----: |
+| Provider abstraction  |     7 |
+| Streaming             |     6 |
+| Tool calling          |     5 |
+| Error handling        |     6 |
+| Retry                 |     5 |
+| Timeout/cancellation  |     5 |
+| Model configuration   |     6 |
+| API-key security      |     7 |
+| Fallback architecture |     2 |
+| Provider independence |     5 |
 
 Experimental Labs is not a validated provider implementation; the configured OpenAI-compatible path is the real provider path.
 
@@ -350,32 +350,32 @@ Exact resume is intentionally absent. This is safer than replaying destructive o
 
 ## Review / Debug / Refactor Modes
 
-| Mode | Score | Assessment |
-| -- | --: | -- |
-| Review | 2 | No serious independent review workflow with structured findings |
-| Debug | 3 | Diagnostic/repair states exist, but no dedicated evidence-first mode |
-| Refactor | 2 | No dedicated behavior-preserving refactor orchestration |
+| Mode     | Score | Assessment                                                           |
+| -------- | ----: | -------------------------------------------------------------------- |
+| Review   |     2 | No serious independent review workflow with structured findings      |
+| Debug    |     3 | Diagnostic/repair states exist, but no dedicated evidence-first mode |
+| Refactor |     2 | No dedicated behavior-preserving refactor orchestration              |
 
 ## UI/UX — 4/10
 
-| Surface | Score | Assessment |
-| -- | --: | -- |
-| Overall UX | 4 | Compact shell, functional but immature |
-| Editor | 4 | Textarea editor, not Monaco-class |
-| Explorer/tabs | 5 | Basic working explorer and tabs |
-| Terminal | 4 | Output UI exists, not full terminal experience |
-| Agent panel | 5 | Prompt, activity, sessions, persisted evidence |
-| Plan UI | 2 | No full plan approval/edit experience |
-| Diff UI | 4 | Persisted unified diff review, limited navigation/inline view |
-| Timeline | 4 | Activity log, limited event detail/navigation |
-| Testing panel | 4 | Basic persisted test panel |
-| Problems panel | 1 | Not implemented as a real panel |
-| Git panel | 1 | Read-only Git tools, no professional panel |
-| Search | 3 | Backend primitives, limited user-facing experience |
-| Sessions | 5 | Recent/interrupted session controls |
-| Settings | 4 | Provider settings only, not full product settings |
-| Errors/loading | 3 | Raw/compact error UX and limited error boundaries |
-| Keyboard/accessibility | 3 | Some shortcuts, limited accessibility audit |
+| Surface                | Score | Assessment                                                    |
+| ---------------------- | ----: | ------------------------------------------------------------- |
+| Overall UX             |     4 | Compact shell, functional but immature                        |
+| Editor                 |     4 | Textarea editor, not Monaco-class                             |
+| Explorer/tabs          |     5 | Basic working explorer and tabs                               |
+| Terminal               |     4 | Output UI exists, not full terminal experience                |
+| Agent panel            |     5 | Prompt, activity, sessions, persisted evidence                |
+| Plan UI                |     2 | No full plan approval/edit experience                         |
+| Diff UI                |     4 | Persisted unified diff review, limited navigation/inline view |
+| Timeline               |     4 | Activity log, limited event detail/navigation                 |
+| Testing panel          |     4 | Basic persisted test panel                                    |
+| Problems panel         |     1 | Not implemented as a real panel                               |
+| Git panel              |     1 | Read-only Git tools, no professional panel                    |
+| Search                 |     3 | Backend primitives, limited user-facing experience            |
+| Sessions               |     5 | Recent/interrupted session controls                           |
+| Settings               |     4 | Provider settings only, not full product settings             |
+| Errors/loading         |     3 | Raw/compact error UX and limited error boundaries             |
+| Keyboard/accessibility |     3 | Some shortcuts, limited accessibility audit                   |
 
 ## Agent Timeline — 5/10
 
@@ -397,11 +397,11 @@ No actual measurements exist for startup, 1k/10k/50k files, large diffs, memory,
 
 ### Large repository readiness
 
-| Size | Score | Evidence |
-| -- | --: | -- |
-| 1k files | 4 | Sequential scanner likely workable; not measured |
-| 10k files | 3 | No measurement; main-process scan risk |
-| 50k+ files | 2 | No watcher/worker architecture or evidence |
+| Size       | Score | Evidence                                         |
+| ---------- | ----: | ------------------------------------------------ |
+| 1k files   |     4 | Sequential scanner likely workable; not measured |
+| 10k files  |     3 | No measurement; main-process scan risk           |
+| 50k+ files |     2 | No watcher/worker architecture or evidence       |
 
 ### Large file readiness
 
@@ -409,21 +409,21 @@ Large-read limits exist for some reads, but editor/diff/index/context behavior a
 
 ## Reliability — 5/10
 
-| Area | Score |
-| -- | --: |
-| Startup | 2 |
-| Workspace loading | 4 |
-| Agent execution | 5 |
-| Tool execution | 5 |
-| Change application | 6 |
-| Testing | 5 |
-| Persistence | 5 |
-| Recovery | 4 |
-| Cancellation | 6 |
-| Concurrency | 5 |
-| Provider failure | 5 |
-| Filesystem failure | 4 |
-| Database failure | 3 |
+| Area               | Score |
+| ------------------ | ----: |
+| Startup            |     2 |
+| Workspace loading  |     4 |
+| Agent execution    |     5 |
+| Tool execution     |     5 |
+| Change application |     6 |
+| Testing            |     5 |
+| Persistence        |     5 |
+| Recovery           |     4 |
+| Cancellation       |     6 |
+| Concurrency        |     5 |
+| Provider failure   |     5 |
+| Filesystem failure |     4 |
+| Database failure   |     3 |
 
 ## Data-loss Safety — 6/10
 
@@ -455,43 +455,43 @@ Architecture, security, approval-flow, current-state, final-architecture, produc
 
 ## E2E Maturity
 
-| Level | Score | Status |
-| -- | --: | -- |
-| Unit workflow | 7 | Strong deterministic coverage |
-| Integration workflow | 6 | Golden workflow passes with real filesystem/test runner |
-| Electron workflow | 2 | BLOCKED; binary unavailable |
-| Production-like workflow | 2 | No real desktop/provider/dependency validation |
+| Level                    | Score | Status                                                  |
+| ------------------------ | ----: | ------------------------------------------------------- |
+| Unit workflow            |     7 | Strong deterministic coverage                           |
+| Integration workflow     |     6 | Golden workflow passes with real filesystem/test runner |
+| Electron workflow        |     2 | BLOCKED; binary unavailable                             |
+| Production-like workflow |     2 | No real desktop/provider/dependency validation          |
 
 ## Competitive Assessment
 
 This is conceptual, not benchmarked against private implementations.
 
-| Category | Position | Reason |
-| -- | -- | -- |
-| Traditional IDE editor | Behind | Current editor is a compact textarea shell, not VS Code/JetBrains-class |
-| VS Code-class IDE | Behind | Missing language services, panels, mature navigation, and extension ecosystem |
-| AI-assisted editor | Behind to comparable | Durable approval is stronger than many chat integrations; UX and provider validation lag |
-| Agentic AI IDE | Comparable conceptually | Change safety, evidence, sessions, and repair foundations are meaningful |
-| Autonomous coding agent | Behind | Real Electron validation, exact resume, broad provider repair, and production recovery are incomplete |
-| Safety/control | Strong conceptually | Persisted proposals, hash protection, authorization, and evidence are differentiators |
+| Category                | Position                | Reason                                                                                                |
+| ----------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| Traditional IDE editor  | Behind                  | Current editor is a compact textarea shell, not VS Code/JetBrains-class                               |
+| VS Code-class IDE       | Behind                  | Missing language services, panels, mature navigation, and extension ecosystem                         |
+| AI-assisted editor      | Behind to comparable    | Durable approval is stronger than many chat integrations; UX and provider validation lag              |
+| Agentic AI IDE          | Comparable conceptually | Change safety, evidence, sessions, and repair foundations are meaningful                              |
+| Autonomous coding agent | Behind                  | Real Electron validation, exact resume, broad provider repair, and production recovery are incomplete |
+| Safety/control          | Strong conceptually     | Persisted proposals, hash protection, authorization, and evidence are differentiators                 |
 
 ## Product Differentiators
 
 ### Durable agent changes
 
-**Maturity:** 6/10. Persisted proposals, diffs, approval, hashes, conflicts, and batch journal exist.  
+**Maturity:** 6/10. Persisted proposals, diffs, approval, hashes, conflicts, and batch journal exist.
 
 ### Evidence-driven completion
 
-**Maturity:** 5/10. Test runs, repair attempts, summaries, and golden workflow evidence exist.  
+**Maturity:** 5/10. Test runs, repair attempts, summaries, and golden workflow evidence exist.
 
 ### Free-tier efficiency
 
-**Maturity:** 5/10. Local indexing, ranking, hashing, budgets, and targeted testing exist.  
+**Maturity:** 5/10. Local indexing, ranking, hashing, budgets, and targeted testing exist.
 
 ### Developer-controlled autonomy
 
-**Maturity:** 7/10. Approval and cancellation boundaries are stronger than the rest of product maturity.  
+**Maturity:** 7/10. Approval and cancellation boundaries are stronger than the rest of product maturity.
 
 ## Top 10 Weaknesses
 
@@ -521,18 +521,18 @@ This is conceptual, not benchmarked against private implementations.
 
 ## Top Release Blockers
 
-| Priority | Blocker | Impact | Required validation |
-| -- | -- | -- | -- |
-| P1 | Electron binary/E2E blocked | Cannot validate actual product | Launch and full renderer/main E2E |
-| P1 | Dependency vulnerabilities | Runtime/security exposure | Deliberate Electron/Vite upgrade and E2E |
-| P1 | Batch crash recovery unproven | Possible ambiguous filesystem state | Crash injection at every replacement boundary |
-| P1 | Shell execution authority | Command injection/process-tree risk | Structured default, shell policy, process-tree tests |
-| P1 | Exact resume unavailable | Long-running tasks cannot continue safely | Deterministic checkpoint replay or explicit product scope |
-| P1 | IPC matrix incomplete | Unvalidated privileged boundary | Route-level malformed/replay/concurrency suite |
-| P1 | Provider repair incomplete | Golden scenario may overstate autonomy | Invalid-tool/dangerous-command/environment/provider scenarios |
-| P2 | Prompt-injection trust boundary weak | Repository text can steer model reasoning | Typed untrusted context and injection tests |
-| P2 | UI/product tooling immature | Developer friction and low discoverability | Plan/Git/Problems/testing/diff panels |
-| P2 | Large repo/file performance unvalidated | Unknown responsiveness/scalability | 1k/10k/50k and large-file measurements |
+| Priority | Blocker                                 | Impact                                     | Required validation                                           |
+| -------- | --------------------------------------- | ------------------------------------------ | ------------------------------------------------------------- |
+| P1       | Electron binary/E2E blocked             | Cannot validate actual product             | Launch and full renderer/main E2E                             |
+| P1       | Dependency vulnerabilities              | Runtime/security exposure                  | Deliberate Electron/Vite upgrade and E2E                      |
+| P1       | Batch crash recovery unproven           | Possible ambiguous filesystem state        | Crash injection at every replacement boundary                 |
+| P1       | Shell execution authority               | Command injection/process-tree risk        | Structured default, shell policy, process-tree tests          |
+| P1       | Exact resume unavailable                | Long-running tasks cannot continue safely  | Deterministic checkpoint replay or explicit product scope     |
+| P1       | IPC matrix incomplete                   | Unvalidated privileged boundary            | Route-level malformed/replay/concurrency suite                |
+| P1       | Provider repair incomplete              | Golden scenario may overstate autonomy     | Invalid-tool/dangerous-command/environment/provider scenarios |
+| P2       | Prompt-injection trust boundary weak    | Repository text can steer model reasoning  | Typed untrusted context and injection tests                   |
+| P2       | UI/product tooling immature             | Developer friction and low discoverability | Plan/Git/Problems/testing/diff panels                         |
+| P2       | Large repo/file performance unvalidated | Unknown responsiveness/scalability         | 1k/10k/50k and large-file measurements                        |
 
 ## Technical Debt — 5/10
 

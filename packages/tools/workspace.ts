@@ -149,12 +149,29 @@ export const workspaceTools = (): AgentTool[] => [
       );
       const original = await fs.readFile(file, "utf8").catch(() => "");
       if (!context.changeService || !context.sessionId)
-        return { content: "Change service is unavailable; file was not changed.", isError: true };
+        return {
+          content: "Change service is unavailable; file was not changed.",
+          isError: true,
+        };
       const proposed = String((value as { content: string }).content);
-      const change = await context.changeService.proposeChange(context.sessionId, path.relative(context.workspace, file), proposed);
-      context.emit({ type: "CHANGE_PROPOSED", message: `Waiting for approval: ${change.path}`, detail: change.id });
+      const change = await context.changeService.proposeChange(
+        context.sessionId,
+        path.relative(context.workspace, file),
+        proposed,
+      );
+      context.emit({
+        type: "CHANGE_PROPOSED",
+        message: `Waiting for approval: ${change.path}`,
+        detail: change.id,
+      });
       return {
-        content: JSON.stringify({ status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch, message: "Waiting for user approval." }),
+        content: JSON.stringify({
+          status: "pending_approval",
+          changeId: change.id,
+          path: change.path,
+          diff: change.patch,
+          message: "Waiting for user approval.",
+        }),
         status: "pending_approval",
         changeId: change.id,
         path: change.path,
@@ -183,11 +200,28 @@ export const workspaceTools = (): AgentTool[] => [
         };
       const proposed = original.replace(data.search, data.replace);
       if (!context.changeService || !context.sessionId)
-        return { content: "Change service is unavailable; file was not changed.", isError: true };
-      const change = await context.changeService.proposeChange(context.sessionId, data.path, proposed);
-      context.emit({ type: "CHANGE_PROPOSED", message: `Waiting for approval: ${change.path}`, detail: change.id });
+        return {
+          content: "Change service is unavailable; file was not changed.",
+          isError: true,
+        };
+      const change = await context.changeService.proposeChange(
+        context.sessionId,
+        data.path,
+        proposed,
+      );
+      context.emit({
+        type: "CHANGE_PROPOSED",
+        message: `Waiting for approval: ${change.path}`,
+        detail: change.id,
+      });
       return {
-        content: JSON.stringify({ status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch, message: "Waiting for user approval." }),
+        content: JSON.stringify({
+          status: "pending_approval",
+          changeId: change.id,
+          path: change.path,
+          diff: change.patch,
+          message: "Waiting for user approval.",
+        }),
         status: "pending_approval",
         changeId: change.id,
         path: change.path,
@@ -218,7 +252,10 @@ export const workspaceTools = (): AgentTool[] => [
       )
         return { content: "User denied command execution.", isError: true };
       const execution = spawnCommand(data.command, cwd, context.signal);
-      context.emit({ type: "command", message: `COMMAND_STARTED ${data.command}` });
+      context.emit({
+        type: "command",
+        message: `COMMAND_STARTED ${data.command}`,
+      });
       const drain = async (stream: AsyncIterable<string>, type: string) => {
         let buffered = "";
         for await (const chunk of stream) {

@@ -26,14 +26,7 @@ export type AgentEvent = {
   id: string;
   sessionId: string;
   at: string;
-  type:
-    | "state"
-    | "text"
-    | "tool"
-    | "approval"
-    | "error"
-    | "done"
-    | "command";
+  type: "state" | "text" | "tool" | "approval" | "error" | "done" | "command";
   state?: AgentState;
   message?: string;
   detail?: string;
@@ -74,8 +67,23 @@ export class AgentRuntime {
     private readonly waitForChangeApproval?: (
       changeId: string,
     ) => Promise<ChangeApprovalResult>,
-    private readonly contextRecordTestRun?: (run: { command: string; cwd: string; targeted: boolean; exitCode?: number; passed?: boolean; stdout?: string; stderr?: string; duration?: number }) => void,
-    private readonly recordRepairAttempt?: (attempt: { attemptNumber: number; diagnosis: string; evidence: unknown; result: string }) => void,
+    private readonly contextRecordTestRun?: (run: {
+      command: string;
+      cwd: string;
+      targeted: boolean;
+      exitCode?: number;
+      passed?: boolean;
+      stdout?: string;
+      stderr?: string;
+      duration?: number;
+    }) => void,
+    private readonly recordRepairAttempt?: (attempt: {
+      attemptNumber: number;
+      diagnosis: string;
+      evidence: unknown;
+      result: string;
+    }) => void,
+    private readonly model: string = "",
   ) {}
   private repairAttempts = 0;
   stop() {
@@ -111,6 +119,22 @@ export class AgentRuntime {
     this.cancelled = false;
     this.toolCalls = 0;
     this.repairAttempts = 0;
+
+    // Capability check: If model explicitly does not support tools in agent mode
+    if (
+      mode === "agent" &&
+      this.model &&
+      this.provider.supportsTools &&
+      !this.provider.supportsTools(this.model)
+    ) {
+      this.transition("FAILED", "Model does not support tools");
+      this.event({
+        type: "error",
+        message: `Model '${this.model}' cannot run autonomous coding tools. Use Chat/Ask mode or select a tool-capable model (e.g. GPT-6 Astra, Qwen3.8 27B).`,
+      });
+      return;
+    }
+
     const messages: ChatMessage[] = [
       {
         role: "system",
@@ -142,7 +166,10 @@ export class AgentRuntime {
       iteration += 1
     ) {
       if (this.stopped || signal?.aborted) {
-        this.transition(this.cancelled ? "CANCELLED" : "STOPPED", this.cancelled ? "Agent cancelled by user" : "Agent stopped by user");
+        this.transition(
+          this.cancelled ? "CANCELLED" : "STOPPED",
+          this.cancelled ? "Agent cancelled by user" : "Agent stopped by user",
+        );
         return;
       }
       if (
@@ -161,12 +188,12 @@ export class AgentRuntime {
       const calls = new Map<string, ToolCall>();
       try {
         for await (const chunk of this.provider.streamChat({
-          model: "",
+          model: this.model || "gpt-6-astra",
           messages,
           tools: definitions,
           temperature: 0.2,
-            maxTokens: 4096,
-            signal,
+          maxTokens: 4096,
+          signal,
         })) {
           if (chunk.content) {
             text += chunk.content;
@@ -176,7 +203,12 @@ export class AgentRuntime {
         }
       } catch (error) {
         if (signal?.aborted || this.stopped) {
-          this.transition(this.cancelled ? "CANCELLED" : "STOPPED", this.cancelled ? "Agent cancelled by user" : "Agent stopped by user");
+          this.transition(
+            this.cancelled ? "CANCELLED" : "STOPPED",
+            this.cancelled
+              ? "Agent cancelled by user"
+              : "Agent stopped by user",
+          );
           return;
         }
         this.transition("FAILED", "Provider request failed");
@@ -284,23 +316,34 @@ export class AgentRuntime {
             this.repairAttempts += 1;
             this.recordRepairAttempt?.({
               attemptNumber: this.repairAttempts,
-              diagnosis: "Test command failed; model diagnosis is required before another repair.",
+              diagnosis:
+                "Test command failed; model diagnosis is required before another repair.",
               evidence: result.content,
-              result: this.repairAttempts >= this.limits.maxRepairAttempts ? "LIMIT_REACHED" : "FAILED",
+              result:
+                this.repairAttempts >= this.limits.maxRepairAttempts
+                  ? "LIMIT_REACHED"
+                  : "FAILED",
             });
-            this.transition("DIAGNOSING", `Tests failed; diagnosing repair attempt ${this.repairAttempts}/${this.limits.maxRepairAttempts}`);
+            this.transition(
+              "DIAGNOSING",
+              `Tests failed; diagnosing repair attempt ${this.repairAttempts}/${this.limits.maxRepairAttempts}`,
+            );
             this.event({
               type: "error",
               toolName: call.name,
-              message: this.repairAttempts >= this.limits.maxRepairAttempts
-                ? "Self-repair limit reached."
-                : "Tests failed. The agent must diagnose the failure before proposing a repair.",
+              message:
+                this.repairAttempts >= this.limits.maxRepairAttempts
+                  ? "Self-repair limit reached."
+                  : "Tests failed. The agent must diagnose the failure before proposing a repair.",
             });
             if (this.repairAttempts >= this.limits.maxRepairAttempts) {
               this.transition("FAILED", "Self-repair limit reached");
               return;
             }
-            this.transition("REPAIRING", "Preparing a model-driven repair proposal");
+            this.transition(
+              "REPAIRING",
+              "Preparing a model-driven repair proposal",
+            );
           }
           messages.push({
             role: "tool",

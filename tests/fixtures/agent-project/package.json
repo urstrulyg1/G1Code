@@ -1,1 +1,8 @@
-{"name":"g1code-agent-fixture","private":true,"scripts":{"test":"node --test"},"type":"module"}
+{
+  "name": "g1code-agent-fixture",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "type": "module"
+}

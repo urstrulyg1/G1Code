@@ -9,8 +9,12 @@ export type AIModel = {
   id: string;
   name: string;
   contextWindow?: number;
+  contextWindowFormatted?: string;
   supportsTools?: boolean;
   supportsStreaming?: boolean;
+  supportsVision?: boolean;
+  isPromotional?: boolean;
+  description?: string;
 };
 export type ToolDefinition = {
   name: string;
@@ -44,6 +48,7 @@ export type ChatResponse = {
   message: ChatMessage;
   usage?: Usage;
   requestId?: string;
+  latencyMs?: number;
 };
 export type ChatChunk = {
   content?: string;
@@ -58,18 +63,29 @@ export type ProviderConfig = {
   maxTokens: number;
 };
 export interface AIProvider {
+  id?: string;
+  name?: string;
   getModels(signal?: AbortSignal): Promise<AIModel[]>;
+  listModels?(signal?: AbortSignal): Promise<AIModel[]>;
   chat(request: ChatRequest): Promise<ChatResponse>;
+  stream?(request: ChatRequest): AsyncIterable<ChatChunk>;
   streamChat(request: ChatRequest): AsyncIterable<ChatChunk>;
+  supportsTools?(model: string): boolean;
+  supportsVision?(model: string): boolean;
+  verifyConnection?(): Promise<{
+    connected: boolean;
+    modelCount: number;
+    message: string;
+  }>;
+  testModel?(
+    modelId: string,
+  ): Promise<{
+    working: boolean;
+    latencyMs: number;
+    ttftMs: number;
+    output: string;
+  }>;
+  cancel?(requestId: string): Promise<void>;
 }
 
-export class ProviderError extends Error {
-  constructor(
-    message: string,
-    public readonly status?: number,
-    public readonly retryable = false,
-  ) {
-    super(message);
-    this.name = "ProviderError";
-  }
-}
+export { ProviderError } from "./errors";

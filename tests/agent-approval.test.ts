@@ -13,7 +13,13 @@ test("agent pauses on pending change and resumes after explicit approval", async
       requestCount += 1;
       if (requestCount === 1) {
         yield {
-          toolCalls: [{ id: "change-call", name: "write_file", arguments: { path: "a.txt", content: "new" } }],
+          toolCalls: [
+            {
+              id: "change-call",
+              name: "write_file",
+              arguments: { path: "a.txt", content: "new" },
+            },
+          ],
         };
       } else {
         yield { content: "completed" };
@@ -27,19 +33,34 @@ test("agent pauses on pending change and resumes after explicit approval", async
     permission: "moderate",
     inputSchema: { type: "object" },
     execute: async () => ({
-      content: JSON.stringify({ status: "pending_approval", changeId: "change-1" }),
+      content: JSON.stringify({
+        status: "pending_approval",
+        changeId: "change-1",
+      }),
       status: "pending_approval",
       changeId: "change-1",
     }),
   });
-  let release!: (value: { approved: boolean; status: "APPLIED" | "REJECTED" | "CONFLICT"; message: string }) => void;
-  const approval = new Promise<{ approved: boolean; status: "APPLIED" | "REJECTED" | "CONFLICT"; message: string }>((resolve) => { release = resolve; });
+  let release!: (value: {
+    approved: boolean;
+    status: "APPLIED" | "REJECTED" | "CONFLICT";
+    message: string;
+  }) => void;
+  const approval = new Promise<{
+    approved: boolean;
+    status: "APPLIED" | "REJECTED" | "CONFLICT";
+    message: string;
+  }>((resolve) => {
+    release = resolve;
+  });
   const states: string[] = [];
   const runtime = new AgentRuntime(
     provider,
     tools,
     "/workspace",
-    (event) => { if (event.state) states.push(event.state); },
+    (event) => {
+      if (event.state) states.push(event.state);
+    },
     async () => true,
     undefined,
     "session-1",
@@ -50,7 +71,11 @@ test("agent pauses on pending change and resumes after explicit approval", async
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.ok(states.includes("WAITING_FOR_CHANGE_APPROVAL"));
   assert.equal(requestCount, 1);
-  release({ approved: true, status: "APPLIED", message: "Change applied successfully. Continuing agent." });
+  release({
+    approved: true,
+    status: "APPLIED",
+    message: "Change applied successfully. Continuing agent.",
+  });
   await run;
   assert.equal(requestCount, 2);
   assert.equal(states.at(-1), "COMPLETED");

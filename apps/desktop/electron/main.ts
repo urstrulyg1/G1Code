@@ -12,7 +12,9 @@ let serverProcess: ChildProcess | null = null;
 
 async function ensureBackendServer() {
   try {
-    const res = await fetch("http://127.0.0.1:3131/api/health").catch(() => null);
+    const res = await fetch("http://127.0.0.1:3131/api/health").catch(
+      () => null,
+    );
     if (res && res.ok) return;
   } catch {
     // not running
@@ -48,7 +50,10 @@ function createWindow() {
   // Security: prevent opening external windows or untrusted navigation
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith("http://localhost:5173") && !url.startsWith("file://")) {
+    if (
+      !url.startsWith("http://localhost:5173") &&
+      !url.startsWith("file://")
+    ) {
       event.preventDefault();
     }
   });
@@ -83,12 +88,19 @@ ipcMain.handle("workspace:choose", async () => {
   return selectedWorkspace;
 });
 ipcMain.handle("workspace:list", async (_event, directory: string) => {
-  if (typeof directory !== "string" || directory.length === 0 || directory.length > 4096)
+  if (
+    typeof directory !== "string" ||
+    directory.length === 0 ||
+    directory.length > 4096
+  )
     throw new Error("Invalid workspace directory");
   if (!selectedWorkspace) throw new Error("Open a workspace first");
   const entries = await fs.readdir(
     selectedWorkspace
-      ? await safeRealPath(selectedWorkspace, path.relative(selectedWorkspace, directory))
+      ? await safeRealPath(
+          selectedWorkspace,
+          path.relative(selectedWorkspace, directory),
+        )
       : directory,
     { withFileTypes: true },
   );
@@ -105,24 +117,38 @@ ipcMain.handle("workspace:list", async (_event, directory: string) => {
     );
 });
 ipcMain.handle("file:read", async (_event, filePath: string) => {
-  if (typeof filePath !== "string" || filePath.length === 0 || filePath.length > 4096)
+  if (
+    typeof filePath !== "string" ||
+    filePath.length === 0 ||
+    filePath.length > 4096
+  )
     throw new Error("Invalid file path");
   if (!selectedWorkspace) throw new Error("Open a workspace first");
   return fs.readFile(
-    await safeRealPath(selectedWorkspace, path.relative(selectedWorkspace, filePath)),
+    await safeRealPath(
+      selectedWorkspace,
+      path.relative(selectedWorkspace, filePath),
+    ),
     "utf8",
   );
 });
 ipcMain.handle(
   "file:write",
   async (_event, filePath: string, contents: string) => {
-    if (typeof filePath !== "string" || filePath.length === 0 || filePath.length > 4096)
+    if (
+      typeof filePath !== "string" ||
+      filePath.length === 0 ||
+      filePath.length > 4096
+    )
       throw new Error("Invalid file path");
     if (!selectedWorkspace) throw new Error("Open a workspace first");
     if (typeof contents !== "string" || contents.length > 10_000_000)
       throw new Error("Invalid file contents");
     await fs.writeFile(
-      await safeRealPath(selectedWorkspace, path.relative(selectedWorkspace, filePath)),
+      await safeRealPath(
+        selectedWorkspace,
+        path.relative(selectedWorkspace, filePath),
+      ),
       contents,
       "utf8",
     );
@@ -165,7 +191,10 @@ const API_BASE = "http://127.0.0.1:3131";
 async function api(pathname: string, options?: RequestInit) {
   await ensureBackendServer();
   const res = await fetch(`${API_BASE}${pathname}`, {
-    headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers || {}),
+    },
     ...options,
   });
   if (!res.ok) {
@@ -181,24 +210,93 @@ async function api(pathname: string, options?: RequestInit) {
 
 function registerApiBridgeHandlers() {
   ipcMain.handle("settings:get", async () => api("/api/settings"));
-  ipcMain.handle("settings:save", async (_e, input) => api("/api/settings", { method: "POST", body: JSON.stringify(input) }));
+  ipcMain.handle("settings:save", async (_e, input) =>
+    api("/api/settings", { method: "POST", body: JSON.stringify(input) }),
+  );
   ipcMain.handle("provider:models", async () => api("/api/provider/models"));
-  ipcMain.handle("provider:test", async (_e, model) => api("/api/provider/test", { method: "POST", body: JSON.stringify({ model }) }));
+  ipcMain.handle("provider:test", async (_e, model) =>
+    api("/api/provider/test", {
+      method: "POST",
+      body: JSON.stringify({ model }),
+    }),
+  );
 
-  ipcMain.handle("agent:start", async (_e, input) => api("/api/agent/start", { method: "POST", body: JSON.stringify(input) }));
-  ipcMain.on("agent:stop", (_e, sessionId) => void api("/api/agent/stop", { method: "POST", body: JSON.stringify({ sessionId }) }));
-  ipcMain.handle("agent:sessions", async (_e, ws) => api(`/api/agent/sessions?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}`));
-  ipcMain.handle("agent:session", async (_e, { workspace, sessionId }) => api(`/api/agent/session?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&sessionId=${encodeURIComponent(sessionId)}`));
-  ipcMain.handle("agent:events", async (_e, { workspace, sessionId }) => api(`/api/agent/events-history?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&sessionId=${encodeURIComponent(sessionId)}`));
-  ipcMain.handle("agent:changes", async (_e, { workspace, sessionId }) => api(`/api/agent/changes?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`));
-  ipcMain.handle("agent:change", async (_e, input) => api("/api/agent/change", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
-  ipcMain.handle("agent:approve-all-changes", async (_e, input) => api("/api/agent/approve-all", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
-  ipcMain.handle("agent:reject-all-changes", async (_e, input) => api("/api/agent/reject-all", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
-  ipcMain.handle("agent:discard-session", async (_e, input) => api("/api/agent/discard", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
-  ipcMain.on("permission:response", (_e, input) => void api("/api/agent/permission", { method: "POST", body: JSON.stringify(input) }));
+  ipcMain.handle("agent:start", async (_e, input) =>
+    api("/api/agent/start", { method: "POST", body: JSON.stringify(input) }),
+  );
+  ipcMain.on(
+    "agent:stop",
+    (_e, sessionId) =>
+      void api("/api/agent/stop", {
+        method: "POST",
+        body: JSON.stringify({ sessionId }),
+      }),
+  );
+  ipcMain.handle("agent:sessions", async (_e, ws) =>
+    api(
+      `/api/agent/sessions?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}`,
+    ),
+  );
+  ipcMain.handle("agent:session", async (_e, { workspace, sessionId }) =>
+    api(
+      `/api/agent/session?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&sessionId=${encodeURIComponent(sessionId)}`,
+    ),
+  );
+  ipcMain.handle("agent:events", async (_e, { workspace, sessionId }) =>
+    api(
+      `/api/agent/events-history?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&sessionId=${encodeURIComponent(sessionId)}`,
+    ),
+  );
+  ipcMain.handle("agent:changes", async (_e, { workspace, sessionId }) =>
+    api(
+      `/api/agent/changes?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
+    ),
+  );
+  ipcMain.handle("agent:change", async (_e, input) =>
+    api("/api/agent/change", {
+      method: "POST",
+      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+    }),
+  );
+  ipcMain.handle("agent:approve-all-changes", async (_e, input) =>
+    api("/api/agent/approve-all", {
+      method: "POST",
+      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+    }),
+  );
+  ipcMain.handle("agent:reject-all-changes", async (_e, input) =>
+    api("/api/agent/reject-all", {
+      method: "POST",
+      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+    }),
+  );
+  ipcMain.handle("agent:discard-session", async (_e, input) =>
+    api("/api/agent/discard", {
+      method: "POST",
+      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+    }),
+  );
+  ipcMain.on(
+    "permission:response",
+    (_e, input) =>
+      void api("/api/agent/permission", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+  );
 
-  ipcMain.handle("index:rebuild", async (_e, input) => api("/api/index/rebuild", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
-  ipcMain.handle("index:search", async (_e, input) => api("/api/index/search", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
+  ipcMain.handle("index:rebuild", async (_e, input) =>
+    api("/api/index/rebuild", {
+      method: "POST",
+      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+    }),
+  );
+  ipcMain.handle("index:search", async (_e, input) =>
+    api("/api/index/search", {
+      method: "POST",
+      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+    }),
+  );
 }
 
 function startEventBridge(win: BrowserWindow) {

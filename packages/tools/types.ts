@@ -7,7 +7,16 @@ export type ToolContext = {
   signal?: AbortSignal;
   changeService?: import("./change-service").ChangeService;
   sessionId?: string;
-  recordTestRun?: (run: { command: string; cwd: string; targeted: boolean; exitCode?: number; passed?: boolean; stdout?: string; stderr?: string; duration?: number }) => void;
+  recordTestRun?: (run: {
+    command: string;
+    cwd: string;
+    targeted: boolean;
+    exitCode?: number;
+    passed?: boolean;
+    stdout?: string;
+    stderr?: string;
+    duration?: number;
+  }) => void;
 };
 export type ToolResult = {
   content: string;

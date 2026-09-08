@@ -7,7 +7,8 @@ import { contentHash } from "../tools/changes";
 import { safeRealPath } from "../tools/workspace";
 import type { ChangeService } from "../tools/change-service";
 
-export type ToolClassification = "READ_ONLY" | "IDEMPOTENT" | "SIDE_EFFECTING" | "NON_REPLAYABLE";
+export type ToolClassification =
+  "READ_ONLY" | "IDEMPOTENT" | "SIDE_EFFECTING" | "NON_REPLAYABLE";
 
 export const TOOL_CLASSIFICATIONS: Record<string, ToolClassification> = {
   read_file: "READ_ONLY",
@@ -51,10 +52,16 @@ export type SafeCheckpoint = {
 };
 
 export function hashArguments(args: unknown): string {
-  return crypto.createHash("sha256").update(JSON.stringify(args ?? {})).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(args ?? {}))
+    .digest("hex");
 }
 
-export async function snapshotFiles(workspace: string, relativePaths: string[]): Promise<Record<string, string>> {
+export async function snapshotFiles(
+  workspace: string,
+  relativePaths: string[],
+): Promise<Record<string, string>> {
   const hashes: Record<string, string> = {};
   for (const rel of relativePaths) {
     try {

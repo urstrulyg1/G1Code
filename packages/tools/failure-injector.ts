@@ -11,7 +11,9 @@ export type CrashPoint =
 
 export class SimulatedCrashError extends Error {
   constructor(public readonly point: CrashPoint) {
-    super(`SimulatedCrashError: Deterministic crash triggered at point ${point}`);
+    super(
+      `SimulatedCrashError: Deterministic crash triggered at point ${point}`,
+    );
     this.name = "SimulatedCrashError";
   }
 }

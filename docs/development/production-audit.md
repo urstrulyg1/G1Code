@@ -10,14 +10,14 @@ The release decision remains `NOT RELEASE READY` and `NOT FULLY VALIDATED` becau
 
 ## Release Blockers
 
-| ID | Severity | Category | Component | Finding | Evidence | Fix |
-| -- | -- | -- | -- | -- | -- | -- |
-| AUD-001 | P1 | DATA INTEGRITY | SQLite migration | Existing legacy `files` data is preserved in `legacy_index_files` but still has no workspace owner and is not automatically reattached. The active index is empty until rebuild. | `packages/database/connection.ts`, migration around `ALTER TABLE files RENAME TO files_legacy` | Add a real migration that maps legacy rows to a workspace owner or makes the rebuild/invalidated state user-visible. Never silently present an empty index. |
-| AUD-002 | P1 | SECURITY | Command execution | Agent and renderer command paths execute through `sh -lc`/`cmd /c`. Permission gates reduce risk but shell metacharacters remain fully active after approval. The direct human terminal inherits main-process environment. | `packages/tools/command.ts`, `apps/desktop/electron/main.ts` | Use structured executable/argument execution for inferred tools; isolate the environment; make arbitrary shell terminal explicitly user-only and disclose inherited environment risk. |
-| AUD-003 | P1 | DATA INTEGRITY | ChangeService | Multi-file application required durable transaction-like recovery. | Fixed with `change_batches`, `change_batch_items`, all-file preflight, temp preparation, atomic rename, rollback journal, and `PARTIAL_FAILURE` state. | Add crash injection/Electron batch UI coverage. |
-| AUD-004 | P1 | RELIABILITY | ChangeService | If filesystem write throws after status becomes `APPLYING`, the record can remain `APPLYING`. Startup converts it to `CONFLICT`, but there is no evidence whether bytes were partially written. | `packages/tools/change-service.ts` `applyChange` | Catch all apply errors, inspect current hash, transition to `CONFLICT`/`FAILED_APPLY`, persist reason, and use atomic temp-file rename. |
-| AUD-005 | P1 | RELIABILITY | Electron | Real Electron launch and renderer/main E2E remain blocked because `node_modules/electron/dist` has no executable. | `npm run e2e:smoke` reports missing platform binary | Repair dependency installation/cache/network in CI and validate launch before release. |
-| AUD-006 | P1 | AGENT RELIABILITY | Restart | Exact provider continuation remains unsafe, but the last runtime state and safe next action were not previously persisted. | `packages/agent/runtime.ts`, in-memory `messages` and waiters | Partial fix: execution checkpoints now persist state and `resumable: false`; exact conversation continuation remains intentionally disabled until deterministic checkpoint replay is implemented. |
+| ID      | Severity | Category          | Component         | Finding                                                                                                                                                                                                                    | Evidence                                                                                                                                               | Fix                                                                                                                                                                                               |
+| ------- | -------- | ----------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AUD-001 | P1       | DATA INTEGRITY    | SQLite migration  | Existing legacy `files` data is preserved in `legacy_index_files` but still has no workspace owner and is not automatically reattached. The active index is empty until rebuild.                                           | `packages/database/connection.ts`, migration around `ALTER TABLE files RENAME TO files_legacy`                                                         | Add a real migration that maps legacy rows to a workspace owner or makes the rebuild/invalidated state user-visible. Never silently present an empty index.                                       |
+| AUD-002 | P1       | SECURITY          | Command execution | Agent and renderer command paths execute through `sh -lc`/`cmd /c`. Permission gates reduce risk but shell metacharacters remain fully active after approval. The direct human terminal inherits main-process environment. | `packages/tools/command.ts`, `apps/desktop/electron/main.ts`                                                                                           | Use structured executable/argument execution for inferred tools; isolate the environment; make arbitrary shell terminal explicitly user-only and disclose inherited environment risk.             |
+| AUD-003 | P1       | DATA INTEGRITY    | ChangeService     | Multi-file application required durable transaction-like recovery.                                                                                                                                                         | Fixed with `change_batches`, `change_batch_items`, all-file preflight, temp preparation, atomic rename, rollback journal, and `PARTIAL_FAILURE` state. | Add crash injection/Electron batch UI coverage.                                                                                                                                                   |
+| AUD-004 | P1       | RELIABILITY       | ChangeService     | If filesystem write throws after status becomes `APPLYING`, the record can remain `APPLYING`. Startup converts it to `CONFLICT`, but there is no evidence whether bytes were partially written.                            | `packages/tools/change-service.ts` `applyChange`                                                                                                       | Catch all apply errors, inspect current hash, transition to `CONFLICT`/`FAILED_APPLY`, persist reason, and use atomic temp-file rename.                                                           |
+| AUD-005 | P1       | RELIABILITY       | Electron          | Real Electron launch and renderer/main E2E remain blocked because `node_modules/electron/dist` has no executable.                                                                                                          | `npm run e2e:smoke` reports missing platform binary                                                                                                    | Repair dependency installation/cache/network in CI and validate launch before release.                                                                                                            |
+| AUD-006 | P1       | AGENT RELIABILITY | Restart           | Exact provider continuation remains unsafe, but the last runtime state and safe next action were not previously persisted.                                                                                                 | `packages/agent/runtime.ts`, in-memory `messages` and waiters                                                                                          | Partial fix: execution checkpoints now persist state and `resumable: false`; exact conversation continuation remains intentionally disabled until deterministic checkpoint replay is implemented. |
 
 ## Critical Bugs
 
@@ -210,23 +210,23 @@ Reasons: P1 migration/data-integrity risk, P1 shell/process security risk, P1 no
 
 ## Scorecard
 
-| Area | Score |
-| -- | --: |
-| Architecture | 7 |
-| Security | 5 |
-| Agent reliability | 5 |
-| Change safety | 6 |
-| Persistence | 5 |
-| Repository intelligence | 5 |
-| Context management | 5 |
-| Testing | 6 |
-| Self-repair | 4 |
-| Git integration | 5 |
-| Electron reliability | 2 |
-| IPC security | 6 |
-| Performance | 4 |
-| UX | 4 |
-| Observability | 5 |
-| E2E coverage | 2 |
+| Area                    | Score |
+| ----------------------- | ----: |
+| Architecture            |     7 |
+| Security                |     5 |
+| Agent reliability       |     5 |
+| Change safety           |     6 |
+| Persistence             |     5 |
+| Repository intelligence |     5 |
+| Context management      |     5 |
+| Testing                 |     6 |
+| Self-repair             |     4 |
+| Git integration         |     5 |
+| Electron reliability    |     2 |
+| IPC security            |     6 |
+| Performance             |     4 |
+| UX                      |     4 |
+| Observability           |     5 |
+| E2E coverage            |     2 |
 
 Scores below 8 reflect unvalidated Electron behavior, incomplete recovery/atomicity, and missing product-level orchestration rather than lack of unit primitives.

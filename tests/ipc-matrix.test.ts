@@ -6,7 +6,11 @@ import os from "node:os";
 import Database from "better-sqlite3";
 import { DatabaseStore } from "../packages/database/repositories";
 import { ChangeService } from "../packages/tools/change-service";
-import { requireBoundedString, requireObject, requireAction } from "../packages/security/validation";
+import {
+  requireBoundedString,
+  requireObject,
+  requireAction,
+} from "../packages/security/validation";
 import { safeRealPath } from "../packages/tools/workspace";
 
 function createInMemoryStore() {
@@ -38,7 +42,10 @@ test("IPC Matrix: Input validation rejects malformed types, empty strings, and o
   assert.throws(() => requireBoundedString(null, "param"), /Invalid param/);
   assert.throws(() => requireBoundedString(12345, "param"), /Invalid param/);
   assert.throws(() => requireBoundedString("", "param"), /Invalid param/);
-  assert.throws(() => requireBoundedString("x".repeat(5000), "param", 4096), /Invalid param/);
+  assert.throws(
+    () => requireBoundedString("x".repeat(5000), "param", 4096),
+    /Invalid param/,
+  );
   assert.equal(requireBoundedString("valid", "param"), "valid");
 
   assert.throws(() => requireObject("string", "body"), /Invalid body/);
@@ -53,39 +60,45 @@ test("IPC Matrix: Input validation rejects malformed types, empty strings, and o
 });
 
 test("IPC Matrix: Path security rejects directory traversal and symlink escapes", async () => {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "g1code-matrix-path-"));
-  const outside = await fs.mkdtemp(path.join(os.tmpdir(), "g1code-matrix-outside-"));
+  const workspace = await fs.mkdtemp(
+    path.join(os.tmpdir(), "g1code-matrix-path-"),
+  );
+  const outside = await fs.mkdtemp(
+    path.join(os.tmpdir(), "g1code-matrix-outside-"),
+  );
   try {
     const sensitiveFile = path.join(outside, "secret.key");
     await fs.writeFile(sensitiveFile, "SECRET", "utf8");
 
     // Relative path traversal attack
-    await assert.rejects(
-      async () => {
-        await safeRealPath(workspace, "../../../etc/passwd");
-      },
-      /Path (is outside the selected workspace|escapes workspace)/,
-    );
+    await assert.rejects(async () => {
+      await safeRealPath(workspace, "../../../etc/passwd");
+    }, /Path (is outside the selected workspace|escapes workspace)/);
 
     // Symlink escape attack
     const linkPath = path.join(workspace, "link_to_secret");
     await fs.symlink(sensitiveFile, linkPath);
 
-    await assert.rejects(
-      async () => {
-        await safeRealPath(workspace, "link_to_secret");
-      },
-      /Path (resolves outside|is outside) the selected workspace/,
-    );
+    await assert.rejects(async () => {
+      await safeRealPath(workspace, "link_to_secret");
+    }, /Path (resolves outside|is outside) the selected workspace/);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
-    await fs.rm(outside, { recursive: true, force: true }).catch(() => undefined);
+    await fs
+      .rm(workspace, { recursive: true, force: true })
+      .catch(() => undefined);
+    await fs
+      .rm(outside, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 });
 
 test("IPC Matrix: Concurrency & State Isolation - Cross-workspace and double-approval rejection", async () => {
-  const workspaceA = await fs.mkdtemp(path.join(os.tmpdir(), "g1code-matrix-wsA-"));
-  const workspaceB = await fs.mkdtemp(path.join(os.tmpdir(), "g1code-matrix-wsB-"));
+  const workspaceA = await fs.mkdtemp(
+    path.join(os.tmpdir(), "g1code-matrix-wsA-"),
+  );
+  const workspaceB = await fs.mkdtemp(
+    path.join(os.tmpdir(), "g1code-matrix-wsB-"),
+  );
   try {
     const fileA = path.join(workspaceA, "file.ts");
     await fs.writeFile(fileA, "const a = 1;\n", "utf8");
@@ -117,7 +130,11 @@ test("IPC Matrix: Concurrency & State Isolation - Cross-workspace and double-app
     const serviceA = new ChangeService(store, workspaceA);
     const serviceB = new ChangeService(store, workspaceB);
 
-    const changeA = await serviceA.proposeChange(sessionA, "file.ts", "const a = 2;\n");
+    const changeA = await serviceA.proposeChange(
+      sessionA,
+      "file.ts",
+      "const a = 2;\n",
+    );
 
     // Attack: workspace B attempts to authorize or mutate change from workspace A
     assert.throws(
@@ -132,7 +149,11 @@ test("IPC Matrix: Concurrency & State Isolation - Cross-workspace and double-app
       /Cannot approve APPROVED change/,
     );
   } finally {
-    await fs.rm(workspaceA, { recursive: true, force: true }).catch(() => undefined);
-    await fs.rm(workspaceB, { recursive: true, force: true }).catch(() => undefined);
+    await fs
+      .rm(workspaceA, { recursive: true, force: true })
+      .catch(() => undefined);
+    await fs
+      .rm(workspaceB, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 });

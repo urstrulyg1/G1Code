@@ -27,26 +27,49 @@ contextBridge.exposeInMainWorld("g1code", {
     }>,
   saveSettings: (settings: Record<string, unknown>) =>
     ipcRenderer.invoke("settings:save", settings),
-  getModels: () => ipcRenderer.invoke("provider:models"),
-  testProvider: (model?: string) => ipcRenderer.invoke("provider:test", model),
+  getModels: (provider?: string) =>
+    ipcRenderer.invoke("provider:models", { provider }),
+  getFreeModels: (provider?: string) =>
+    ipcRenderer.invoke("provider:models:free", { provider }),
+  testProvider: (model?: string, provider?: string) =>
+    ipcRenderer.invoke("provider:test", { model, provider }),
+  verifyProvider: (provider?: string) =>
+    ipcRenderer.invoke("provider:verify", { provider }),
+  refreshModels: (provider?: string) =>
+    ipcRenderer.invoke("provider:refresh", { provider }),
   startAgent: (input: {
     workspace: string;
     prompt: string;
     mode: "ask" | "plan" | "agent";
+    model?: string;
   }) => ipcRenderer.invoke("agent:start", input),
+  setSessionModel: (sessionId: string, model: string) =>
+    ipcRenderer.invoke("agent:session-model", { sessionId, model }),
   stopAgent: (sessionId: string) => ipcRenderer.send("agent:stop", sessionId),
   listSessions: (workspace: string) =>
     ipcRenderer.invoke("agent:sessions", workspace),
-  rebuildIndex: (workspace: string) => ipcRenderer.invoke("index:rebuild", { workspace }),
-  searchSymbols: (workspace: string, query: string) => ipcRenderer.invoke("index:search", { workspace, query }),
+  rebuildIndex: (workspace: string) =>
+    ipcRenderer.invoke("index:rebuild", { workspace }),
+  searchSymbols: (workspace: string, query: string) =>
+    ipcRenderer.invoke("index:search", { workspace, query }),
+  searchWorkspace: (workspace: string, query: string) =>
+    ipcRenderer.invoke("workspace:search", { workspace, query }),
+  commitGit: (workspace: string, message: string) =>
+    ipcRenderer.invoke("git:commit", { workspace, message }),
+  generateCommitMsg: (workspace: string, model?: string) =>
+    ipcRenderer.invoke("git:generate-commit-msg", { workspace, model }),
   loadSessionEvents: (workspace: string, sessionId: string) =>
     ipcRenderer.invoke("agent:events", { workspace, sessionId }),
   loadSession: (workspace: string, sessionId: string) =>
     ipcRenderer.invoke("agent:session", { workspace, sessionId }),
   listChanges: (workspace: string, sessionId?: string) =>
     ipcRenderer.invoke("agent:changes", { workspace, sessionId }),
-  change: (workspace: string, sessionId: string, id: string, action: "approve" | "reject" | "apply" | "revert") =>
-    ipcRenderer.invoke("agent:change", { workspace, sessionId, id, action }),
+  change: (
+    workspace: string,
+    sessionId: string,
+    id: string,
+    action: "approve" | "reject" | "apply" | "revert",
+  ) => ipcRenderer.invoke("agent:change", { workspace, sessionId, id, action }),
   approveAllChanges: (workspace: string, sessionId: string) =>
     ipcRenderer.invoke("agent:approve-all-changes", { workspace, sessionId }),
   rejectAllChanges: (workspace: string, sessionId: string) =>

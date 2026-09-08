@@ -16,10 +16,20 @@ test("streaming command can be cancelled and returns bounded result", async () =
 });
 
 test("structured commands execute without shell interpolation and enforce timeout", async () => {
-  const execution = spawnExecutable({ executable: process.execPath, args: ["-e", "process.stdout.write('ok')"], cwd: process.cwd(), timeoutMs: 1000 });
+  const execution = spawnExecutable({
+    executable: process.execPath,
+    args: ["-e", "process.stdout.write('ok')"],
+    cwd: process.cwd(),
+    timeoutMs: 1000,
+  });
   const result = await execution.wait();
   assert.equal(result.stdout, "ok");
-  const timeout = spawnExecutable({ executable: process.execPath, args: ["-e", "setTimeout(() => {}, 10000)"], cwd: process.cwd(), timeoutMs: 20 });
+  const timeout = spawnExecutable({
+    executable: process.execPath,
+    args: ["-e", "setTimeout(() => {}, 10000)"],
+    cwd: process.cwd(),
+    timeoutMs: 20,
+  });
   const timed = await timeout.wait();
   assert.notEqual(timed.exitCode, 0);
 });

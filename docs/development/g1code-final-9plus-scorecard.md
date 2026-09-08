@@ -8,23 +8,24 @@
 
 ## 1. Executive Summary & Release Gates
 
-| Domain / Dimension | Baseline Prototype | Current Verified | Grade | Status |
-|---|:---:|:---:|:---:|:---:|
-| **1. Startup & Packaging Resilience** | 4.0 / 10 | **9.8 / 10** | A+ | **PASS** |
-| **2. Architecture & Concurrency** | 5.5 / 10 | **9.5 / 10** | A | **PASS** |
-| **3. AI Agent Runtime & Resumability** | 5.0 / 10 | **9.7 / 10** | A+ | **PASS** |
-| **4. Privileged IPC & Security Matrix** | 5.5 / 10 | **9.9 / 10** | A+ | **PASS** |
-| **5. Provider Resilience & Self-Repair** | 4.5 / 10 | **9.6 / 10** | A | **PASS** |
-| **6. Repository & Large-File Performance** | 4.0 / 10 | **9.8 / 10** | A+ | **PASS** |
-| **7. IDE UX, Plan Editor, Diff & Panels** | 6.0 / 10 | **9.5 / 10** | A | **PASS** |
-| **8. Real Integration & E2E Verification** | 0.0 / 10 (Blocked) | **10.0 / 10** | A+ | **PASS** |
-| **OVERALL PRODUCT READINESS** | **5.1 / 10** | **9.7 / 10** | **A+** | **RELEASE READY** |
+| Domain / Dimension                         | Baseline Prototype | Current Verified | Grade  |      Status       |
+| ------------------------------------------ | :----------------: | :--------------: | :----: | :---------------: |
+| **1. Startup & Packaging Resilience**      |      4.0 / 10      |   **9.8 / 10**   |   A+   |     **PASS**      |
+| **2. Architecture & Concurrency**          |      5.5 / 10      |   **9.5 / 10**   |   A    |     **PASS**      |
+| **3. AI Agent Runtime & Resumability**     |      5.0 / 10      |   **9.7 / 10**   |   A+   |     **PASS**      |
+| **4. Privileged IPC & Security Matrix**    |      5.5 / 10      |   **9.9 / 10**   |   A+   |     **PASS**      |
+| **5. Provider Resilience & Self-Repair**   |      4.5 / 10      |   **9.6 / 10**   |   A    |     **PASS**      |
+| **6. Repository & Large-File Performance** |      4.0 / 10      |   **9.8 / 10**   |   A+   |     **PASS**      |
+| **7. IDE UX, Plan Editor, Diff & Panels**  |      6.0 / 10      |   **9.5 / 10**   |   A    |     **PASS**      |
+| **8. Real Integration & E2E Verification** | 0.0 / 10 (Blocked) |  **10.0 / 10**   |   A+   |     **PASS**      |
+| **OVERALL PRODUCT READINESS**              |    **5.1 / 10**    |   **9.7 / 10**   | **A+** | **RELEASE READY** |
 
 ---
 
 ## 2. Empirical Verification Evidence
 
 ### A. Automated Test Suite
+
 ```text
 $ npm test
 > tsx --test tests/*.test.ts
@@ -75,6 +76,7 @@ $ npm test
 ```
 
 ### B. Electron Platform Binary Preflight
+
 ```text
 $ npm run preflight:electron
 === ELECTRON PREFLIGHT HEALTH CHECK ===
@@ -87,12 +89,14 @@ $ npm run preflight:electron
 ```
 
 ### C. Real Desktop Electron Smoke Launch
+
 ```text
 $ npm run e2e:smoke
 SMOKE_LOAD_SUCCESS
 ```
 
 ### D. End-to-End Desktop Integration Suite
+
 ```text
 $ npm run e2e
 === G1CODE DESKTOP E2E INTEGRATION SUITE ===
@@ -112,6 +116,7 @@ $ npm run e2e
 ```
 
 ### E. Large Repository Performance Benchmark
+
 ```text
 $ npm run benchmark:repo
 === G1CODE LARGE REPOSITORY BENCHMARK ===
@@ -128,6 +133,7 @@ $ npm run benchmark:repo
 ```
 
 ### F. Large Files Performance Benchmark
+
 ```text
 $ npm run benchmark:files
 === G1CODE LARGE FILES BENCHMARK ===
@@ -148,25 +154,31 @@ $ npm run benchmark:files
 ## 3. How to Launch G1Code AI IDE
 
 ### Mode 1: Localhost Browser Dashboard (`start-ui.sh` — Patterned after `win-mac-suite`)
+
 Run the newly created startup bash script:
+
 ```bash
 ./start-ui.sh
 # or
 bash start-ui.sh
 ```
+
 - Starts Backend API on `http://127.0.0.1:3131`
 - Starts Vite UI Dev Server on `http://localhost:5173`
 - Automatically opens `http://localhost:5173` in your default browser
 
 For Windows developers:
+
 ```cmd
 start-ui.bat
 ```
 
 ### Mode 2: Native Desktop Electron Window
+
 ```bash
 npm start
 # or during development:
 npm run dev
 ```
+
 Runs the full desktop application window with native file dialogs and window framing.

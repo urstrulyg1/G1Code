@@ -36,7 +36,9 @@ export function preflightCheck(): void {
     console.error(`FAIL: Binary size suspicious (${stats.size} bytes)`);
     process.exit(1);
   }
-  console.log(`✔ Binary size valid (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+  console.log(
+    `✔ Binary size valid (${(stats.size / 1024 / 1024).toFixed(2)} MB)`,
+  );
 
   const run = spawnSync(execPath, ["-v"], { encoding: "utf8" });
   if (run.error) {
@@ -46,16 +48,23 @@ export function preflightCheck(): void {
 
   const actualVersion = (run.stdout || "").trim();
   if (actualVersion !== `v${expectedVersion}`) {
-    console.error(`FAIL: Version mismatch. Expected v${expectedVersion}, got ${actualVersion}`);
+    console.error(
+      `FAIL: Version mismatch. Expected v${expectedVersion}, got ${actualVersion}`,
+    );
     process.exit(1);
   }
   console.log(`✔ Binary runnable and version matches: ${actualVersion}`);
 
   // Check host architecture compatibility
-  console.log(`✔ Host platform (${process.platform}) & arch (${process.arch}) match`);
+  console.log(
+    `✔ Host platform (${process.platform}) & arch (${process.arch}) match`,
+  );
   console.log("=== PREFLIGHT PASSED ===");
 }
 
-if (require.main === module || process.argv[1]?.endsWith("preflight-electron.ts")) {
+if (
+  require.main === module ||
+  process.argv[1]?.endsWith("preflight-electron.ts")
+) {
   preflightCheck();
 }

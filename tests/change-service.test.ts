@@ -9,7 +9,9 @@ import { ChangeService } from "../packages/tools/change-service";
 
 function store() {
   const db = new Database(":memory:");
-  db.exec("CREATE TABLE file_changes (id TEXT PRIMARY KEY, session_id TEXT, path TEXT, original_hash TEXT, proposed_hash TEXT, original_content TEXT, proposed_content TEXT, applied_content TEXT, patch TEXT, status TEXT, created_at TEXT, updated_at TEXT)");
+  db.exec(
+    "CREATE TABLE file_changes (id TEXT PRIMARY KEY, session_id TEXT, path TEXT, original_hash TEXT, proposed_hash TEXT, original_content TEXT, proposed_content TEXT, applied_content TEXT, patch TEXT, status TEXT, created_at TEXT, updated_at TEXT)",
+  );
   return new DatabaseStore(db);
 }
 
@@ -17,12 +19,22 @@ test("change service persists approval, apply, and safe revert lifecycle", async
   const workspace = await mkdtemp(path.join(tmpdir(), "g1code-change-"));
   await writeFile(path.join(workspace, "sample.txt"), "one\ntwo\n");
   const service = new ChangeService(store(), workspace);
-  const change = await service.proposeChange("session", "sample.txt", "one\nthree\n");
+  const change = await service.proposeChange(
+    "session",
+    "sample.txt",
+    "one\nthree\n",
+  );
   assert.equal(change.status, "PENDING");
-  assert.equal(await readFile(path.join(workspace, "sample.txt"), "utf8"), "one\ntwo\n");
+  assert.equal(
+    await readFile(path.join(workspace, "sample.txt"), "utf8"),
+    "one\ntwo\n",
+  );
   await service.approveChange(change.id);
   assert.equal((await service.applyChange(change.id)).status, "APPLIED");
-  assert.equal(await readFile(path.join(workspace, "sample.txt"), "utf8"), "one\nthree\n");
+  assert.equal(
+    await readFile(path.join(workspace, "sample.txt"), "utf8"),
+    "one\nthree\n",
+  );
   assert.equal((await service.revertChange(change.id)).status, "REVERTED");
 });
 
@@ -31,7 +43,11 @@ test("change service marks external edits as conflicts without overwriting them"
   const file = path.join(workspace, "sample.txt");
   await writeFile(file, "original\n");
   const service = new ChangeService(store(), workspace);
-  const change = await service.proposeChange("session", "sample.txt", "agent\n");
+  const change = await service.proposeChange(
+    "session",
+    "sample.txt",
+    "agent\n",
+  );
   await writeFile(file, "user\n");
   await service.approveChange(change.id);
   assert.equal((await service.applyChange(change.id)).status, "CONFLICT");
@@ -44,8 +60,14 @@ test("change service rejects duplicate approval and duplicate apply", async () =
   const service = new ChangeService(store(), workspace);
   const change = await service.proposeChange("session", "sample.txt", "new\n");
   await service.approveChange(change.id);
-  assert.throws(() => service.approveChange(change.id), /already decided|Cannot approve/);
+  assert.throws(
+    () => service.approveChange(change.id),
+    /already decided|Cannot approve/,
+  );
   const first = await service.applyChange(change.id);
   assert.equal(first.status, "APPLIED");
-  await assert.rejects(() => service.applyChange(change.id), /must be approved|already approved|already being/);
+  await assert.rejects(
+    () => service.applyChange(change.id),
+    /must be approved|already approved|already being/,
+  );
 });

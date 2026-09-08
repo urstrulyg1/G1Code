@@ -46,7 +46,16 @@ export type FileChange = {
   createdAt: string;
   updatedAt: string;
 };
-export type ChangeBatchStatus = "PENDING" | "PREPARING" | "APPLYING" | "APPLIED" | "ROLLING_BACK" | "ROLLED_BACK" | "PARTIAL_FAILURE" | "CONFLICT" | "FAILED";
+export type ChangeBatchStatus =
+  | "PENDING"
+  | "PREPARING"
+  | "APPLYING"
+  | "APPLIED"
+  | "ROLLING_BACK"
+  | "ROLLED_BACK"
+  | "PARTIAL_FAILURE"
+  | "CONFLICT"
+  | "FAILED";
 export type ChangeBatch = {
   id: string;
   sessionId: string;

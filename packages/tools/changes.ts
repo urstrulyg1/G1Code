@@ -50,7 +50,10 @@ export async function applyApprovedChange(
   const current = await fs.readFile(filePath, "utf8").catch(() => null);
   if (current === null && original !== "")
     return { status: "CONFLICT" as const, reason: "File no longer exists" };
-  if (current !== null && (contentHash(current) !== originalHash || current !== original))
+  if (
+    current !== null &&
+    (contentHash(current) !== originalHash || current !== original)
+  )
     return {
       status: "CONFLICT" as const,
       reason: "File changed since it was inspected",

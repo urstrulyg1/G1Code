@@ -33,7 +33,10 @@ function ensureEventSource() {
   }
 }
 
-async function apiRequest<T = any>(endpoint: string, options?: RequestInit): Promise<T> {
+async function apiRequest<T = any>(
+  endpoint: string,
+  options?: RequestInit,
+): Promise<T> {
   const response = await fetch(endpoint, {
     headers: {
       "Content-Type": "application/json",
@@ -60,24 +63,36 @@ if (typeof window !== "undefined" && !window.g1code) {
   window.g1code = {
     async chooseWorkspace(): Promise<string | null> {
       // In web browser mode, prompt user for directory path or use default server workspace
-      const current = await apiRequest<{ workspace: string }>("/api/workspace/choose", {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      const input = window.prompt("Enter local workspace directory path:", current.workspace);
+      const current = await apiRequest<{ workspace: string }>(
+        "/api/workspace/choose",
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+      );
+      const input = window.prompt(
+        "Enter local workspace directory path:",
+        current.workspace,
+      );
       if (input === null) return null; // Cancelled
-      const res = await apiRequest<{ workspace: string }>("/api/workspace/choose", {
-        method: "POST",
-        body: JSON.stringify({ path: input.trim() || current.workspace }),
-      });
+      const res = await apiRequest<{ workspace: string }>(
+        "/api/workspace/choose",
+        {
+          method: "POST",
+          body: JSON.stringify({ path: input.trim() || current.workspace }),
+        },
+      );
       return res.workspace;
     },
 
     async listDirectory(directory: string) {
-      return apiRequest<Array<{ name: string; kind: "file" | "directory" }>>("/api/workspace/list", {
-        method: "POST",
-        body: JSON.stringify({ directory }),
-      });
+      return apiRequest<Array<{ name: string; kind: "file" | "directory" }>>(
+        "/api/workspace/list",
+        {
+          method: "POST",
+          body: JSON.stringify({ directory }),
+        },
+      );
     },
 
     async readFile(filePath: string) {
@@ -97,10 +112,13 @@ if (typeof window !== "undefined" && !window.g1code) {
     },
 
     async runCommand(command: string, cwd: string) {
-      return apiRequest<{ output: string; exitCode: number }>("/api/terminal/run", {
-        method: "POST",
-        body: JSON.stringify({ command, cwd }),
-      });
+      return apiRequest<{ output: string; exitCode: number }>(
+        "/api/terminal/run",
+        {
+          method: "POST",
+          body: JSON.stringify({ command, cwd }),
+        },
+      );
     },
 
     async getSettings() {
@@ -114,23 +132,82 @@ if (typeof window !== "undefined" && !window.g1code) {
       });
     },
 
-    async getModels() {
-      return apiRequest<Array<{ id: string; name: string; supportsTools?: boolean }>>("/api/provider/models");
+    async getModels(provider?: string) {
+      const q = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+      return apiRequest<
+        Array<{ id: string; name: string; supportsTools?: boolean; provider?: string }>
+      >(`/api/provider/models${q}`);
     },
 
-    async testProvider(model?: string) {
+    async getFreeModels(provider?: string) {
+      const q = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+      return apiRequest<
+        Array<{ id: string; name: string; supportsTools?: boolean; isPromotional?: boolean; provider?: string }>
+      >(`/api/provider/models/free${q}`);
+    },
+
+    async testProvider(model?: string, provider?: string) {
       return apiRequest("/api/provider/test", {
         method: "POST",
-        body: JSON.stringify({ model }),
+        body: JSON.stringify({ model, provider }),
       });
     },
 
-    async startAgent(input: { workspace: string; prompt: string; mode: "ask" | "plan" | "agent" }) {
-      ensureEventSource();
-      return apiRequest<{ sessionId: string }>("/api/agent/start", {
+    async verifyProvider(provider?: string) {
+      return apiRequest("/api/provider/verify", {
         method: "POST",
-        body: JSON.stringify(input),
+        body: JSON.stringify({ provider }),
       });
+    },
+
+    async refreshModels(provider?: string) {
+      return apiRequest("/api/provider/refresh", {
+        method: "POST",
+        body: JSON.stringify({ provider }),
+      });
+    },
+
+    async startAgent(input: {
+      workspace: string;
+      prompt: string;
+      mode: "ask" | "plan" | "agent";
+      model?: string;
+    }) {
+      ensureEventSource();
+      return apiRequest<{ sessionId: string; model?: string }>(
+        "/api/agent/start",
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
+    },
+
+    async setSessionModel(sessionId: string, model: string) {
+      return apiRequest("/api/agent/session-model", {
+        method: "POST",
+        body: JSON.stringify({ sessionId, model }),
+      });
+    },
+
+    async commitGit(workspace: string, message: string) {
+      return apiRequest("/api/git/commit", {
+        method: "POST",
+        body: JSON.stringify({ workspace, message }),
+      });
+    },
+
+    async generateCommitMsg(workspace: string, model?: string) {
+      return apiRequest("/api/git/generate-commit-msg", {
+        method: "POST",
+        body: JSON.stringify({ workspace, model }),
+      });
+    },
+
+    async searchWorkspace(workspace: string, query: string) {
+      return apiRequest<Array<{ file: string; line: number; content: string }>>(
+        `/api/workspace/search?workspace=${encodeURIComponent(workspace)}&query=${encodeURIComponent(query)}`,
+      );
     },
 
     stopAgent(sessionId: string) {
@@ -141,9 +218,9 @@ if (typeof window !== "undefined" && !window.g1code) {
     },
 
     async listSessions(workspace: string) {
-      return apiRequest<Array<{ id: string; title: string; mode: string; status: string }>>(
-        `/api/agent/sessions?workspace=${encodeURIComponent(workspace)}`,
-      );
+      return apiRequest<
+        Array<{ id: string; title: string; mode: string; status: string }>
+      >(`/api/agent/sessions?workspace=${encodeURIComponent(workspace)}`);
     },
 
     async rebuildIndex(workspace: string) {
@@ -154,17 +231,25 @@ if (typeof window !== "undefined" && !window.g1code) {
     },
 
     async searchSymbols(workspace: string, query: string) {
-      return apiRequest<Array<{ symbol: string; kind: string; path: string; line: number; column: number; parent?: string }>>(
-        "/api/index/search",
-        {
-          method: "POST",
-          body: JSON.stringify({ workspace, query }),
-        },
-      );
+      return apiRequest<
+        Array<{
+          symbol: string;
+          kind: string;
+          path: string;
+          line: number;
+          column: number;
+          parent?: string;
+        }>
+      >("/api/index/search", {
+        method: "POST",
+        body: JSON.stringify({ workspace, query }),
+      });
     },
 
     async loadSessionEvents(workspace: string, sessionId: string) {
-      return apiRequest(`/api/agent/events-history?workspace=${encodeURIComponent(workspace)}&sessionId=${encodeURIComponent(sessionId)}`);
+      return apiRequest(
+        `/api/agent/events-history?workspace=${encodeURIComponent(workspace)}&sessionId=${encodeURIComponent(sessionId)}`,
+      );
     },
 
     async loadSession(workspace: string, sessionId: string) {
@@ -175,10 +260,17 @@ if (typeof window !== "undefined" && !window.g1code) {
 
     async listChanges(workspace: string, sessionId?: string) {
       const q = sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : "";
-      return apiRequest(`/api/agent/changes?workspace=${encodeURIComponent(workspace)}${q}`);
+      return apiRequest(
+        `/api/agent/changes?workspace=${encodeURIComponent(workspace)}${q}`,
+      );
     },
 
-    async change(workspace: string, sessionId: string, id: string, action: "approve" | "reject" | "apply" | "revert") {
+    async change(
+      workspace: string,
+      sessionId: string,
+      id: string,
+      action: "approve" | "reject" | "apply" | "revert",
+    ) {
       return apiRequest("/api/agent/change", {
         method: "POST",
         body: JSON.stringify({ workspace, sessionId, id, action }),
@@ -231,11 +323,15 @@ if (typeof window !== "undefined" && !window.g1code) {
 
     // Extended IDE capabilities
     async getGitStatus(workspace: string) {
-      return apiRequest(`/api/git/status?workspace=${encodeURIComponent(workspace)}`);
+      return apiRequest(
+        `/api/git/status?workspace=${encodeURIComponent(workspace)}`,
+      );
     },
 
     async getProblems(workspace: string) {
-      return apiRequest(`/api/problems?workspace=${encodeURIComponent(workspace)}`);
+      return apiRequest(
+        `/api/problems?workspace=${encodeURIComponent(workspace)}`,
+      );
     },
   } as any;
 }

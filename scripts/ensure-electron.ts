@@ -1,4 +1,12 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync, chmodSync, statSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  chmodSync,
+  statSync,
+  mkdirSync,
+} from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -20,14 +28,19 @@ function getPlatformPath(): string {
   }
 }
 
-function findCachedZip(version: string, platform: string, arch: string): string | null {
+function findCachedZip(
+  version: string,
+  platform: string,
+  arch: string,
+): string | null {
   const candidates: string[] = [];
   const home = os.homedir();
 
   if (platform === "darwin") {
     candidates.push(path.join(home, "Library", "Caches", "electron"));
   } else if (platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+    const localAppData =
+      process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
     candidates.push(path.join(localAppData, "electron", "Cache"));
   } else {
     candidates.push(path.join(home, ".cache", "electron"));
@@ -88,13 +101,21 @@ export function ensureElectron(): void {
       const stats = statSync(execPath);
       if (stats.size > 1000) {
         // Ensure path.txt and version file exist
-        if (!existsSync(pathTxtPath) || readFileSync(pathTxtPath, "utf8") !== platformPath) {
+        if (
+          !existsSync(pathTxtPath) ||
+          readFileSync(pathTxtPath, "utf8") !== platformPath
+        ) {
           writeFileSync(pathTxtPath, platformPath, "utf8");
         }
-        if (!existsSync(versionPath) || readFileSync(versionPath, "utf8").trim() !== `v${version}`) {
+        if (
+          !existsSync(versionPath) ||
+          readFileSync(versionPath, "utf8").trim() !== `v${version}`
+        ) {
           writeFileSync(versionPath, `v${version}`, "utf8");
         }
-        console.log(`[ensure-electron] Valid Electron binary already present at ${execPath}`);
+        console.log(
+          `[ensure-electron] Valid Electron binary already present at ${execPath}`,
+        );
         return;
       }
     } catch {
@@ -102,12 +123,18 @@ export function ensureElectron(): void {
     }
   }
 
-  console.log(`[ensure-electron] Resolving Electron ${version} for ${platform}-${arch}...`);
+  console.log(
+    `[ensure-electron] Resolving Electron ${version} for ${platform}-${arch}...`,
+  );
 
   const zipPath = findCachedZip(version, platform, arch);
   if (!zipPath) {
-    console.error(`[ensure-electron] ERROR: Cached binary electron-v${version}-${platform}-${arch}.zip was not found.`);
-    console.error("Please ensure the Electron download artifact is available in your system cache.");
+    console.error(
+      `[ensure-electron] ERROR: Cached binary electron-v${version}-${platform}-${arch}.zip was not found.`,
+    );
+    console.error(
+      "Please ensure the Electron download artifact is available in your system cache.",
+    );
     process.exit(1);
   }
 
@@ -117,14 +144,29 @@ export function ensureElectron(): void {
   if (platform === "darwin" || platform === "linux") {
     // Native unzip reliably handles symlinks, permissions, and streams on modern Node.js versions
     try {
-      execFileSync("/usr/bin/unzip", ["-q", "-o", zipPath, "-d", distDir], { stdio: "inherit" });
+      execFileSync("/usr/bin/unzip", ["-q", "-o", zipPath, "-d", distDir], {
+        stdio: "inherit",
+      });
     } catch (err) {
-      console.error("[ensure-electron] /usr/bin/unzip failed, falling back to unzip in PATH...", err);
-      execFileSync("unzip", ["-q", "-o", zipPath, "-d", distDir], { stdio: "inherit" });
+      console.error(
+        "[ensure-electron] /usr/bin/unzip failed, falling back to unzip in PATH...",
+        err,
+      );
+      execFileSync("unzip", ["-q", "-o", zipPath, "-d", distDir], {
+        stdio: "inherit",
+      });
     }
   } else {
     // Windows PowerShell extraction
-    spawnSync("powershell.exe", ["-NoProfile", "-Command", `Expand-Archive -Force -Path '${zipPath}' -DestinationPath '${distDir}'`], { stdio: "inherit" });
+    spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        `Expand-Archive -Force -Path '${zipPath}' -DestinationPath '${distDir}'`,
+      ],
+      { stdio: "inherit" },
+    );
   }
 
   // Ensure path.txt points to platform path
@@ -141,20 +183,29 @@ export function ensureElectron(): void {
 
   // Verification test
   if (!existsSync(execPath)) {
-    console.error(`[ensure-electron] Extraction failed: ${execPath} does not exist.`);
+    console.error(
+      `[ensure-electron] Extraction failed: ${execPath} does not exist.`,
+    );
     process.exit(1);
   }
 
   const check = spawnSync(execPath, ["-v"], { encoding: "utf8" });
   const output = (check.stdout || "").trim();
   if (output !== `v${version}`) {
-    console.error(`[ensure-electron] Verification failed. Expected v${version}, got: ${output}`);
+    console.error(
+      `[ensure-electron] Verification failed. Expected v${version}, got: ${output}`,
+    );
     process.exit(1);
   }
 
-  console.log(`[ensure-electron] Successfully verified Electron binary: ${output} at ${execPath}`);
+  console.log(
+    `[ensure-electron] Successfully verified Electron binary: ${output} at ${execPath}`,
+  );
 }
 
-if (require.main === module || process.argv[1]?.endsWith("ensure-electron.ts")) {
+if (
+  require.main === module ||
+  process.argv[1]?.endsWith("ensure-electron.ts")
+) {
   ensureElectron();
 }

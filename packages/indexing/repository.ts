@@ -23,7 +23,8 @@ const ignored = new Set([
   "target",
   "vendor",
 ]);
-const sensitive = /^(\.env(?:\..*)?|.*\.(pem|key|p12|pfx)|id_rsa|credentials(?:\..*)?|secrets?(?:\..*)?)$/i;
+const sensitive =
+  /^(\.env(?:\..*)?|.*\.(pem|key|p12|pfx)|id_rsa|credentials(?:\..*)?|secrets?(?:\..*)?)$/i;
 const language = (file: string) =>
   ({
     ts: "typescript",
@@ -43,18 +44,40 @@ const language = (file: string) =>
     yml: "yaml",
   })[path.extname(file).slice(1)] ?? "text";
 export const fileLanguage = language;
-export function extractSymbols(content: string, file: string): SymbolIndexEntry[] {
+export function extractSymbols(
+  content: string,
+  file: string,
+): SymbolIndexEntry[] {
   const result: SymbolIndexEntry[] = [];
   const extension = path.extname(file).toLowerCase();
-  const patterns: Array<[RegExp, string]> = extension === ".py"
-    ? [[/^\s*(?:async\s+)?def\s+([A-Za-z_$][\w$]*)/gm, "function"], [/^\s*class\s+([A-Za-z_$][\w$]*)/gm, "class"]]
-    : [[/\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g, "function"], [/\bclass\s+([A-Za-z_$][\w$]*)/g, "class"], [/\binterface\s+([A-Za-z_$][\w$]*)/g, "interface"], [/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g, "variable"], [/\b(?:func|fn)\s+([A-Za-z_$][\w$]*)/g, "function"], [/\b(?:struct|enum)\s+([A-Za-z_$][\w$]*)/g, "struct"]];
+  const patterns: Array<[RegExp, string]> =
+    extension === ".py"
+      ? [
+          [/^\s*(?:async\s+)?def\s+([A-Za-z_$][\w$]*)/gm, "function"],
+          [/^\s*class\s+([A-Za-z_$][\w$]*)/gm, "class"],
+        ]
+      : [
+          [
+            /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g,
+            "function",
+          ],
+          [/\bclass\s+([A-Za-z_$][\w$]*)/g, "class"],
+          [/\binterface\s+([A-Za-z_$][\w$]*)/g, "interface"],
+          [/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g, "variable"],
+          [/\b(?:func|fn)\s+([A-Za-z_$][\w$]*)/g, "function"],
+          [/\b(?:struct|enum)\s+([A-Za-z_$][\w$]*)/g, "struct"],
+        ];
   for (const [pattern, kind] of patterns) {
     for (const match of content.matchAll(pattern)) {
       const index = match.index ?? 0;
       const line = content.slice(0, index).split(/\r?\n/).length;
       const lineStart = content.lastIndexOf("\n", index - 1) + 1;
-      result.push({ symbol: match[1], kind, line, column: index - lineStart + 1 });
+      result.push({
+        symbol: match[1],
+        kind,
+        line,
+        column: index - lineStart + 1,
+      });
     }
   }
   return result.sort((a, b) => a.line - b.line || a.column - b.column);

@@ -6,7 +6,10 @@ import os from "node:os";
 import Database from "better-sqlite3";
 import { DatabaseStore } from "../packages/database/repositories";
 import { ChangeService } from "../packages/tools/change-service";
-import { FailureInjector, SimulatedCrashError } from "../packages/tools/failure-injector";
+import {
+  FailureInjector,
+  SimulatedCrashError,
+} from "../packages/tools/failure-injector";
 
 function createInMemoryStore() {
   const db = new Database(":memory:");
@@ -55,8 +58,16 @@ test("Crash injection: BEFORE_BATCH_PREPARE leaves filesystem untouched and fail
     });
 
     const service = new ChangeService(store, workspace);
-    const changeA = await service.proposeChange(sessionId, "a.txt", "proposed a\n");
-    const changeB = await service.proposeChange(sessionId, "b.txt", "proposed b\n");
+    const changeA = await service.proposeChange(
+      sessionId,
+      "a.txt",
+      "proposed a\n",
+    );
+    const changeB = await service.proposeChange(
+      sessionId,
+      "b.txt",
+      "proposed b\n",
+    );
     service.approveChange(changeA.id);
     service.approveChange(changeB.id);
 
@@ -66,7 +77,9 @@ test("Crash injection: BEFORE_BATCH_PREPARE leaves filesystem untouched and fail
       async () => {
         await service.applyBatch(sessionId, [changeA.id, changeB.id]);
       },
-      (err: Error) => err instanceof SimulatedCrashError && err.point === "BEFORE_BATCH_PREPARE",
+      (err: Error) =>
+        err instanceof SimulatedCrashError &&
+        err.point === "BEFORE_BATCH_PREPARE",
     );
 
     // Files must be strictly untouched
@@ -74,7 +87,9 @@ test("Crash injection: BEFORE_BATCH_PREPARE leaves filesystem untouched and fail
     assert.equal(await fs.readFile(fileB, "utf8"), "original b\n");
   } finally {
     FailureInjector.reset();
-    await fs.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
+    await fs
+      .rm(workspace, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 });
 
@@ -100,19 +115,24 @@ test("Crash injection: BETWEEN_FILE_REPLACEMENTS rolls back cleanly and recovers
     });
 
     const service = new ChangeService(store, workspace);
-    const changeA = await service.proposeChange(sessionId, "a.txt", "proposed a\n");
-    const changeB = await service.proposeChange(sessionId, "b.txt", "proposed b\n");
+    const changeA = await service.proposeChange(
+      sessionId,
+      "a.txt",
+      "proposed a\n",
+    );
+    const changeB = await service.proposeChange(
+      sessionId,
+      "b.txt",
+      "proposed b\n",
+    );
     service.approveChange(changeA.id);
     service.approveChange(changeB.id);
 
     FailureInjector.setCrashPoint("BETWEEN_FILE_REPLACEMENTS");
 
-    await assert.rejects(
-      async () => {
-        await service.applyBatch(sessionId, [changeA.id, changeB.id]);
-      },
-      /Change batch rolled back after failure/,
-    );
+    await assert.rejects(async () => {
+      await service.applyBatch(sessionId, [changeA.id, changeB.id]);
+    }, /Change batch rolled back after failure/);
 
     // Filesystem must have rolled back to original content
     assert.equal(await fs.readFile(fileA, "utf8"), "original a\n");
@@ -124,7 +144,9 @@ test("Crash injection: BETWEEN_FILE_REPLACEMENTS rolls back cleanly and recovers
     assert.equal(await fs.readFile(fileB, "utf8"), "original b\n");
   } finally {
     FailureInjector.reset();
-    await fs.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
+    await fs
+      .rm(workspace, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 });
 
@@ -150,19 +172,24 @@ test("Crash injection: AFTER_FILE_REPLACE reconciles to APPLIED on recovery with
     });
 
     const service = new ChangeService(store, workspace);
-    const changeA = await service.proposeChange(sessionId, "a.txt", "proposed a\n");
-    const changeB = await service.proposeChange(sessionId, "b.txt", "proposed b\n");
+    const changeA = await service.proposeChange(
+      sessionId,
+      "a.txt",
+      "proposed a\n",
+    );
+    const changeB = await service.proposeChange(
+      sessionId,
+      "b.txt",
+      "proposed b\n",
+    );
     service.approveChange(changeA.id);
     service.approveChange(changeB.id);
 
     FailureInjector.setCrashPoint("AFTER_FILE_REPLACE");
 
-    await assert.rejects(
-      async () => {
-        await service.applyBatch(sessionId, [changeA.id, changeB.id]);
-      },
-      /SimulatedCrashError/,
-    );
+    await assert.rejects(async () => {
+      await service.applyBatch(sessionId, [changeA.id, changeB.id]);
+    }, /SimulatedCrashError/);
 
     // Both files were replaced before the crash
     assert.equal(await fs.readFile(fileA, "utf8"), "proposed a\n");
@@ -177,6 +204,8 @@ test("Crash injection: AFTER_FILE_REPLACE reconciles to APPLIED on recovery with
     assert.equal(store.getChange(changeB.id)?.status, "APPLIED");
   } finally {
     FailureInjector.reset();
-    await fs.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
+    await fs
+      .rm(workspace, { recursive: true, force: true })
+      .catch(() => undefined);
   }
 });
