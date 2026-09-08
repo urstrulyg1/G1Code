@@ -16,374 +16,19 @@ export type ModelMetadata = AIModel & {
   contextWindowFormatted: string;
   capabilities: ModelCapability;
   pricingType: "free" | "promotional" | "credits" | "paid";
+  pricingFormatted?: string;
+  pricingDetails?: {
+    input?: number;
+    output?: number;
+  };
   recommendedRole?: "coding" | "reasoning" | "fast" | "balanced" | "review" | "agent";
+  apiRank?: number;
 };
 
-// Known promotional / free catalog models available in Experiential Labs
-export const PROMOTIONAL_MODELS: ModelMetadata[] = [
-  {
-    id: "gpt-6-astra",
-    name: "GPT-6 Astra",
-    slug: "gpt-6-astra",
-    displayName: "GPT-6 Astra",
-    contextWindow: 1_050_000,
-    contextWindowFormatted: "1.05M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "coding",
-    description:
-      "Flagship frontier reasoning & computer-use coding model with 1.05M context window.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: true,
-      reasoning: true,
-      maxOutputTokens: 131_072,
-      contextWindow: 1_050_000,
-    },
-  },
-  {
-    id: "gpt-5.6-luna",
-    name: "GPT-5.6 Luna",
-    slug: "gpt-5.6-luna",
-    displayName: "GPT-5.6 Luna",
-    contextWindow: 1_050_000,
-    contextWindowFormatted: "1.05M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "fast",
-    description:
-      "Ultra-fast efficiency model with 1.05M context, optimized for real-time agent tasks.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_050_000,
-    },
-  },
-  {
-    id: "qwen-3.8-27b",
-    name: "Qwen3.8 27B",
-    slug: "qwen3.8-27b",
-    displayName: "Qwen3.8 27B",
-    contextWindow: 1_000_000,
-    contextWindowFormatted: "1M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "fast",
-    description:
-      "Ultra-fast instruction following and agent execution with 1M context.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_000_000,
-    },
-  },
-  {
-    id: "deepseek-v4-flash",
-    name: "DeepSeek V4 Flash",
-    slug: "deepseek-v4-flash",
-    displayName: "DeepSeek V4 Flash",
-    contextWindow: 1_050_000,
-    contextWindowFormatted: "1.05M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "balanced",
-    description:
-      "Efficient reasoning model with 1.05M context and strong code generation.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_050_000,
-    },
-  },
-  {
-    id: "deepseek-r1-distill-qwen-32b",
-    name: "DeepSeek R1 Distill Qwen 32B",
-    slug: "deepseek-r1-distill-qwen-32b",
-    displayName: "DeepSeek R1 Distill Qwen 32B",
-    contextWindow: 128_000,
-    contextWindowFormatted: "128K",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "reasoning",
-    description:
-      "Distilled mathematical and logical reasoning model with verified code generation.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: true,
-      maxOutputTokens: 32_768,
-      contextWindow: 128_000,
-    },
-  },
-  {
-    id: "meta-llama-3.3-70b-instruct",
-    name: "Llama 3.3 70B Instruct",
-    slug: "meta-llama-3.3-70b-instruct",
-    displayName: "Llama 3.3 70B Instruct",
-    contextWindow: 128_000,
-    contextWindowFormatted: "128K",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "balanced",
-    description:
-      "Versatile open-weights instruction model with comprehensive tool and agent capabilities.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: false,
-      maxOutputTokens: 16_384,
-      contextWindow: 128_000,
-    },
-  },
-  {
-    id: "qwen-2.5-coder-32b",
-    name: "Qwen 2.5 Coder 32B",
-    slug: "qwen-2.5-coder-32b",
-    displayName: "Qwen 2.5 Coder 32B",
-    contextWindow: 128_000,
-    contextWindowFormatted: "128K",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "coding",
-    description:
-      "Specialized coding model fine-tuned for repository refactoring, bug fixing, and test writing.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: false,
-      maxOutputTokens: 16_384,
-      contextWindow: 128_000,
-    },
-  },
-  {
-    id: "mistral-small-3-24b",
-    name: "Mistral Small 3 24B",
-    slug: "mistral-small-3-24b",
-    displayName: "Mistral Small 3 24B",
-    contextWindow: 32_768,
-    contextWindowFormatted: "32K",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "fast",
-    description:
-      "Compact low-latency model for rapid file edits, lint checks, and inline completion.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: false,
-      maxOutputTokens: 8_192,
-      contextWindow: 32_768,
-    },
-  },
-];
-
-// Additional standard models on Experiential Labs (paid / credits)
-export const STANDARD_CATALOG_MODELS: ModelMetadata[] = [
-  {
-    id: "claude-fable-5.1",
-    name: "Claude Fable 5.1",
-    slug: "claude-fable-5.1",
-    displayName: "Claude Fable 5.1",
-    contextWindow: 1_000_000,
-    contextWindowFormatted: "1M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    isPromotional: false,
-    pricingType: "credits",
-    recommendedRole: "coding",
-    description: "Next-generation Claude frontier model with 1M context window.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: true,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_000_000,
-    },
-  },
-  {
-    id: "claude-sonnet-5",
-    name: "Claude Sonnet 5",
-    slug: "claude-sonnet-5",
-    displayName: "Claude Sonnet 5",
-    contextWindow: 1_000_000,
-    contextWindowFormatted: "1M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    isPromotional: false,
-    pricingType: "credits",
-    recommendedRole: "balanced",
-    description: "High-speed reasoning and code synthesis model with 1M context.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: true,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_000_000,
-    },
-  },
-  {
-    id: "claude-opus-5",
-    name: "Claude Opus 5",
-    slug: "claude-opus-5",
-    displayName: "Claude Opus 5",
-    contextWindow: 1_000_000,
-    contextWindowFormatted: "1M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    isPromotional: false,
-    pricingType: "credits",
-    recommendedRole: "reasoning",
-    description: "Deep architecture reasoning and comprehensive verification model.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: true,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_000_000,
-    },
-  },
-  {
-    id: "gpt-5.6-sol",
-    name: "GPT-5.6 Sol",
-    slug: "gpt-5.6-sol",
-    displayName: "GPT-5.6 Sol",
-    contextWindow: 1_050_000,
-    contextWindowFormatted: "1.05M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    isPromotional: false,
-    pricingType: "credits",
-    recommendedRole: "coding",
-    description: "High-performance frontier model for production workflows.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: true,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_050_000,
-    },
-  },
-  {
-    id: "gemini-3.7-flash",
-    name: "Gemini 3.7 Flash",
-    slug: "gemini-3.7-flash",
-    displayName: "Gemini 3.7 Flash",
-    contextWindow: 1_050_000,
-    contextWindowFormatted: "1.05M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    isPromotional: false,
-    pricingType: "credits",
-    recommendedRole: "fast",
-    description: "Ultra-high-throughput multimodal reasoning model with 935 tok/s.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: true,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_050_000,
-    },
-  },
-  {
-    id: "kimi-k3",
-    name: "Kimi K3",
-    slug: "kimi-k3",
-    displayName: "Kimi K3",
-    contextWindow: 1_050_000,
-    contextWindowFormatted: "1.05M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: false,
-    pricingType: "credits",
-    recommendedRole: "reasoning",
-    description: "Deep-thinking long-context model with 100% benchmark score.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_050_000,
-    },
-  },
-  {
-    id: "glm-5.3-flash",
-    name: "GLM-5.3 Flash",
-    slug: "glm-5.3-flash",
-    displayName: "GLM-5.3 Flash",
-    contextWindow: 1_310_000,
-    contextWindowFormatted: "1.31M",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: false,
-    pricingType: "credits",
-    recommendedRole: "fast",
-    description: "Massive 1.31M context model operating at 3,425 tokens per second.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 1_310_000,
-    },
-  },
-];
-
-export const ALL_DEFAULT_MODELS: ModelMetadata[] = [
-  ...PROMOTIONAL_MODELS,
-  ...STANDARD_CATALOG_MODELS,
-];
+// Dynamic catalog models populated directly from ExperientialLabs.ai — no hardcoded models
+export const PROMOTIONAL_MODELS: ModelMetadata[] = [];
+export const STANDARD_CATALOG_MODELS: ModelMetadata[] = [];
+export const ALL_DEFAULT_MODELS: ModelMetadata[] = [];
 
 export function formatContextWindow(tokens?: number): string {
   if (!tokens || tokens <= 0) return "128K";
@@ -405,6 +50,7 @@ export function parseModelMetadata(
     context_window?: number;
     max_tokens?: number;
     max_output_tokens?: number;
+    apiRank?: number;
     capabilities?: {
       tools?: boolean;
       function_calling?: boolean;
@@ -415,74 +61,83 @@ export function parseModelMetadata(
     pricing?: { free?: boolean; promotional?: boolean; input?: number; output?: number };
     is_free?: boolean;
     free?: boolean;
+    requires_payment?: boolean;
     provider?: "experiential-labs";
   },
   defaultProvider: "experiential-labs" = "experiential-labs",
 ): ModelMetadata {
   const id = raw.id;
-  const cleanId = id.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-  const known = ALL_DEFAULT_MODELS.find((m) => {
-    const mId = m.id.toLowerCase();
-    const mSlug = m.slug.toLowerCase();
-    const cleanMId = mId.replace(/[^a-z0-9]/g, "");
-    return (
-      mId === id.toLowerCase() ||
-      mSlug === id.toLowerCase() ||
-      cleanMId === cleanId ||
-      (cleanId.includes("qwen3827b") && cleanMId.includes("qwen3827b"))
-    );
-  });
 
   const contextWindow =
-    raw.context_window ??
-    known?.contextWindow ??
-    (id.includes("1m") ? 1_000_000 : 128_000);
+    raw.context_window ?? (id.includes("1m") ? 1_000_000 : 128_000);
   const supportsTools =
     raw.capabilities?.tools ??
     raw.capabilities?.function_calling ??
-    known?.supportsTools ??
     (!id.includes("embedding") && !id.includes("moderation"));
   const supportsStreaming =
-    raw.capabilities?.streaming ?? known?.supportsStreaming ?? true;
+    raw.capabilities?.streaming ?? true;
   const supportsVision =
     raw.capabilities?.vision ??
-    known?.supportsVision ??
-    (id.includes("vision") || id.includes("gpt-4o") || id.includes("astra") || id.includes("claude"));
+    (id.includes("vision") || id.includes("image") || id.includes("multimodal"));
   const reasoning =
     raw.capabilities?.reasoning ??
-    known?.capabilities.reasoning ??
     (id.includes("reasoning") ||
+      id.includes("think") ||
       id.includes("r1") ||
-      id.includes("o1") ||
-      id.includes("astra") ||
-      id.includes("luna") ||
-      id.includes("agent") ||
-      id.includes("fable"));
+      id.includes("agent"));
 
-  const displayName = raw.display_name ?? raw.name ?? known?.displayName ?? id;
-  const isPromo =
-    raw.pricing?.free === true ||
-    raw.pricing?.promotional === true ||
-    raw.free === true ||
-    raw.is_free === true ||
-    (raw.pricing && raw.pricing.input === 0 && raw.pricing.output === 0) ||
-    Boolean(known?.isPromotional);
+  const displayName = raw.display_name ?? raw.name ?? id;
+
+  // Strict: only treat as Free when dynamically fetched pricing confirms Input = $0/M and Output = $0/M
+  const hasDynamicPricing =
+    raw.pricing !== undefined &&
+    typeof raw.pricing.input === "number" &&
+    typeof raw.pricing.output === "number";
+
+  const isFreeZeroCost =
+    hasDynamicPricing && raw.pricing!.input === 0 && raw.pricing!.output === 0;
+
+  const pricingFormatted = isFreeZeroCost
+    ? "Free ($0 input / $0 output)"
+    : hasDynamicPricing
+      ? `$${raw.pricing!.input}/M input · $${raw.pricing!.output}/M output`
+      : "Credits";
+
+  // Inferred recommended role for dynamic models
+  let recommendedRole: ModelMetadata["recommendedRole"];
+  const lower = id.toLowerCase();
+  if (lower.includes("code") || lower.includes("coder")) {
+    recommendedRole = "coding";
+  } else if (reasoning || lower.includes("r1") || lower.includes("ultra") || lower.includes("think")) {
+    recommendedRole = "reasoning";
+  } else if (lower.includes("flash") || lower.includes("mini") || lower.includes("nano") || lower.includes("lite") || lower.includes("small")) {
+    recommendedRole = "fast";
+  } else {
+    recommendedRole = "balanced";
+  }
 
   return {
     id,
     name: displayName,
-    slug: known?.slug || id,
+    slug: id,
     displayName,
-    provider: raw.provider || known?.provider || defaultProvider,
+    provider: raw.provider || defaultProvider,
     contextWindow,
     contextWindowFormatted: formatContextWindow(contextWindow),
     supportsTools,
     supportsStreaming,
     supportsVision,
-    isPromotional: isPromo,
-    pricingType: isPromo ? "free" : (known?.pricingType || "credits"),
-    description: known?.description,
+    isPromotional: isFreeZeroCost,
+    pricingType: isFreeZeroCost ? "free" : "credits",
+    pricingFormatted,
+    pricingDetails: hasDynamicPricing
+      ? { input: raw.pricing!.input, output: raw.pricing!.output }
+      : undefined,
+    description: isFreeZeroCost
+      ? `Free ($0 input / $0 output) model on Experiential Labs gateway.`
+      : undefined,
+    recommendedRole,
+    apiRank: raw.apiRank,
     capabilities: {
       tools: supportsTools,
       streaming: supportsStreaming,
@@ -491,7 +146,6 @@ export function parseModelMetadata(
       maxOutputTokens:
         raw.max_output_tokens ??
         raw.max_tokens ??
-        known?.capabilities.maxOutputTokens ??
         4096,
       contextWindow,
     },
@@ -504,7 +158,7 @@ export class ModelCatalog {
   private readonly TTL_MS = 5 * 60 * 1000; // 5 minutes cache
 
   getModels(provider?: string): ModelMetadata[] {
-    const list = this.cache.length > 0 ? this.cache : ALL_DEFAULT_MODELS;
+    const list = this.cache;
     if (!provider || provider === "all") return list;
     return list.filter(
       (m) =>
@@ -514,11 +168,28 @@ export class ModelCatalog {
   }
 
   getFreeModels(provider?: string): ModelMetadata[] {
-    return this.getModels(provider).filter(
-      (m) =>
-        m.isPromotional ||
-        m.pricingType === "free" ||
-        m.pricingType === "promotional",
+    return this.getModels(provider)
+      .filter(
+        (m) =>
+          m.pricingType === "free" &&
+          m.pricingDetails?.input === 0 &&
+          m.pricingDetails?.output === 0,
+      )
+      .sort((a, b) => (a.apiRank ?? Infinity) - (b.apiRank ?? Infinity));
+  }
+
+  getNextBestFreeModel(
+    currentModelId?: string,
+    restrictedModelIds?: Set<string>,
+  ): ModelMetadata | undefined {
+    const free = this.getFreeModels();
+    return (
+      free.find(
+        (m) =>
+          m.id !== currentModelId &&
+          (!restrictedModelIds || !restrictedModelIds.has(m.id)),
+      ) ||
+      free.find((m) => !restrictedModelIds || !restrictedModelIds.has(m.id))
     );
   }
 
@@ -535,18 +206,64 @@ export class ModelCatalog {
     this.lastFetched = Date.now();
   }
 
+  /**
+   * Updates catalog with live fetched models.
+   * Auto-publishes newly available models and prunes expired/unavailable ones.
+   * When isFullCatalog=true, models absent from the live response are removed.
+   */
+  updateCatalog(
+    liveModels: ModelMetadata[],
+    isFullCatalog = false,
+  ): { added: string[]; removed: string[]; total: number } {
+    // Start only from what's currently cached — no hardcoded fallback lists
+    const existingMap = new Map<string, ModelMetadata>(
+      this.cache.map((m) => [m.id.toLowerCase(), m]),
+    );
+    const added: string[] = [];
+    const liveIds = new Set<string>();
+
+    for (const model of liveModels) {
+      const key = model.id.toLowerCase();
+      liveIds.add(key);
+      if (!existingMap.has(key)) {
+        added.push(model.id);
+      }
+      // Always overwrite with the freshest data from the live API
+      existingMap.set(key, model);
+    }
+
+    const removed: string[] = [];
+    if (isFullCatalog && liveModels.length > 0) {
+      // Prune models that are no longer reported by the live catalog
+      for (const [key, existing] of existingMap.entries()) {
+        if (!liveIds.has(key)) {
+          existingMap.delete(key);
+          removed.push(existing.id);
+        }
+      }
+    }
+
+    const updated = Array.from(existingMap.values());
+    this.setModels(updated);
+
+    return {
+      added,
+      removed,
+      total: updated.length,
+    };
+  }
+
+  removeModel(modelId: string): boolean {
+    const key = modelId.toLowerCase();
+    const beforeLen = this.cache.length;
+    this.cache = this.cache.filter((m) => m.id.toLowerCase() !== key);
+    return this.cache.length < beforeLen;
+  }
+
   findModel(id: string, provider?: string): ModelMetadata | undefined {
     const cleanTarget = id.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const list = provider ? this.getModels(provider) : (this.cache.length > 0 ? this.cache : ALL_DEFAULT_MODELS);
+    const list = provider ? this.getModels(provider) : this.cache;
     return list.find((m) => {
-      const mId = m.id.toLowerCase();
-      const mSlug = m.slug.toLowerCase();
-      return (
-        mId === id.toLowerCase() ||
-        mSlug === id.toLowerCase() ||
-        mId.replace(/[^a-z0-9]/g, "") === cleanTarget
-      );
-    }) ?? ALL_DEFAULT_MODELS.find((m) => {
       const mId = m.id.toLowerCase();
       const mSlug = m.slug.toLowerCase();
       return (

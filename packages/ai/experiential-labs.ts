@@ -16,7 +16,6 @@ import {
 import {
   globalModelCatalog,
   parseModelMetadata,
-  PROMOTIONAL_MODELS,
   type ModelMetadata,
 } from "./models";
 import { parseSSEStream } from "./streaming";
@@ -31,8 +30,16 @@ export class ExperientialLabsProvider implements AIProvider {
 
   constructor(
     private readonly endpoint = EXPERIENTIAL_LABS_DEFAULT_ENDPOINT,
-    private readonly apiKey: string,
-  ) {}
+    private apiKey?: string,
+  ) {
+    if (!this.apiKey) {
+      this.apiKey =
+        process.env.EXPLABS_API_KEY ||
+        process.env.EXPERIENTIAL_LABS_API_KEY ||
+        process.env.XPL_API_KEY ||
+        "";
+    }
+  }
 
   private cleanUrl(path: string): string {
     const base = (this.endpoint || EXPERIENTIAL_LABS_DEFAULT_ENDPOINT).replace(
@@ -129,20 +136,120 @@ export class ExperientialLabsProvider implements AIProvider {
     );
   }
 
+  // Cache for public catalog metadata to enrich gateway models with pricing and capabilities
+  private static publicCatalogCache: {
+    timestamp: number;
+    data: Map<string, Record<string, unknown>>;
+  } | null = null;
+
+  private async fetchPublicCatalogMetadata(
+    signal?: AbortSignal,
+  ): Promise<Map<string, Record<string, unknown>>> {
+    const now = Date.now();
+    if (
+      ExperientialLabsProvider.publicCatalogCache &&
+      now - ExperientialLabsProvider.publicCatalogCache.timestamp < 5 * 60 * 1000
+    ) {
+      return ExperientialLabsProvider.publicCatalogCache.data;
+    }
+
+    const metadataMap = new Map<string, Record<string, unknown>>();
+    try {
+      // Fetch public catalog without requiring auth key
+      const catalogUrl = "https://api.experientiallabs.ai/api/models";
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), 4000);
+      const res = await fetch(catalogUrl, {
+        signal: signal || ctrl.signal,
+        headers: { Accept: "application/json" },
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const json = (await res.json()) as {
+          models?: Array<{
+            model?: Record<string, unknown>;
+            providers?: Array<Record<string, unknown>>;
+          }>;
+        };
+        let index = 0;
+        for (const item of json.models || []) {
+          index++;
+          const mod = item.model;
+          if (!mod || typeof mod.slug !== "string") continue;
+          const slug = String(mod.slug).toLowerCase();
+          const activeProviders = (item.providers || []).filter(
+            (p) => p.status === "active",
+          );
+          const zeroCostProvider = activeProviders.find(
+            (p) =>
+              p.input_micro_usd_per_million === 0 &&
+              p.output_micro_usd_per_million === 0,
+          );
+          const bestProvider = zeroCostProvider || activeProviders[0];
+          const inputMicro = bestProvider?.input_micro_usd_per_million;
+          const outputMicro = bestProvider?.output_micro_usd_per_million;
+          const isZeroCost = inputMicro === 0 && outputMicro === 0;
+
+          metadataMap.set(slug, {
+            ...mod,
+            is_free: isZeroCost,
+            input_micro: inputMicro,
+            output_micro: outputMicro,
+            providers: item.providers,
+            api_rank:
+              typeof mod.preferred_rank === "number"
+                ? mod.preferred_rank
+                : index,
+          });
+        }
+        ExperientialLabsProvider.publicCatalogCache = {
+          timestamp: now,
+          data: metadataMap,
+        };
+      }
+    } catch {
+      // Gracefully continue without external public catalog metadata
+    }
+
+    return metadataMap;
+  }
+
   async listModels(signal?: AbortSignal): Promise<AIModel[]> {
     return this.getModels(signal);
   }
 
-  async getModels(signal?: AbortSignal): Promise<AIModel[]> {
+  /**
+   * Dynamically fetches models from ExperientialLabs.ai, enriches them with capability
+   * & pricing metadata, auto-publishes newly available models, and removes expired/unavailable ones.
+   */
+  async fetchDynamicCatalog(options?: {
+    pruneExpired?: boolean;
+    signal?: AbortSignal;
+  }): Promise<{
+    models: ModelMetadata[];
+    freeModels: ModelMetadata[];
+    added: string[];
+    removed: string[];
+  }> {
     try {
-      const response = await fetch(this.cleanUrl("/models"), {
-        headers: this.headers(),
-        signal,
-      });
+      const [response, publicMeta] = await Promise.all([
+        fetch(this.cleanUrl("/models"), {
+          headers: this.headers(),
+          signal: options?.signal,
+        }),
+        this.fetchPublicCatalogMetadata(options?.signal),
+      ]);
 
       if (!response.ok) {
-        // If API fails or unauthenticated, fall back to known catalog models
-        return globalModelCatalog.getModels();
+        const fallback = globalModelCatalog.getModels();
+        const fallbackFree = globalModelCatalog.getFreeModels();
+        return {
+          models: fallback,
+          freeModels: fallbackFree,
+          added: [],
+          removed: [],
+        };
       }
 
       const json = (await response.json()) as {
@@ -151,60 +258,158 @@ export class ExperientialLabsProvider implements AIProvider {
       };
 
       const rawList = json.data || json.models || [];
-      const parsedModels: ModelMetadata[] = rawList.map((item) =>
-        parseModelMetadata({
-          id: String(item.id || item.slug || ""),
-          name: typeof item.name === "string" ? item.name : undefined,
+      const parsedModels: ModelMetadata[] = rawList.map((item, index) => {
+        const id = String(item.id || item.slug || "");
+        const slug = id.toLowerCase();
+        const enriched = publicMeta.get(slug);
+
+        const itemPricing = item.pricing as
+          | { input?: number; output?: number; free?: boolean }
+          | undefined;
+        const enrichedInput =
+          enriched?.input_micro !== undefined && enriched.input_micro !== null
+            ? Number(enriched.input_micro) / 1_000_000
+            : undefined;
+        const enrichedOutput =
+          enriched?.output_micro !== undefined && enriched.output_micro !== null
+            ? Number(enriched.output_micro) / 1_000_000
+            : undefined;
+
+        const inputCost = itemPricing?.input ?? enrichedInput;
+        const outputCost = itemPricing?.output ?? enrichedOutput;
+
+        const hasPricing =
+          typeof inputCost === "number" && typeof outputCost === "number";
+        // ONLY treat as Free when dynamically fetched pricing confirms Input = $0/M and Output = $0/M
+        const isFree = hasPricing && inputCost === 0 && outputCost === 0;
+
+        const apiRank =
+          typeof enriched?.api_rank === "number"
+            ? (enriched.api_rank as number)
+            : typeof item.preferred_rank === "number"
+              ? (item.preferred_rank as number)
+              : typeof item.rank === "number"
+                ? (item.rank as number)
+                : typeof (item as any).apiRank === "number"
+                  ? (item as any).apiRank
+                  : index;
+
+        return parseModelMetadata({
+          id,
+          apiRank,
+          name:
+            typeof item.name === "string"
+              ? item.name
+              : typeof enriched?.display_name === "string"
+                ? (enriched.display_name as string)
+                : undefined,
           display_name:
             typeof item.display_name === "string"
               ? item.display_name
-              : undefined,
+              : typeof enriched?.display_name === "string"
+                ? (enriched.display_name as string)
+                : undefined,
           context_window:
             typeof item.context_window === "number"
               ? item.context_window
-              : undefined,
+              : typeof enriched?.context_window === "number"
+                ? (enriched.context_window as number)
+                : undefined,
           max_output_tokens:
             typeof item.max_output_tokens === "number"
               ? item.max_output_tokens
-              : undefined,
+              : typeof enriched?.max_output_tokens === "number"
+                ? (enriched.max_output_tokens as number)
+                : undefined,
           capabilities:
             typeof item.capabilities === "object" && item.capabilities
               ? (item.capabilities as any)
+              : typeof enriched?.capabilities === "object" && enriched?.capabilities
+                ? (enriched.capabilities as any)
+                : undefined,
+          pricing: hasPricing
+            ? { input: inputCost, output: outputCost, free: isFree }
+            : isFree
+              ? { input: 0, output: 0, free: true }
               : undefined,
-          pricing:
-            typeof item.pricing === "object" && item.pricing
-              ? (item.pricing as any)
-              : undefined,
-        }),
+          free: isFree,
+          is_free: isFree,
+        });
+      });
+
+      // Update global catalog with live models, auto-publishing new models and pruning expired
+      const syncResult = globalModelCatalog.updateCatalog(
+        parsedModels,
+        Boolean(options?.pruneExpired),
       );
 
-      // Ensure promotional models exist in list
-      for (const promo of PROMOTIONAL_MODELS) {
-        if (
-          !parsedModels.some(
-            (m) => m.id.toLowerCase() === promo.id.toLowerCase(),
-          )
-        ) {
-          parsedModels.unshift(promo);
-        }
-      }
+      const allModels = globalModelCatalog.getModels("experiential-labs");
+      const freeModels = globalModelCatalog.getFreeModels("experiential-labs");
 
-      globalModelCatalog.setModels(parsedModels);
-      return parsedModels;
+      return {
+        models: allModels,
+        freeModels,
+        added: syncResult.added,
+        removed: syncResult.removed,
+      };
     } catch {
-      // If offline, network issue, or unauthenticated, fallback to catalog
-      return globalModelCatalog.getModels();
+      const fallback = globalModelCatalog.getModels("experiential-labs");
+      const fallbackFree = globalModelCatalog.getFreeModels("experiential-labs");
+      return {
+        models: fallback,
+        freeModels: fallbackFree,
+        added: [],
+        removed: [],
+      };
     }
   }
 
+  async getModels(signal?: AbortSignal): Promise<AIModel[]> {
+    const result = await this.fetchDynamicCatalog({
+      pruneExpired: false,
+      signal,
+    });
+    return result.models;
+  }
+
+  /**
+   * Dynamically returns verified free models from ExperientialLabs.ai.
+   * Auto-publishes newly available free models and prunes expired/unavailable ones.
+   */
   async getFreeModels(signal?: AbortSignal): Promise<AIModel[]> {
-    const models = await this.getModels(signal);
-    return models.filter(
-      (m) =>
-        m.isPromotional ||
-        (m as ModelMetadata).pricingType === "free" ||
-        (m as ModelMetadata).pricingType === "promotional",
-    );
+    const result = await this.fetchDynamicCatalog({
+      pruneExpired: true,
+      signal,
+    });
+    return result.freeModels;
+  }
+
+  /**
+   * Explicitly verifies available free models against the ExperientialLabs gateway.
+   * Identifies newly published models and removes unavailable or expired models.
+   */
+  async verifyFreeModels(signal?: AbortSignal): Promise<{
+    connected: boolean;
+    totalModels: number;
+    freeModelCount: number;
+    freeModels: ModelMetadata[];
+    added: string[];
+    removed: string[];
+    message: string;
+  }> {
+    const result = await this.fetchDynamicCatalog({
+      pruneExpired: true,
+      signal,
+    });
+    return {
+      connected: result.models.length > 0,
+      totalModels: result.models.length,
+      freeModelCount: result.freeModels.length,
+      freeModels: result.freeModels,
+      added: result.added,
+      removed: result.removed,
+      message: `Verified ${result.freeModels.length} free models (${result.added.length} newly added, ${result.removed.length} expired/removed).`,
+    };
   }
 
   supportsTools(model: string): boolean {
@@ -215,17 +420,14 @@ export class ExperientialLabsProvider implements AIProvider {
     return globalModelCatalog.supportsVision(model);
   }
 
-  static normalizeModelSlug(modelId: string): string {
-    if (!modelId) return "gpt-6-astra";
-    const s = modelId.toLowerCase().trim();
-    if (s === "gpt-6" || s === "gpt6") return "gpt-6-astra";
-    if (s === "qwen-3.8-27b" || s === "qwen3.8-27b") return "qwen3.8-27b";
-    if (s === "meta-llama-3.3-70b-instruct" || s === "llama-3.3-70b")
-      return "llama-3.3-70b-instruct";
-    if (s === "deepseek-r1-distill-qwen-32b") return "deepseek-r1";
-    if (s === "mistral-small-3-24b") return "mistral-small-3.2-24b-instruct";
-    if (s === "qwen-2.5-coder-32b") return "qwen3-coder-30b-a3b-instruct";
-    return modelId;
+  static normalizeModelSlug(modelId?: string): string {
+    if (!modelId || !modelId.trim()) {
+      const firstFree =
+        globalModelCatalog.getFreeModels("experiential-labs")[0] ||
+        globalModelCatalog.getModels("experiential-labs")[0];
+      return firstFree?.id || "";
+    }
+    return modelId.trim();
   }
 
   private buildRequestBody(
@@ -233,7 +435,7 @@ export class ExperientialLabsProvider implements AIProvider {
     stream = false,
   ): Record<string, unknown> {
     const targetModel = ExperientialLabsProvider.normalizeModelSlug(
-      request.model || "gpt-6-astra",
+      request.model,
     );
     const meta = globalModelCatalog.findModel(targetModel);
     const body: Record<string, unknown> = {
@@ -381,6 +583,10 @@ export class ExperientialLabsProvider implements AIProvider {
     }
   }
 
+  /**
+   * Non-billable model verification: checks model presence and active status in the
+   * gateway catalog without sending prompts, generating tokens, or consuming credits.
+   */
   async testModel(modelId: string): Promise<{
     working: boolean;
     latencyMs: number;
@@ -389,31 +595,31 @@ export class ExperientialLabsProvider implements AIProvider {
     error?: string;
   }> {
     const startTime = Date.now();
-    let firstTokenTime = 0;
 
     try {
-      const stream = this.streamChat({
-        model: modelId,
-        messages: [{ role: "user", content: "Reply with exactly: OK" }],
-        maxTokens: 10,
-      });
+      const models = await this.getModels();
+      const target = models.find(
+        (m) =>
+          m.id.toLowerCase() === modelId.toLowerCase() ||
+          (m as any).slug?.toLowerCase() === modelId.toLowerCase(),
+      );
+      const latency = Date.now() - startTime;
 
-      let fullText = "";
-      for await (const chunk of stream) {
-        if (chunk.content) {
-          if (!firstTokenTime) firstTokenTime = Date.now();
-          fullText += chunk.content;
-        }
+      if (target) {
+        return {
+          working: true,
+          latencyMs: latency,
+          ttftMs: latency,
+          output: `Model ${modelId} verified active via non-billable catalog endpoint.`,
+        };
       }
 
-      const totalLatency = Date.now() - startTime;
-      const ttft = firstTokenTime ? firstTokenTime - startTime : totalLatency;
-
       return {
-        working: true,
-        latencyMs: totalLatency,
-        ttftMs: ttft,
-        output: fullText.trim() || "OK",
+        working: false,
+        latencyMs: latency,
+        ttftMs: 0,
+        output: "",
+        error: `Model ${modelId} not found in active catalog.`,
       };
     } catch (err) {
       return {

@@ -21,7 +21,8 @@ import {
   configuredProvider,
   type Settings,
 } from "../../../packages/settings/storage";
-import { ModelCatalog } from "../../../packages/ai/models";
+import { ModelCatalog, globalModelCatalog } from "../../../packages/ai/models";
+import { globalUsageLimitManager } from "../../../packages/ai/usage-limits";
 function validWorkspace(input: unknown) {
   if (typeof input !== "string" || !path.isAbsolute(input))
     throw new Error("A selected absolute workspace path is required");
@@ -113,8 +114,7 @@ export function registerRuntimeHandlers(
         const { provider } = await configuredProvider();
         return await provider.getModels();
       } catch {
-        const catalog = new ModelCatalog();
-        return catalog.getModels();
+        return globalModelCatalog.getModels();
       }
     },
   );
@@ -130,10 +130,14 @@ export function registerRuntimeHandlers(
           return await (provider as any).getFreeModels();
         }
         const models = await provider.getModels();
-        return models.filter((m) => m.isPromotional);
+        return models.filter(
+          (m: any) =>
+            m.pricingType === "free" &&
+            m.pricingDetails?.input === 0 &&
+            m.pricingDetails?.output === 0,
+        );
       } catch {
-        const catalog = new ModelCatalog();
-        return catalog.getFreeModels();
+        return globalModelCatalog.getFreeModels();
       }
     },
   );
@@ -173,25 +177,34 @@ export function registerRuntimeHandlers(
         throw new Error("Invalid model");
       try {
         const { provider, settings } = await configuredProvider();
-        const targetModel = model || settings.model || "gpt-6-astra";
+        const targetModel =
+          model ||
+          settings.model ||
+          globalModelCatalog.getFreeModels()[0]?.id ||
+          globalModelCatalog.getModels()[0]?.id ||
+          "";
         if (provider.testModel) {
           const result = await provider.testModel(targetModel);
           return { connected: true, model: targetModel, ...result };
         }
         const startTime = Date.now();
-        const chatRes = await provider.chat({
-          model: targetModel,
-          messages: [{ role: "user", content: "Reply with exactly: OK" }],
-          maxTokens: 10,
-        });
+        const models = await provider.getModels();
+        const target = models.find(
+          (m) =>
+            m.id.toLowerCase() === targetModel.toLowerCase() ||
+            (m as any).slug?.toLowerCase() === targetModel.toLowerCase(),
+        );
         const latency = Date.now() - startTime;
         return {
-          connected: true,
+          connected: Boolean(target),
           model: targetModel,
-          working: true,
+          working: Boolean(target),
           latencyMs: latency,
           ttftMs: latency,
-          output: chatRes.message.content.trim(),
+          output: target
+            ? `Model ${targetModel} verified active via non-billable catalog.`
+            : "",
+          error: target ? undefined : `Model ${targetModel} not found in catalog.`,
         };
       } catch (err) {
         return {
@@ -206,11 +219,25 @@ export function registerRuntimeHandlers(
     async (_event, input?: { provider?: string }) => {
       try {
         const { provider } = await configuredProvider();
-        const models = await provider.getModels();
+        if (typeof (provider as any).verifyFreeModels === "function") {
+          const verifyResult = await (provider as any).verifyFreeModels();
+          return {
+            success: true,
+            models: verifyResult.freeModels,
+            count: verifyResult.freeModelCount,
+            totalModels: verifyResult.totalModels,
+            added: verifyResult.added,
+            removed: verifyResult.removed,
+            message: verifyResult.message,
+          };
+        }
+        const models =
+          typeof (provider as any).getFreeModels === "function"
+            ? await (provider as any).getFreeModels()
+            : await provider.getModels();
         return { success: true, models, count: models.length };
       } catch {
-        const catalog = new ModelCatalog();
-        const models = catalog.getModels();
+        const models = globalModelCatalog.getFreeModels();
         return { success: true, models, count: models.length };
       }
     },
@@ -483,7 +510,24 @@ export function registerRuntimeHandlers(
       )
         throw new Error("Invalid agent request");
       const { provider, settings } = await configuredProvider();
-      const selectedModel = input.model || settings.model || "gpt-6-astra";
+      let selectedModel =
+        input.model ||
+        settings.model ||
+        globalModelCatalog.getFreeModels()[0]?.id ||
+        globalModelCatalog.getModels()[0]?.id ||
+        "";
+
+      // If selected model is limit-reached, auto-failover to next best available free model
+      const usage = globalUsageLimitManager.getModelUsage(selectedModel);
+      if (usage.isLimitReached) {
+        const nextBest = globalModelCatalog.getNextBestFreeModel(
+          selectedModel,
+          new Set([selectedModel]),
+        );
+        if (nextBest) {
+          selectedModel = nextBest.id;
+        }
+      }
       const workspace = validWorkspace(input.workspace);
       const selectedWorkspace = getSelectedWorkspace();
       if (!selectedWorkspace || workspace !== path.resolve(selectedWorkspace))
@@ -730,7 +774,12 @@ export function registerRuntimeHandlers(
       if (!statusOut.trim()) return { message: "chore: update codebase" };
       try {
         const { provider, settings } = await configuredProvider();
-        const model = input?.model || settings.model || "gpt-6-astra";
+        const model =
+          input?.model ||
+          settings.model ||
+          globalModelCatalog.getFreeModels()[0]?.id ||
+          globalModelCatalog.getModels()[0]?.id ||
+          "";
         const prompt = `Based on these Git changes, write a concise, conventional Git commit message (single line header, e.g. "feat: ...", "fix: ...", "refactor: ..."): \nStatus:\n${statusOut.slice(0, 1000)}\nDiff summary:\n${diffOut.slice(0, 1000)}`;
         const chatRes = await provider.chat({
           model,

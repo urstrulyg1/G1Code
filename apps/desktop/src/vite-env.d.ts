@@ -50,6 +50,14 @@ interface Window {
         supportsStreaming?: boolean;
         supportsVision?: boolean;
         isPromotional?: boolean;
+        pricingType?: string;
+        pricingFormatted?: string;
+        pricingDetails?: {
+          input?: number;
+          output?: number;
+        };
+        recommendedRole?: string;
+        apiRank?: number;
         description?: string;
       }>
     >;
@@ -64,6 +72,14 @@ interface Window {
         supportsStreaming?: boolean;
         supportsVision?: boolean;
         isPromotional?: boolean;
+        pricingType?: string;
+        pricingFormatted?: string;
+        pricingDetails?: {
+          input?: number;
+          output?: number;
+        };
+        recommendedRole?: string;
+        apiRank?: number;
         description?: string;
       }>
     >;

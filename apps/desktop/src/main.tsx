@@ -119,6 +119,11 @@ type ModelItem = {
   supportsVision?: boolean;
   isPromotional?: boolean;
   pricingType?: string;
+  pricingFormatted?: string;
+  pricingDetails?: {
+    input?: number;
+    output?: number;
+  };
   recommendedRole?: string;
   description?: string;
 };
@@ -253,138 +258,17 @@ function App() {
     },
   ]);
 
-  // Experiential Labs Provider & Models
+  // Experiential Labs Provider & Models (Dynamically loaded directly from ExperientialLabs.ai)
   const [settings, setSettings] = useState<SettingsType>({
     provider: "experiential-labs",
     endpoint: "https://api.experientiallabs.ai/v1",
-    model: "gpt-6-astra",
+    model: "",
     temperature: 0.2,
     maxTokens: 4096,
     apiKeyConfigured: false,
   });
-  const [models, setModels] = useState<ModelItem[]>([
-    {
-      id: "gpt-6-astra",
-      name: "GPT-6 Astra",
-      provider: "experiential-labs",
-      contextWindow: 1050000,
-      contextWindowFormatted: "1.05M",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: true,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "coding",
-      description:
-        "Flagship frontier reasoning & computer-use coding model with 1.05M context window.",
-    },
-    {
-      id: "gpt-5.6-luna",
-      name: "GPT-5.6 Luna",
-      provider: "experiential-labs",
-      contextWindow: 1050000,
-      contextWindowFormatted: "1.05M",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "fast",
-      description:
-        "Ultra-fast efficiency model with 1.05M context, optimized for real-time agent tasks.",
-    },
-    {
-      id: "qwen-3.8-27b",
-      name: "Qwen3.8 27B",
-      provider: "experiential-labs",
-      contextWindow: 1000000,
-      contextWindowFormatted: "1M",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "fast",
-      description:
-        "Ultra-fast instruction following and agent execution with 1M context.",
-    },
-    {
-      id: "deepseek-v4-flash",
-      name: "DeepSeek V4 Flash",
-      provider: "experiential-labs",
-      contextWindow: 1050000,
-      contextWindowFormatted: "1.05M",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "balanced",
-      description:
-        "Efficient reasoning model with 1.05M context and strong code generation.",
-    },
-    {
-      id: "deepseek-r1-distill-qwen-32b",
-      name: "DeepSeek R1 Distill Qwen 32B",
-      provider: "experiential-labs",
-      contextWindow: 128000,
-      contextWindowFormatted: "128K",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "reasoning",
-      description:
-        "Distilled mathematical and logical reasoning model with verified code generation.",
-    },
-    {
-      id: "meta-llama-3.3-70b-instruct",
-      name: "Llama 3.3 70B Instruct",
-      provider: "experiential-labs",
-      contextWindow: 128000,
-      contextWindowFormatted: "128K",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "balanced",
-      description:
-        "Versatile open-weights instruction model with comprehensive tool and agent capabilities.",
-    },
-    {
-      id: "qwen-2.5-coder-32b",
-      name: "Qwen 2.5 Coder 32B",
-      provider: "experiential-labs",
-      contextWindow: 128000,
-      contextWindowFormatted: "128K",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "coding",
-      description:
-        "Specialized coding model fine-tuned for repository refactoring, bug fixing, and test writing.",
-    },
-    {
-      id: "mistral-small-3-24b",
-      name: "Mistral Small 3 24B",
-      provider: "experiential-labs",
-      contextWindow: 32768,
-      contextWindowFormatted: "32K",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "fast",
-      description:
-        "Compact low-latency model for rapid file edits, lint checks, and inline completion.",
-    },
-  ]);
-  const [selectedModel, setSelectedModel] = useState("gpt-6-astra");
+  const [models, setModels] = useState<ModelItem[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [modelFilterTab, setModelFilterTab] = useState<
@@ -433,34 +317,101 @@ function App() {
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Poll usage limits every 30 s so limit-reached state auto-refreshes
+  // Dynamic free models & usage limits refresh loop (refreshes every 30s while G1Code is running)
   useEffect(() => {
-    const fetchLimits = () => {
-      if (window.g1code.getUsageLimits) {
-        void window.g1code.getUsageLimits().then((limits) => {
-          if (limits) setUsageLimits(limits);
-        });
+    let isMounted = true;
+
+    const refreshCatalogAndLimits = async () => {
+      try {
+        const getFn = window.g1code.getFreeModels || window.g1code.getModels;
+        const [fetchedModels, limits] = await Promise.all([
+          getFn("experiential-labs").catch(() => []),
+          window.g1code.getUsageLimits
+            ? window.g1code.getUsageLimits().catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+        if (!isMounted) return;
+
+        if (limits) {
+          setUsageLimits(limits);
+        }
+
+        if (Array.isArray(fetchedModels) && fetchedModels.length > 0) {
+          setModels(fetchedModels);
+
+          setSelectedModel((current) => {
+            const currentLimit = limits ? limits[current] : undefined;
+            // Current model must: (1) still be in the live free catalog, (2) have zero-cost
+            // pricing confirmed by API, and (3) not have hit its usage limit
+            const isCurrentValid =
+              Boolean(current) &&
+              fetchedModels.some((m) => {
+                if (m.id !== current) return false;
+                if (currentLimit?.isLimitReached) return false;
+                // Only remain selected if pricing is still confirmed as $0/$0
+                return (
+                  m.pricingType === "free" &&
+                  (m as ModelItem).pricingDetails?.input === 0 &&
+                  (m as ModelItem).pricingDetails?.output === 0
+                );
+              });
+
+            if (isCurrentValid) return current;
+
+            // Automatically switch to the next best available free model based on API ranking:
+            const candidateFreeModels = fetchedModels.filter((m) => {
+              if (m.pricingType !== "free") return false;
+              if ((m as ModelItem).pricingDetails?.input !== 0) return false;
+              if ((m as ModelItem).pricingDetails?.output !== 0) return false;
+              const l = limits ? limits[m.id] : undefined;
+              return !l?.isLimitReached;
+            });
+
+            const nextBest =
+              candidateFreeModels.find((m) => m.id !== current) ||
+              candidateFreeModels[0];
+
+            if (nextBest) {
+              return nextBest.id;
+            }
+
+            // If all free models are usage-limited, select first confirmed free model
+            const anyFree = fetchedModels.find(
+              (m) =>
+                m.pricingType === "free" &&
+                (m as ModelItem).pricingDetails?.input === 0 &&
+                (m as ModelItem).pricingDetails?.output === 0,
+            );
+
+            return anyFree?.id || "";
+          });
+        }
+      } catch (err) {
+        console.warn("[G1Code] 30s model availability sync error:", err);
       }
     };
-    fetchLimits();
-    const id = setInterval(fetchLimits, 30_000);
+
+    // Initial fetch
+    void refreshCatalogAndLimits();
+
+    // Refresh model availability every 30 seconds while G1Code is running
+    const intervalId = setInterval(refreshCatalogAndLimits, 30_000);
     // Ticker forces re-render each second so "resets in Xs" countdown updates
     const tickId = setInterval(() => setTicker((n) => n + 1), 1_000);
+
     return () => {
-      clearInterval(id);
+      isMounted = false;
+      clearInterval(intervalId);
       clearInterval(tickId);
     };
   }, []);
 
-  // Load initial settings, models, workspace, git & problems
+  // Load initial settings, workspace, git & problems
   useEffect(() => {
     void window.g1code.getSettings().then((s) => {
       setSettings(s);
       if (s.model) setSelectedModel(s.model);
-    });
-
-    void window.g1code.getModels().then((res) => {
-      if (res && res.length > 0) setModels(res);
     });
 
     // Auto-initialize active workspace from backend server if available
@@ -687,16 +638,50 @@ function App() {
       return;
     }
 
-    const currentLimit = usageLimits[selectedModel];
-    if (currentLimit?.isLimitReached) {
-      setEvents((old) => [
-        ...old,
-        {
-          type: "error",
-          message: `Model "${activeModelMeta.name}" has reached its ${currentLimit.limitType || "usage"} limit. Please select another free model or wait for reset.`,
-        },
-      ]);
-      return;
+    let modelToUse = selectedModel;
+    const currentLimit = usageLimits[modelToUse];
+    const currentMeta = models.find((m) => m.id === modelToUse);
+    const isCurrentValid =
+      Boolean(modelToUse) &&
+      Boolean(currentMeta) &&
+      currentMeta?.pricingType === "free" &&
+      currentMeta?.pricingDetails?.input === 0 &&
+      currentMeta?.pricingDetails?.output === 0 &&
+      !currentLimit?.isLimitReached;
+
+    if (!isCurrentValid) {
+      const candidateFree = models.filter((m) => {
+        const isFree =
+          m.pricingType === "free" &&
+          m.pricingDetails?.input === 0 &&
+          m.pricingDetails?.output === 0;
+        const isLimited = Boolean(usageLimits[m.id]?.isLimitReached);
+        return isFree && !isLimited;
+      });
+
+      const nextBest =
+        candidateFree.find((m) => m.id !== modelToUse) || candidateFree[0];
+
+      if (nextBest) {
+        modelToUse = nextBest.id;
+        setSelectedModel(modelToUse);
+        setEvents((old) => [
+          ...old,
+          {
+            type: "text",
+            message: `Switched automatically to next best available free model: ${nextBest.name || nextBest.id}`,
+          },
+        ]);
+      } else {
+        setEvents((old) => [
+          ...old,
+          {
+            type: "error",
+            message: `Model "${activeModelMeta.name}" is unavailable or usage-limited, and no other free models are currently available.`,
+          },
+        ]);
+        return;
+      }
     }
 
     setRunning(true);
@@ -711,7 +696,7 @@ function App() {
       {
         title: `Task: ${task}`,
         bullets: [
-          `Active Model: Experiential Labs / ${selectedModel}`,
+          `Active Model: Experiential Labs / ${modelToUse}`,
           "Inspecting workspace repository baseline",
           "Autonomous tool execution engaged",
         ],
@@ -724,7 +709,7 @@ function App() {
         prompt: task,
         mode:
           agentMode === "plan" ? "plan" : agentMode === "ask" ? "ask" : "agent",
-        model: selectedModel,
+        model: modelToUse,
         provider: targetProvider,
       });
       setSessionId(res.sessionId);
@@ -916,8 +901,14 @@ function App() {
     textareaRef.current?.focus();
   };
 
-  // Filtered models for Model Picker — only Experiential Labs free models shown
-  const freeCount = models.filter((m) => m.isPromotional).length;
+  // Filtered models for Model Picker — driven entirely by dynamically fetched data
+  // A model is "free" only when the API confirms Input = $0/M and Output = $0/M
+  const isTrulyFree = (m: ModelItem) =>
+    m.pricingType === "free" &&
+    m.pricingDetails?.input === 0 &&
+    m.pricingDetails?.output === 0;
+
+  const freeCount = models.filter(isTrulyFree).length;
   const toolCount = models.filter((m) => m.supportsTools).length;
 
   const filteredModels = models.filter((m) => {
@@ -925,33 +916,24 @@ function App() {
       m.name.toLowerCase().includes(modelSearch.toLowerCase()) ||
       m.id.toLowerCase().includes(modelSearch.toLowerCase());
     if (!matchSearch) return false;
-    if (modelFilterTab === "free") return m.isPromotional;
+    if (modelFilterTab === "free") return isTrulyFree(m);
     if (modelFilterTab === "tools") return m.supportsTools;
-    if (modelFilterTab === "reasoning") {
-      const id = m.id.toLowerCase();
-      return (
-        id.includes("astra") ||
-        id.includes("luna") ||
-        id.includes("r1") ||
-        id.includes("flash") ||
-        id.includes("reasoning")
-      );
-    }
-    if (modelFilterTab === "coding")
-      return m.recommendedRole === "coding";
-    if (modelFilterTab === "fast")
-      return m.recommendedRole === "fast";
-    if (modelFilterTab === "balanced")
-      return m.recommendedRole === "balanced";
+    // Use the recommendedRole assigned dynamically from the API, not hardcoded id fragments
+    if (modelFilterTab === "reasoning") return m.recommendedRole === "reasoning";
+    if (modelFilterTab === "coding")  return m.recommendedRole === "coding";
+    if (modelFilterTab === "fast")    return m.recommendedRole === "fast";
+    if (modelFilterTab === "balanced") return m.recommendedRole === "balanced";
     return true; // "all"
   });
 
   const activeModelMeta = models.find((m) => m.id === selectedModel) ||
     models[0] || {
-      id: "gpt-6-astra",
-      name: "GPT-6 Astra",
-      contextWindowFormatted: "1.05M",
-      isPromotional: true,
+      id: selectedModel || "loading",
+      name:
+        selectedModel ||
+        (models.length === 0 ? "Loading models..." : "Select model"),
+      contextWindowFormatted: "",
+      isPromotional: false,
     };
 
   const renderModelCard = (m: (typeof models)[0]) => {
@@ -1006,8 +988,8 @@ function App() {
               >
                 LIMIT REACHED
               </span>
-            ) : m.isPromotional ? (
-              <span className="model-promo-badge">FREE · $0.00</span>
+            ) : isTrulyFree(m) ? (
+              <span className="model-promo-badge">{m.pricingFormatted || "Free ($0 input / $0 output)"}</span>
             ) : (
               <span
                 style={{
@@ -2190,7 +2172,9 @@ function App() {
                             LIMIT REACHED
                           </span>
                         ) : activeModelMeta.isPromotional ? (
-                          <span className="model-promo-badge mini">FREE</span>
+                          <span className="model-promo-badge mini">
+                            Free ($0 input / $0 output)
+                          </span>
                         ) : null}
                         <ChevronDown size={10} />
                       </span>
@@ -2285,7 +2269,7 @@ function App() {
             <div className="model-free-notice">
               <Sparkles size={14} color="var(--accent-agent)" />
               <span>
-                <strong>Experiential Labs Free Tier:</strong> All models are free to use within their hourly and daily usage limits.
+                <strong>Experiential Labs Free Tier:</strong> Only models confirmed free by the live API (Input = $0/M · Output = $0/M) appear in the Free tab. Catalog refreshes every 30 seconds automatically.
               </span>
             </div>
 
@@ -2335,7 +2319,7 @@ function App() {
               ) : (
                 <>
                   <div className="model-category-header">
-                    EXPERIENTIAL LABS FREE MODELS ({filteredModels.length} AVAILABLE · ZERO TOKEN COST)
+                    EXPERIENTIAL LABS LIVE FREE MODELS (FREE: $0 INPUT / $0 OUTPUT · AUTO-REFRESHES EVERY 30S)
                   </div>
                   {filteredModels.map((m) => renderModelCard(m))}
                 </>
@@ -2347,7 +2331,13 @@ function App() {
                 className="btn-secondary"
                 onClick={async () => {
                   const res = await window.g1code.refreshModels(settings.provider);
-                  if (res.success && res.models) setModels(res.models);
+                  if (res.success && res.models) {
+                    setModels(res.models);
+                    setSelectedModel((curr) => {
+                      if (curr && res.models.some((m: ModelItem) => m.id === curr)) return curr;
+                      return res.models[0]?.id || "";
+                    });
+                  }
                 }}
               >
                 <RefreshCw size={12} /> Refresh Catalog

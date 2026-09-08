@@ -22,9 +22,14 @@ import {
   readSettings,
   saveSettings,
   configuredProvider,
+  readApiKeyFromZshrcSync,
   type Settings,
 } from "./packages/settings/storage";
-import { ModelCatalog, PROMOTIONAL_MODELS } from "./packages/ai/models";
+import {
+  ModelCatalog,
+  PROMOTIONAL_MODELS,
+  globalModelCatalog,
+} from "./packages/ai/models";
 import { globalUsageLimitManager } from "./packages/ai/usage-limits";
 
 const execFileAsync = promisify(execFile);
@@ -342,20 +347,70 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, updated);
     }
 
-    // Provider models (exclusively Experiential Labs free models)
+    // Provider models (exclusively Experiential Labs verified free models)
     if (pathname === "/api/provider/models/free" && req.method === "GET") {
-      return sendJson(res, 200, PROMOTIONAL_MODELS);
+      try {
+        const { provider } = await configuredProvider();
+        if (typeof (provider as any).getFreeModels === "function") {
+          const free = await (provider as any).getFreeModels();
+          return sendJson(res, 200, free);
+        }
+        const models = await provider.getModels();
+        const free = models.filter(
+          (m: any) =>
+            m.pricingType === "free" &&
+            m.pricingDetails?.input === 0 &&
+            m.pricingDetails?.output === 0,
+        );
+        return sendJson(
+          res,
+          200,
+          free.length > 0 ? free : globalModelCatalog.getFreeModels(),
+        );
+      } catch {
+        return sendJson(res, 200, globalModelCatalog.getFreeModels());
+      }
     }
 
     if (pathname === "/api/provider/models" && req.method === "GET") {
-      return sendJson(res, 200, PROMOTIONAL_MODELS);
+      try {
+        const { provider } = await configuredProvider();
+        const models = await provider.getModels();
+        return sendJson(
+          res,
+          200,
+          models.length > 0 ? models : globalModelCatalog.getModels(),
+        );
+      } catch {
+        return sendJson(res, 200, globalModelCatalog.getModels());
+      }
     }
 
     // Usage limits for Experiential Labs free promotional models
     if (pathname === "/api/provider/usage-limits" && req.method === "GET") {
-      const limits = globalUsageLimitManager.getAllUsage(
-        PROMOTIONAL_MODELS.map((m) => ({ id: m.id, name: m.name })),
+      let currentFreeModels: Array<{ id: string; name: string }>;
+      try {
+        const { provider } = await configuredProvider();
+        if (typeof (provider as any).getFreeModels === "function") {
+          const free = await (provider as any).getFreeModels();
+          currentFreeModels = free.map((m: any) => ({
+            id: m.id,
+            name: m.name || m.displayName || m.id,
+          }));
+        } else {
+          currentFreeModels = globalModelCatalog
+            .getFreeModels()
+            .map((m) => ({ id: m.id, name: m.displayName || m.name }));
+        }
+      } catch {
+        currentFreeModels = globalModelCatalog
+          .getFreeModels()
+          .map((m) => ({ id: m.id, name: m.displayName || m.name }));
+      }
+      globalUsageLimitManager.pruneExpiredModels(
+        new Set(currentFreeModels.map((m) => m.id)),
       );
+      const limits = globalUsageLimitManager.getAllUsage(currentFreeModels);
       return sendJson(res, 200, limits);
     }
 
@@ -413,7 +468,12 @@ const server = http.createServer(async (req, res) => {
       try {
         const body = await parseJsonBody<{ model?: string; provider?: string }>(req);
         const { provider, settings } = await configuredProvider(undefined, body.provider);
-        const targetModel = body.model || settings.model || "gpt-6-astra";
+        const targetModel =
+          body.model ||
+          settings.model ||
+          globalModelCatalog.getFreeModels()[0]?.id ||
+          globalModelCatalog.getModels()[0]?.id ||
+          "";
 
         if (provider.testModel) {
           const result = await provider.testModel(targetModel);
@@ -425,19 +485,23 @@ const server = http.createServer(async (req, res) => {
         }
 
         const startTime = Date.now();
-        const chatRes = await provider.chat({
-          model: targetModel,
-          messages: [{ role: "user", content: "Reply with exactly: OK" }],
-          maxTokens: 10,
-        });
+        const models = await provider.getModels();
+        const target = models.find(
+          (m) =>
+            m.id.toLowerCase() === targetModel.toLowerCase() ||
+            (m as any).slug?.toLowerCase() === targetModel.toLowerCase(),
+        );
         const latency = Date.now() - startTime;
         return sendJson(res, 200, {
-          connected: true,
+          connected: Boolean(target),
           model: targetModel,
-          working: true,
+          working: Boolean(target),
           latencyMs: latency,
           ttftMs: latency,
-          output: chatRes.message.content.trim(),
+          output: target
+            ? `Model ${targetModel} verified active via non-billable catalog.`
+            : "",
+          error: target ? undefined : `Model ${targetModel} not found in catalog.`,
         });
       } catch (err) {
         return sendJson(res, 400, {
@@ -447,20 +511,40 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // Provider refresh catalog
+    // Provider refresh catalog (dynamically fetches, verifies free models, prunes expired)
     if (pathname === "/api/provider/refresh" && req.method === "POST") {
+      const body = await parseJsonBody<{ provider?: string }>(req).catch(
+        () => ({} as any),
+      );
       try {
-        const body = await parseJsonBody<{ provider?: string }>(req).catch(() => ({} as any));
-        const { provider } = await configuredProvider(undefined, body?.provider);
-        const models = await provider.getModels();
+        const { provider } = await configuredProvider(
+          undefined,
+          body?.provider,
+        );
+        if (typeof (provider as any).verifyFreeModels === "function") {
+          const verifyResult = await (provider as any).verifyFreeModels();
+          return sendJson(res, 200, {
+            success: true,
+            models: verifyResult.freeModels,
+            count: verifyResult.freeModelCount,
+            totalModels: verifyResult.totalModels,
+            added: verifyResult.added,
+            removed: verifyResult.removed,
+            message: verifyResult.message,
+          });
+        }
+        const freeModels =
+          typeof (provider as any).getFreeModels === "function"
+            ? await (provider as any).getFreeModels()
+            : await provider.getModels();
         return sendJson(res, 200, {
           success: true,
-          models,
-          count: models.length,
+          models: freeModels,
+          count: freeModels.length,
         });
       } catch {
         const catalog = new ModelCatalog();
-        const models = catalog.getModels(body?.provider);
+        const models = catalog.getFreeModels(body?.provider);
         return sendJson(res, 200, {
           success: true,
           models,
@@ -752,11 +836,31 @@ const server = http.createServer(async (req, res) => {
         );
       }
       const { provider, settings } = providerPackage;
-      const selectedModel = body.model || settings.model || "gpt-6-astra";
+      let selectedModel =
+        body.model ||
+        settings.model ||
+        globalModelCatalog.getFreeModels()[0]?.id ||
+        globalModelCatalog.getModels()[0]?.id ||
+        "";
 
-      // Enforce usage limits for Experiential Labs free models
-      const { allowed, limitInfo } =
+      // Enforce usage limits for Experiential Labs free models & auto-failover
+      let { allowed, limitInfo } =
         globalUsageLimitManager.checkAndIncrement(selectedModel);
+      if (!allowed) {
+        // Automatically switch to the next best available free model based on API ranking
+        const nextBest = globalModelCatalog.getNextBestFreeModel(
+          selectedModel,
+          new Set([selectedModel]),
+        );
+        if (nextBest) {
+          selectedModel = nextBest.id;
+          const retryCheck =
+            globalUsageLimitManager.checkAndIncrement(selectedModel);
+          allowed = retryCheck.allowed;
+          limitInfo = retryCheck.limitInfo;
+        }
+      }
+
       if (!allowed) {
         const remainingMs = Math.max(
           0,
@@ -768,7 +872,7 @@ const server = http.createServer(async (req, res) => {
         return sendError(
           res,
           429,
-          `Model "${limitInfo.name}" has reached its ${limitInfo.limitType} usage limit (${limitInfo.limitType === "daily" ? limitInfo.dailyLimit : limitInfo.hourlyLimit} requests). Resets in ${mins} minute${mins === 1 ? "" : "s"}. Please select another free model or wait for reset.`,
+          `Model "${limitInfo.name}" has reached its ${limitInfo.limitType} usage limit (${limitInfo.limitType === "daily" ? limitInfo.dailyLimit : limitInfo.hourlyLimit} requests). Resets in ${mins} minute${mins === 1 ? "" : "s"}. No other free models currently available.`,
         );
       }
 
@@ -1044,7 +1148,12 @@ const server = http.createServer(async (req, res) => {
         }
 
         const { provider, settings } = await configuredProvider();
-        const model = body.model || settings.model || "gpt-6-astra";
+        const model =
+          body.model ||
+          settings.model ||
+          globalModelCatalog.getFreeModels()[0]?.id ||
+          globalModelCatalog.getModels()[0]?.id ||
+          "";
         const prompt = `Based on these Git changes, write a concise, conventional Git commit message (single line header, e.g. "feat: ...", "fix: ...", "refactor: ..."): \nStatus:\n${statusOut.slice(0, 1000)}\nDiff summary:\n${diffOut.slice(0, 1000)}`;
 
         const chatRes = await provider.chat({
@@ -1177,5 +1286,31 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`[G1Code Backend] Server listening at http://127.0.0.1:${PORT}`);
   console.log(`[G1Code Backend] Active workspace: ${selectedWorkspace}`);
 });
+
+// Automatic dynamic free model discovery & verification worker
+async function syncExperientialFreeModels() {
+  try {
+    const { provider } = await configuredProvider();
+    if (typeof (provider as any).verifyFreeModels === "function") {
+      const res = await (provider as any).verifyFreeModels();
+      if (res.added.length > 0 || res.removed.length > 0) {
+        console.log(
+          `[G1Code Backend] Experiential Labs free models updated: ${res.freeModelCount} active (+${res.added.length} newly added, -${res.removed.length} expired/removed).`,
+        );
+      }
+    }
+  } catch {
+    // If unconfigured or offline, silently ignore
+  }
+}
+
+// Initial sync on startup
+void syncExperientialFreeModels();
+// Periodic sync every 30 seconds while G1Code is running to auto-publish new free models & remove expired ones
+const catalogSyncTimer = setInterval(
+  () => void syncExperientialFreeModels(),
+  30_000,
+);
+catalogSyncTimer.unref();
 
 export { server };

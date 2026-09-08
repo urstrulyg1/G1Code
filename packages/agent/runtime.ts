@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AIProvider, ChatMessage, ToolCall, ToolDefinition } from "../ai/types";
+import { globalModelCatalog } from "../ai/models";
 import { AgentTool, ToolContext, ToolRegistry } from "../tools/types";
 
 export type AgentState =
@@ -130,7 +131,7 @@ export class AgentRuntime {
       this.transition("FAILED", "Model does not support tools");
       this.event({
         type: "error",
-        message: `Model '${this.model}' cannot run autonomous coding tools. Use Chat/Ask mode or select a tool-capable model (e.g. GPT-6 Astra, Qwen3.8 27B).`,
+        message: `Model '${this.model}' cannot run autonomous coding tools. Use Chat/Ask mode or select a tool-capable model.`,
       });
       return;
     }
@@ -188,7 +189,11 @@ export class AgentRuntime {
       const calls = new Map<string, ToolCall>();
       try {
         for await (const chunk of this.provider.streamChat({
-          model: this.model || "gpt-6-astra",
+          model:
+            this.model ||
+            globalModelCatalog.getFreeModels()[0]?.id ||
+            globalModelCatalog.getModels()[0]?.id ||
+            "",
           messages,
           tools: definitions,
           temperature: 0.2,

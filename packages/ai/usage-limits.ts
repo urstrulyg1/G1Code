@@ -11,19 +11,15 @@ export type ModelUsageLimit = {
   limitType?: "hourly" | "daily";
 };
 
-// Default free promotional tier quotas for Experiential Labs models
+// Dynamic usage limit configuration — no hardcoded model names, lists, or pricing
 export const EXPERIENTIAL_FREE_LIMITS: Record<
   string,
   { hourlyLimit: number; dailyLimit: number }
-> = {
-  "gpt-6-astra": { hourlyLimit: 20, dailyLimit: 100 },
-  "gpt-5.6-luna": { hourlyLimit: 40, dailyLimit: 200 },
-  "qwen-3.8-27b": { hourlyLimit: 50, dailyLimit: 300 },
-  "deepseek-v4-flash": { hourlyLimit: 60, dailyLimit: 400 },
-  "deepseek-r1-distill-qwen-32b": { hourlyLimit: 30, dailyLimit: 150 },
-  "meta-llama-3.3-70b-instruct": { hourlyLimit: 25, dailyLimit: 120 },
-  "qwen-2.5-coder-32b": { hourlyLimit: 35, dailyLimit: 180 },
-  "mistral-small-3-24b": { hourlyLimit: 60, dailyLimit: 500 },
+> = {};
+
+export const DEFAULT_MODEL_LIMITS = {
+  hourlyLimit: 30,
+  dailyLimit: 150,
 };
 
 type UsageRecord = {
@@ -150,6 +146,17 @@ class UsageLimitManager {
   public resetModelLimit(modelId: string): ModelUsageLimit {
     this.usage.delete(modelId);
     return this.getModelUsage(modelId);
+  }
+
+  public pruneExpiredModels(activeModelIds: Set<string>): string[] {
+    const pruned: string[] = [];
+    for (const key of this.usage.keys()) {
+      if (!activeModelIds.has(key)) {
+        this.usage.delete(key);
+        pruned.push(key);
+      }
+    }
+    return pruned;
   }
 }
 

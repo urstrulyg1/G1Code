@@ -103,7 +103,7 @@ export async function readSettings(customDir?: string): Promise<Settings> {
   const defaults: Settings = {
     provider: "experiential-labs",
     endpoint: EXPERIENTIAL_LABS_DEFAULT_ENDPOINT,
-    model: "gpt-6-astra",
+    model: "",
     temperature: 0.2,
     maxTokens: 4096,
     apiKeyConfigured: false,
@@ -122,7 +122,7 @@ export async function readSettings(customDir?: string): Promise<Settings> {
         parsed.endpoint === "https://api.openai.com/v1" || !parsed.endpoint
           ? EXPERIENTIAL_LABS_DEFAULT_ENDPOINT
           : parsed.endpoint,
-      model: parsed.model || "gpt-6-astra",
+      model: parsed.model || "",
       apiKeyConfigured: keyExists,
       apiKeyMasked: maskApiKey(key),
     };
@@ -184,7 +184,68 @@ export async function saveSettings(
   return next;
 }
 
+export function readApiKeyFromZshrcSync(): string | null {
+  try {
+    const zshrcPath = path.join(os.homedir(), ".zshrc");
+    if (!fsSync.existsSync(zshrcPath)) return null;
+    const content = fsSync.readFileSync(zshrcPath, "utf8");
+    const match = content.match(
+      /(?:export\s+)?(?:EXPLABS_API_KEY|EXPERIENTIAL_LABS_API_KEY|XPL_API_KEY|EXPERIENTIAL_API_KEY)\s*=\s*["']?([^"'\s#]+)["']?/,
+    );
+    if (match && match[1]?.trim()) {
+      const key = match[1].trim();
+      if (!process.env.EXPLABS_API_KEY) {
+        process.env.EXPLABS_API_KEY = key;
+      }
+      return key;
+    }
+  } catch {
+    // Ignore if ~/.zshrc cannot be accessed
+  }
+  return null;
+}
+
+export async function readApiKeyFromZshrc(): Promise<string | null> {
+  try {
+    const zshrcPath = path.join(os.homedir(), ".zshrc");
+    const content = await fs.readFile(zshrcPath, "utf8");
+    const match = content.match(
+      /(?:export\s+)?(?:EXPLABS_API_KEY|EXPERIENTIAL_LABS_API_KEY|XPL_API_KEY|EXPERIENTIAL_API_KEY)\s*=\s*["']?([^"'\s#]+)["']?/,
+    );
+    if (match && match[1]?.trim()) {
+      const key = match[1].trim();
+      if (!process.env.EXPLABS_API_KEY) {
+        process.env.EXPLABS_API_KEY = key;
+      }
+      return key;
+    }
+  } catch {
+    // Ignore if ~/.zshrc cannot be accessed
+  }
+  return null;
+}
+
+// In-memory initialization from ~/.zshrc without logging or exposing
+readApiKeyFromZshrcSync();
+
 export async function getApiKey(customDir?: string): Promise<string | null> {
+  // 1. Prioritize reading directly from user's ~/.zshrc configuration
+  const zshrcKey = await readApiKeyFromZshrc();
+  if (zshrcKey) {
+    return zshrcKey;
+  }
+
+  // 2. Check process environment
+  const envKey =
+    process.env.EXPLABS_API_KEY ||
+    process.env.EXPERIENTIAL_LABS_API_KEY ||
+    process.env.XPL_API_KEY ||
+    process.env.EXPERIENTIAL_API_KEY;
+  if (envKey && envKey.trim().length > 0) {
+    return envKey.trim();
+  }
+
+  // 3. Fall back to secure storage if configured
   const dir = getAppDataDir(customDir);
   try {
     const data = await fs.readFile(keyPath(dir));
@@ -199,14 +260,6 @@ export async function getApiKey(customDir?: string): Promise<string | null> {
       return decryptSecretNode(data, dir);
     }
   } catch {
-    const envKey =
-      process.env.EXPLABS_API_KEY ||
-      process.env.EXPERIENTIAL_LABS_API_KEY ||
-      process.env.XPL_API_KEY ||
-      process.env.EXPERIENTIAL_API_KEY;
-    if (envKey && envKey.trim().length > 0) {
-      return envKey.trim();
-    }
     return null;
   }
 }
@@ -219,7 +272,9 @@ export async function configuredProvider(customDir?: string): Promise<{
   const settings = await readSettings(dir);
   const key = await getApiKey(dir);
   if (!key) {
-    throw new Error("Configure an Experiential Labs API key first");
+    throw new Error(
+      "Experiential Labs API key not found in ~/.zshrc or environment.",
+    );
   }
   return {
     settings,
