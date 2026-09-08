@@ -1,5 +1,5 @@
 import "./api-client";
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import Editor, { DiffEditor } from "@monaco-editor/react";
 import {
@@ -161,6 +161,109 @@ function App() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [showBottomPanel, setShowBottomPanel] = useState(true);
   const [showAgentWorkspace, setShowAgentWorkspace] = useState(true);
+
+  // Draggable Tile Layout Dimensions (Antigravity Style)
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem("g1code_sidebar_width");
+    return saved ? Math.max(160, Math.min(600, Number(saved))) : 270;
+  });
+  const [agentWidth, setAgentWidth] = useState(() => {
+    const saved = localStorage.getItem("g1code_agent_width");
+    return saved ? Math.max(280, Math.min(900, Number(saved))) : 410;
+  });
+  const [drawerHeight, setDrawerHeight] = useState(() => {
+    const saved = localStorage.getItem("g1code_drawer_height");
+    return saved ? Math.max(80, Math.min(650, Number(saved))) : 220;
+  });
+  const [resizingPane, setResizingPane] = useState<"sidebar" | "agent" | "drawer" | null>(null);
+  const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("g1code_sidebar_width", String(sidebarWidth));
+    } catch {}
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("g1code_agent_width", String(agentWidth));
+    } catch {}
+  }, [agentWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("g1code_drawer_height", String(drawerHeight));
+    } catch {}
+  }, [drawerHeight]);
+
+  // Drag Sidebar (Left Tile Splitter)
+  const startResizingSidebar = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setResizingPane("sidebar");
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      const nextW = Math.max(160, Math.min(window.innerWidth * 0.45, startW + delta));
+      setSidebarWidth(Math.round(nextW));
+    };
+
+    const onMouseUp = () => {
+      setResizingPane(null);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [sidebarWidth]);
+
+  // Drag Agent Workspace (Right Tile Splitter)
+  const startResizingAgent = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setResizingPane("agent");
+    const startX = e.clientX;
+    const startW = agentWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX; // dragging left expands width
+      const nextW = Math.max(280, Math.min(window.innerWidth * 0.65, startW + delta));
+      setAgentWidth(Math.round(nextW));
+    };
+
+    const onMouseUp = () => {
+      setResizingPane(null);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [agentWidth]);
+
+  // Drag Bottom Drawer (Bottom Tile Splitter)
+  const startResizingDrawer = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setResizingPane("drawer");
+    const startY = e.clientY;
+    const startH = drawerHeight;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = startY - ev.clientY; // dragging up increases height
+      const nextH = Math.max(80, Math.min(window.innerHeight * 0.75, startH + delta));
+      setDrawerHeight(Math.round(nextH));
+    };
+
+    const onMouseUp = () => {
+      setResizingPane(null);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [drawerHeight]);
 
   // Center Monaco Editor State
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -1274,7 +1377,7 @@ function App() {
 
         {/* 2. Contextual Sidebar */}
         {showSidebar && (
-          <aside className="sidebar">
+          <aside className="sidebar" style={{ width: `${sidebarWidth}px` }}>
             {activeActivity === "git" ? (
               /* Source Control View matching Reference */
               <div className="git-sidebar">
@@ -1543,15 +1646,45 @@ function App() {
           </aside>
         )}
 
+        {showSidebar && (
+          <div
+            className={`tile-resizer-vertical ${resizingPane === "sidebar" ? "resizing" : ""}`}
+            onMouseDown={startResizingSidebar}
+            onDoubleClick={() => setSidebarWidth(270)}
+            title="Drag to resize sidebar (Double-click to reset)"
+          />
+        )}
+
         {/* 3. Center Professional Code Editor */}
         <main className="editor-area">
           {/* Editor Tabs Bar */}
           <div className="editor-tabs-bar">
             <div className="tabs-scroll">
-              {tabs.map((tab) => (
+              {tabs.map((tab, idx) => (
                 <div
-                  className={`editor-tab ${tab.path === activeTabPath && !activeDiff ? "active" : ""}`}
+                  className={`editor-tab ${tab.path === activeTabPath && !activeDiff ? "active" : ""} ${draggedTabIndex === idx ? "dragging" : ""}`}
                   key={tab.path}
+                  draggable
+                  onDragStart={(e) => {
+                    setDraggedTabIndex(idx);
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", tab.path);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (draggedTabIndex !== null && draggedTabIndex !== idx) {
+                      const updated = [...tabs];
+                      const [draggedItem] = updated.splice(draggedTabIndex, 1);
+                      updated.splice(idx, 0, draggedItem);
+                      setTabs(updated);
+                    }
+                    setDraggedTabIndex(null);
+                  }}
+                  onDragEnd={() => setDraggedTabIndex(null)}
                   onClick={() => {
                     setActiveTabPath(tab.path);
                     setActiveDiff(null);
@@ -1703,7 +1836,15 @@ function App() {
 
           {/* Bottom Drawer (Terminal / Activity / Problems / Tests) */}
           {showBottomPanel && (
-            <div className="bottom-drawer">
+            <div
+              className={`tile-resizer-horizontal ${resizingPane === "drawer" ? "resizing" : ""}`}
+              onMouseDown={startResizingDrawer}
+              onDoubleClick={() => setDrawerHeight(220)}
+              title="Drag to resize bottom panel (Double-click to reset)"
+            />
+          )}
+          {showBottomPanel && (
+            <div className="bottom-drawer" style={{ height: `${drawerHeight}px` }}>
               <div className="drawer-tabs">
                 <button
                   className={`drawer-tab ${bottomTab === "terminal" ? "active" : ""}`}
@@ -1876,9 +2017,18 @@ function App() {
           )}
         </main>
 
+        {showAgentWorkspace && (
+          <div
+            className={`tile-resizer-vertical ${resizingPane === "agent" ? "resizing" : ""}`}
+            onMouseDown={startResizingAgent}
+            onDoubleClick={() => setAgentWidth(410)}
+            title="Drag to resize agent panel (Double-click to reset)"
+          />
+        )}
+
         {/* 4. Right-Side Agent Workspace (Antigravity / BOB Style) */}
         {showAgentWorkspace && (
-          <aside className="agent-workspace">
+          <aside className="agent-workspace" style={{ width: `${agentWidth}px` }}>
             {/* Header */}
             <div className="agent-header">
               <div className="agent-title-col">
@@ -2958,6 +3108,13 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {resizingPane && (
+        <div
+          className="resizing-overlay"
+          style={{ cursor: resizingPane === "drawer" ? "row-resize" : "col-resize" }}
+        />
       )}
     </div>
   );

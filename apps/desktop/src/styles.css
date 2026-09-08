@@ -290,15 +290,15 @@ button {
 
 /* 2. Contextual Sidebar (Explorer / Git / Search) */
 .sidebar {
-  width: 270px;
-  min-width: 200px;
-  max-width: 480px;
+  min-width: 160px;
+  max-width: 60vw;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   position: relative;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -789,12 +789,14 @@ button {
 
 /* Bottom Panel (Terminal / Problems / Tests / Git) */
 .bottom-drawer {
-  height: 220px;
+  min-height: 80px;
+  max-height: 80vh;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-panel);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .drawer-tabs {
@@ -820,6 +822,7 @@ button {
 
 .drawer-tab:hover {
   color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .drawer-tab.active {
@@ -828,34 +831,36 @@ button {
 }
 
 .drawer-badge {
-  background: rgba(239, 68, 68, 0.2);
-  color: var(--accent-error);
-  padding: 1px 5px;
-  border-radius: 10px;
+  background: var(--accent-error);
+  color: white;
   font-size: 9px;
   font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
 }
 
 .drawer-content {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 14px;
-  font-family: var(--font-mono);
+  padding: 12px 14px;
   font-size: 12px;
+  font-family: var(--font-mono);
 }
 
 .terminal-pre {
   margin: 0;
   white-space: pre-wrap;
-  color: #d1d5db;
-  line-height: 1.5;
+  word-break: break-all;
+  color: var(--text-secondary);
 }
 
 .terminal-prompt-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
 }
 
 .terminal-prompt-row span {
@@ -865,11 +870,11 @@ button {
 
 .terminal-prompt-row input {
   flex: 1;
-  border: 0;
   background: transparent;
+  border: none;
+  color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--text-primary);
 }
 
 .terminal-prompt-row input:focus {
@@ -878,9 +883,8 @@ button {
 
 /* 4. Right-Side Agent Workspace (Primary Hero Panel) */
 .agent-workspace {
-  width: 410px;
-  min-width: 320px;
-  max-width: 580px;
+  min-width: 280px;
+  max-width: 75vw;
   background: var(--bg-agent);
   border-left: 1px solid var(--border-subtle);
   display: flex;
@@ -888,6 +892,76 @@ button {
   flex-shrink: 0;
   position: relative;
   z-index: 15;
+  overflow: hidden;
+}
+
+/* Antigravity Draggable Tile Splitters */
+.tile-resizer-vertical {
+  width: 7px;
+  cursor: col-resize;
+  position: relative;
+  flex-shrink: 0;
+  z-index: 25;
+  background: transparent;
+  margin: 0 -3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.tile-resizer-vertical::after {
+  content: "";
+  width: 1px;
+  height: 100%;
+  background: var(--border-subtle);
+  transition: all 0.15s ease;
+}
+
+.tile-resizer-vertical:hover::after,
+.tile-resizer-vertical.resizing::after {
+  width: 2px;
+  background: var(--accent-agent, #a855f7);
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+}
+
+.tile-resizer-horizontal {
+  height: 7px;
+  cursor: row-resize;
+  position: relative;
+  flex-shrink: 0;
+  z-index: 25;
+  background: transparent;
+  margin: -3px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.tile-resizer-horizontal::after {
+  content: "";
+  height: 1px;
+  width: 100%;
+  background: var(--border-subtle);
+  transition: all 0.15s ease;
+}
+
+.tile-resizer-horizontal:hover::after,
+.tile-resizer-horizontal.resizing::after {
+  height: 2px;
+  background: var(--accent-agent, #a855f7);
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+}
+
+.resizing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  user-select: none;
+  background: transparent;
 }
 
 /* Agent Header */
