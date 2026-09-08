@@ -110,14 +110,11 @@ export function registerRuntimeHandlers(
     "provider:models",
     async (_event, input?: { provider?: string }) => {
       try {
-        const { provider } = await configuredProvider(
-          undefined,
-          input?.provider,
-        );
+        const { provider } = await configuredProvider();
         return await provider.getModels();
       } catch {
         const catalog = new ModelCatalog();
-        return catalog.getModels(input?.provider);
+        return catalog.getModels();
       }
     },
   );
@@ -125,10 +122,7 @@ export function registerRuntimeHandlers(
     "provider:models:free",
     async (_event, input?: { provider?: string }) => {
       try {
-        const { provider } = await configuredProvider(
-          undefined,
-          input?.provider,
-        );
+        const { provider } = await configuredProvider();
         if (
           "getFreeModels" in provider &&
           typeof (provider as any).getFreeModels === "function"
@@ -139,7 +133,7 @@ export function registerRuntimeHandlers(
         return models.filter((m) => m.isPromotional);
       } catch {
         const catalog = new ModelCatalog();
-        return catalog.getFreeModels(input?.provider);
+        return catalog.getFreeModels();
       }
     },
   );
@@ -147,10 +141,7 @@ export function registerRuntimeHandlers(
     "provider:verify",
     async (_event, input?: { provider?: string }) => {
       try {
-        const { provider } = await configuredProvider(
-          undefined,
-          input?.provider,
-        );
+        const { provider } = await configuredProvider();
         if (provider.verifyConnection) {
           return provider.verifyConnection();
         }
@@ -181,14 +172,8 @@ export function registerRuntimeHandlers(
       )
         throw new Error("Invalid model");
       try {
-        const { provider, settings } = await configuredProvider(
-          undefined,
-          providerId,
-        );
-        const targetModel =
-          model ||
-          settings.model ||
-          (providerId === "arena.ai" ? "arena-agent-v1" : "gpt-6-astra");
+        const { provider, settings } = await configuredProvider();
+        const targetModel = model || settings.model || "gpt-6-astra";
         if (provider.testModel) {
           const result = await provider.testModel(targetModel);
           return { connected: true, model: targetModel, ...result };
@@ -220,15 +205,12 @@ export function registerRuntimeHandlers(
     "provider:refresh",
     async (_event, input?: { provider?: string }) => {
       try {
-        const { provider } = await configuredProvider(
-          undefined,
-          input?.provider,
-        );
+        const { provider } = await configuredProvider();
         const models = await provider.getModels();
         return { success: true, models, count: models.length };
       } catch {
         const catalog = new ModelCatalog();
-        const models = catalog.getModels(input?.provider);
+        const models = catalog.getModels();
         return { success: true, models, count: models.length };
       }
     },

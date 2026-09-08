@@ -3,6 +3,13 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("g1code", {
   chooseWorkspace: () =>
     ipcRenderer.invoke("workspace:choose") as Promise<string | null>,
+  getCurrentWorkspace: () =>
+    ipcRenderer.invoke("workspace:get-current") as Promise<string | null>,
+  openNativeFolder: (targetPath?: string) =>
+    ipcRenderer.invoke("workspace:open-native-folder", targetPath) as Promise<{
+      success: boolean;
+      path?: string;
+    }>,
   listDirectory: (directory: string) =>
     ipcRenderer.invoke("workspace:list", directory) as Promise<
       Array<{ name: string; kind: "file" | "directory" }>

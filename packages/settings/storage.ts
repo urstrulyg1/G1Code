@@ -7,7 +7,6 @@ import {
   ExperientialLabsProvider,
   EXPERIENTIAL_LABS_DEFAULT_ENDPOINT,
 } from "../ai/experiential-labs";
-import { ArenaAIProvider, ARENA_DEFAULT_ENDPOINT } from "../ai/arena";
 import { globalProviderRegistry } from "../ai/provider-registry";
 import type { AIProvider } from "../ai/provider";
 
@@ -38,10 +37,7 @@ export function getAppDataDir(customDir?: string): string {
 }
 
 const settingsPath = (dir: string) => path.join(dir, "g1code-settings.json");
-const keyPath = (dir: string, provider = "experiential-labs") =>
-  provider === "arena.ai" || provider === "arena"
-    ? path.join(dir, "g1code-arena-api-key.bin")
-    : path.join(dir, "g1code-api-key.bin");
+const keyPath = (dir: string) => path.join(dir, "g1code-api-key.bin");
 const nodeSecretPath = (dir: string) => path.join(dir, ".g1code.secret");
 
 function getOrCreateNodeSecret(dir: string): Buffer {
@@ -99,12 +95,6 @@ function maskApiKey(key: string | null): string | undefined {
   if (trimmed.startsWith("xpl_")) {
     return "xpl_" + "•".repeat(Math.max(16, trimmed.length - 4));
   }
-  if (trimmed.startsWith("arena_")) {
-    return "arena_" + "•".repeat(Math.max(16, trimmed.length - 6));
-  }
-  if (trimmed.startsWith("ar_")) {
-    return "ar_" + "•".repeat(Math.max(16, trimmed.length - 3));
-  }
   return "•".repeat(Math.max(20, trimmed.length));
 }
 
@@ -121,34 +111,23 @@ export async function readSettings(customDir?: string): Promise<Settings> {
   try {
     const raw = await fs.readFile(settingsPath(dir), "utf8");
     const parsed = JSON.parse(raw);
-    const activeProvider =
-      parsed.provider === "arena" || parsed.provider === "arena.ai"
-        ? "arena.ai"
-        : "experiential-labs";
 
-    const defaultEndpoint =
-      activeProvider === "arena.ai"
-        ? ARENA_DEFAULT_ENDPOINT
-        : EXPERIENTIAL_LABS_DEFAULT_ENDPOINT;
-    const defaultModel =
-      activeProvider === "arena.ai" ? "arena-agent-v1" : "gpt-6-astra";
-
-    const key = await getApiKey(dir, activeProvider);
+    const key = await getApiKey(dir);
     const keyExists = Boolean(key);
     return {
       ...defaults,
       ...parsed,
-      provider: activeProvider,
+      provider: "experiential-labs",
       endpoint:
         parsed.endpoint === "https://api.openai.com/v1" || !parsed.endpoint
-          ? defaultEndpoint
+          ? EXPERIENTIAL_LABS_DEFAULT_ENDPOINT
           : parsed.endpoint,
-      model: parsed.model || defaultModel,
+      model: parsed.model || "gpt-6-astra",
       apiKeyConfigured: keyExists,
       apiKeyMasked: maskApiKey(key),
     };
   } catch {
-    const key = await getApiKey(dir, defaults.provider);
+    const key = await getApiKey(dir);
     const keyExists = Boolean(key);
     return {
       ...defaults,
@@ -168,31 +147,11 @@ export async function saveSettings(
   const dir = getAppDataDir(customDir);
   const current = await readSettings(dir);
 
-  const newProvider = input.provider
-    ? input.provider === "arena" || input.provider === "arena.ai"
-      ? "arena.ai"
-      : "experiential-labs"
-    : current.provider;
-  const isProviderChanged = newProvider !== current.provider;
-
-  const defaultEndpoint =
-    newProvider === "arena.ai"
-      ? ARENA_DEFAULT_ENDPOINT
-      : EXPERIENTIAL_LABS_DEFAULT_ENDPOINT;
-  const defaultModel =
-    newProvider === "arena.ai" ? "arena-agent-v1" : "gpt-6-astra";
-
   const next: Settings = {
     ...current,
-    provider: newProvider,
-    endpoint:
-      isProviderChanged && !input.endpoint
-        ? defaultEndpoint
-        : String(input.endpoint ?? current.endpoint),
-    model:
-      isProviderChanged && !input.model
-        ? defaultModel
-        : String(input.model ?? current.model),
+    provider: "experiential-labs",
+    endpoint: String(input.endpoint ?? current.endpoint),
+    model: String(input.model ?? current.model),
     temperature: Number(input.temperature ?? current.temperature),
     maxTokens: Number(input.maxTokens ?? current.maxTokens),
   };
@@ -203,7 +162,7 @@ export async function saveSettings(
     input.apiKey.trim().length > 0
   ) {
     await fs.mkdir(dir, { recursive: true });
-    const targetFile = keyPath(dir, newProvider);
+    const targetFile = keyPath(dir);
     const safeStorage = getElectronSafeStorage();
     if (safeStorage) {
       await fs.writeFile(
@@ -216,7 +175,7 @@ export async function saveSettings(
     }
   }
 
-  const activeKey = await getApiKey(dir, newProvider);
+  const activeKey = await getApiKey(dir);
   next.apiKeyConfigured = Boolean(activeKey);
   next.apiKeyMasked = maskApiKey(activeKey);
 
@@ -225,26 +184,10 @@ export async function saveSettings(
   return next;
 }
 
-export async function getApiKey(
-  customDir?: string,
-  provider?: string,
-): Promise<string | null> {
+export async function getApiKey(customDir?: string): Promise<string | null> {
   const dir = getAppDataDir(customDir);
-  let targetProvider = provider;
-  if (!targetProvider) {
-    try {
-      const raw = await fs.readFile(settingsPath(dir), "utf8");
-      const parsed = JSON.parse(raw);
-      targetProvider = parsed.provider;
-    } catch {
-      targetProvider = "experiential-labs";
-    }
-  }
-
-  const isArena = targetProvider === "arena.ai" || targetProvider === "arena";
-
   try {
-    const data = await fs.readFile(keyPath(dir, targetProvider));
+    const data = await fs.readFile(keyPath(dir));
     const safeStorage = getElectronSafeStorage();
     if (safeStorage) {
       try {
@@ -256,22 +199,11 @@ export async function getApiKey(
       return decryptSecretNode(data, dir);
     }
   } catch {
-    // Fall back to environment variable if configured in shell
-    if (isArena) {
-      const envKey =
-        process.env.ARENA_API_KEY ||
-        process.env.ARENAAI_API_KEY ||
-        process.env.ARENA_KEY;
-      if (envKey && envKey.trim().length > 0) {
-        return envKey.trim();
-      }
-      return null;
-    }
-
     const envKey =
       process.env.EXPLABS_API_KEY ||
       process.env.EXPERIENTIAL_LABS_API_KEY ||
-      process.env.XPL_API_KEY;
+      process.env.XPL_API_KEY ||
+      process.env.EXPERIENTIAL_API_KEY;
     if (envKey && envKey.trim().length > 0) {
       return envKey.trim();
     }
@@ -279,28 +211,20 @@ export async function getApiKey(
   }
 }
 
-export async function configuredProvider(
-  customDir?: string,
-  providerId?: string,
-): Promise<{
+export async function configuredProvider(customDir?: string): Promise<{
   settings: Settings;
   provider: AIProvider;
 }> {
   const dir = getAppDataDir(customDir);
   const settings = await readSettings(dir);
-  const targetProvider =
-    providerId || settings.provider || "experiential-labs";
-  const key = await getApiKey(dir, targetProvider);
+  const key = await getApiKey(dir);
   if (!key) {
-    throw new Error(`Configure an API key for ${targetProvider} first`);
+    throw new Error("Configure an Experiential Labs API key first");
   }
   return {
-    settings: {
-      ...settings,
-      provider: targetProvider,
-    },
+    settings,
     provider: globalProviderRegistry.create(
-      targetProvider,
+      "experiential-labs",
       settings.endpoint,
       key,
     ),

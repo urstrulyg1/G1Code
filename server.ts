@@ -24,7 +24,8 @@ import {
   configuredProvider,
   type Settings,
 } from "./packages/settings/storage";
-import { ModelCatalog } from "./packages/ai/models";
+import { ModelCatalog, PROMOTIONAL_MODELS } from "./packages/ai/models";
+import { globalUsageLimitManager } from "./packages/ai/usage-limits";
 
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.PORT) || 3131;
@@ -192,6 +193,28 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { workspace: selectedWorkspace });
     }
 
+    // Workspace open in native file manager (Finder on macOS, File Explorer on Windows)
+    if (pathname === "/api/workspace/open-folder" && req.method === "POST") {
+      const body = await parseJsonBody<{ path?: string }>(req);
+      const targetDir = validWorkspace(body.path);
+      try {
+        if (process.platform === "darwin") {
+          await execFileAsync("open", [targetDir]);
+        } else if (process.platform === "win32") {
+          await execFileAsync("explorer.exe", [targetDir]);
+        } else {
+          await execFileAsync("xdg-open", [targetDir]);
+        }
+        return sendJson(res, 200, { success: true, path: targetDir });
+      } catch (err) {
+        return sendError(
+          res,
+          500,
+          `Failed to open native file manager: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     // Workspace list entries
     if (
       (pathname === "/api/workspace/list" && req.method === "POST") ||
@@ -309,48 +332,46 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, updated);
     }
 
-    // Provider models (all or free)
-    // Provider models (all or free)
+    // Provider models (exclusively Experiential Labs free models)
     if (pathname === "/api/provider/models/free" && req.method === "GET") {
-      const providerParam = url.searchParams.get("provider") || undefined;
-      try {
-        const { provider } = await configuredProvider(undefined, providerParam);
-        if ("getFreeModels" in provider && typeof (provider as any).getFreeModels === "function") {
-          const freeModels = await (provider as any).getFreeModels();
-          return sendJson(res, 200, freeModels);
-        }
-        const models = await provider.getModels();
-        const freeModels = models.filter((m) => m.isPromotional);
-        return sendJson(res, 200, freeModels);
-      } catch {
-        const catalog = new ModelCatalog();
-        return sendJson(res, 200, catalog.getFreeModels(providerParam));
-      }
+      return sendJson(res, 200, PROMOTIONAL_MODELS);
     }
 
     if (pathname === "/api/provider/models" && req.method === "GET") {
-      const providerParam = url.searchParams.get("provider") || undefined;
-      const isFreeOnly = url.searchParams.get("free") === "true";
-      try {
-        const { provider } = await configuredProvider(undefined, providerParam);
-        if (isFreeOnly) {
-          if ("getFreeModels" in provider && typeof (provider as any).getFreeModels === "function") {
-            const freeModels = await (provider as any).getFreeModels();
-            return sendJson(res, 200, freeModels);
-          }
-        }
-        const models = await provider.getModels();
-        if (isFreeOnly) {
-          return sendJson(res, 200, models.filter((m) => m.isPromotional));
-        }
-        return sendJson(res, 200, models);
-      } catch {
-        const catalog = new ModelCatalog();
-        const models = isFreeOnly
-          ? catalog.getFreeModels(providerParam)
-          : catalog.getModels(providerParam);
-        return sendJson(res, 200, models);
+      return sendJson(res, 200, PROMOTIONAL_MODELS);
+    }
+
+    // Usage limits for Experiential Labs free promotional models
+    if (pathname === "/api/provider/usage-limits" && req.method === "GET") {
+      const limits = globalUsageLimitManager.getAllUsage(
+        PROMOTIONAL_MODELS.map((m) => ({ id: m.id, name: m.name })),
+      );
+      return sendJson(res, 200, limits);
+    }
+
+    if (
+      pathname === "/api/provider/usage-limits/simulate" &&
+      req.method === "POST"
+    ) {
+      const body = await parseJsonBody<{
+        modelId: string;
+        resetInSeconds?: number;
+        reset?: boolean;
+        type?: "hourly" | "daily";
+      }>(req);
+      if (!body.modelId) {
+        return sendError(res, 400, "modelId is required");
       }
+      if (body.reset) {
+        const updated = globalUsageLimitManager.resetModelLimit(body.modelId);
+        return sendJson(res, 200, updated);
+      }
+      const updated = globalUsageLimitManager.setSimulatedLimit(
+        body.modelId,
+        body.resetInSeconds || 60,
+        body.type || "hourly",
+      );
+      return sendJson(res, 200, updated);
     }
 
     // Provider verify connection
@@ -708,8 +729,38 @@ const server = http.createServer(async (req, res) => {
         return sendError(res, 400, "Invalid agent request");
       }
 
-      const { provider, settings } = await configuredProvider();
+      const targetProvider = "experiential-labs";
+
+      let providerPackage;
+      try {
+        providerPackage = await configuredProvider(undefined, targetProvider);
+      } catch (err) {
+        return sendError(
+          res,
+          400,
+          `Configure an API key for Experiential Labs in Settings before starting agent tasks (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
+      const { provider, settings } = providerPackage;
       const selectedModel = body.model || settings.model || "gpt-6-astra";
+
+      // Enforce usage limits for Experiential Labs free models
+      const { allowed, limitInfo } =
+        globalUsageLimitManager.checkAndIncrement(selectedModel);
+      if (!allowed) {
+        const remainingMs = Math.max(
+          0,
+          (limitInfo.limitType === "daily"
+            ? limitInfo.dailyResetAt
+            : limitInfo.hourlyResetAt) - Date.now(),
+        );
+        const mins = Math.ceil(remainingMs / 60000);
+        return sendError(
+          res,
+          429,
+          `Model "${limitInfo.name}" has reached its ${limitInfo.limitType} usage limit (${limitInfo.limitType === "daily" ? limitInfo.dailyLimit : limitInfo.hourlyLimit} requests). Resets in ${mins} minute${mins === 1 ? "" : "s"}. Please select another free model or wait for reset.`,
+        );
+      }
 
       const workspace = validWorkspace(body.workspace);
       const instructions = await fs

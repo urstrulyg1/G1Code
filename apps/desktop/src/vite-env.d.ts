@@ -1,6 +1,25 @@
 interface Window {
   g1code: {
     chooseWorkspace(): Promise<string | null>;
+    getCurrentWorkspace?(): Promise<string | null>;
+    openNativeFolder?(targetPath?: string): Promise<{ success: boolean; path?: string }>;
+    getUsageLimits?(): Promise<Record<string, {
+      modelId: string;
+      name: string;
+      hourlyLimit: number;
+      hourlyUsed: number;
+      hourlyResetAt: number;
+      dailyLimit: number;
+      dailyUsed: number;
+      dailyResetAt: number;
+      isLimitReached: boolean;
+      limitType?: "hourly" | "daily";
+    }>>;
+    simulateLimit?(
+      modelId: string,
+      resetInSeconds?: number,
+      type?: "hourly" | "daily",
+    ): Promise<any>;
     listDirectory(
       directory: string,
     ): Promise<Array<{ name: string; kind: "file" | "directory" }>>;
@@ -77,6 +96,7 @@ interface Window {
       prompt: string;
       mode: "ask" | "plan" | "agent";
       model?: string;
+      provider?: string;
     }): Promise<{ sessionId: string; model?: string }>;
     setSessionModel(
       sessionId: string,

@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Clock,
   Command,
   Edit3,
   FileCode,
@@ -198,7 +199,7 @@ function App() {
   const [userTaskPrompt, setUserTaskPrompt] = useState("now commit and push");
   const [agentPrompt, setAgentPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<
-    "agent" | "ask" | "plan" | "arena-agent" | "review" | "debug" | "refactor"
+    "agent" | "ask" | "plan" | "review" | "debug" | "refactor"
   >("agent");
   const [events, setEvents] = useState<Event[]>([
     {
@@ -264,6 +265,7 @@ function App() {
     {
       id: "gpt-6-astra",
       name: "GPT-6 Astra",
+      provider: "experiential-labs",
       contextWindow: 1050000,
       contextWindowFormatted: "1.05M",
       supportsTools: true,
@@ -278,6 +280,7 @@ function App() {
     {
       id: "gpt-5.6-luna",
       name: "GPT-5.6 Luna",
+      provider: "experiential-labs",
       contextWindow: 1050000,
       contextWindowFormatted: "1.05M",
       supportsTools: true,
@@ -292,6 +295,7 @@ function App() {
     {
       id: "qwen-3.8-27b",
       name: "Qwen3.8 27B",
+      provider: "experiential-labs",
       contextWindow: 1000000,
       contextWindowFormatted: "1M",
       supportsTools: true,
@@ -306,6 +310,7 @@ function App() {
     {
       id: "deepseek-v4-flash",
       name: "DeepSeek V4 Flash",
+      provider: "experiential-labs",
       contextWindow: 1050000,
       contextWindowFormatted: "1.05M",
       supportsTools: true,
@@ -320,6 +325,7 @@ function App() {
     {
       id: "deepseek-r1-distill-qwen-32b",
       name: "DeepSeek R1 Distill Qwen 32B",
+      provider: "experiential-labs",
       contextWindow: 128000,
       contextWindowFormatted: "128K",
       supportsTools: true,
@@ -334,6 +340,7 @@ function App() {
     {
       id: "meta-llama-3.3-70b-instruct",
       name: "Llama 3.3 70B Instruct",
+      provider: "experiential-labs",
       contextWindow: 128000,
       contextWindowFormatted: "128K",
       supportsTools: true,
@@ -348,6 +355,7 @@ function App() {
     {
       id: "qwen-2.5-coder-32b",
       name: "Qwen 2.5 Coder 32B",
+      provider: "experiential-labs",
       contextWindow: 128000,
       contextWindowFormatted: "128K",
       supportsTools: true,
@@ -362,6 +370,7 @@ function App() {
     {
       id: "mistral-small-3-24b",
       name: "Mistral Small 3 24B",
+      provider: "experiential-labs",
       contextWindow: 32768,
       contextWindowFormatted: "32K",
       supportsTools: true,
@@ -373,88 +382,33 @@ function App() {
       description:
         "Compact low-latency model for rapid file edits, lint checks, and inline completion.",
     },
-    {
-      id: "arena-agent-v1",
-      name: "Arena Agent V1",
-      provider: "arena.ai",
-      contextWindow: 256000,
-      contextWindowFormatted: "256K",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: true,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "agent",
-      description:
-        "Autonomous agent model with tool use, multi-step planning, and bash sandbox execution evaluated on Agent Arena.",
-    },
-    {
-      id: "arena-agent-coder",
-      name: "Arena Agent Coder",
-      provider: "arena.ai",
-      contextWindow: 128000,
-      contextWindowFormatted: "128K",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "coding",
-      description:
-        "High-precision coding and refactoring agent model with verified repository repair capabilities.",
-    },
-    {
-      id: "arena-chat-v1",
-      name: "Arena Chat V1",
-      provider: "arena.ai",
-      contextWindow: 128000,
-      contextWindowFormatted: "128K",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "balanced",
-      description:
-        "Top-tier conversational reasoning and instruction following model benchmarked on Chatbot Arena.",
-    },
-    {
-      id: "arena-code-v1",
-      name: "Arena Code V1",
-      provider: "arena.ai",
-      contextWindow: 128000,
-      contextWindowFormatted: "128K",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: false,
-      isPromotional: true,
-      pricingType: "free",
-      recommendedRole: "coding",
-      description:
-        "Specialized coding assistant model leading Arena coding leaderboards.",
-    },
-    {
-      id: "arena-frontier-eval",
-      name: "Arena Frontier Eval",
-      provider: "arena.ai",
-      contextWindow: 200000,
-      contextWindowFormatted: "200K",
-      supportsTools: true,
-      supportsStreaming: true,
-      supportsVision: true,
-      isPromotional: false,
-      pricingType: "credits",
-      recommendedRole: "reasoning",
-      description:
-        "Flagship frontier model evaluator with deep multi-step verification.",
-    },
   ]);
   const [selectedModel, setSelectedModel] = useState("gpt-6-astra");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [modelFilterTab, setModelFilterTab] = useState<
-    "free" | "arena" | "experiential" | "agents" | "all" | "tools" | "reasoning"
+    "all" | "free" | "coding" | "reasoning" | "fast" | "balanced" | "tools"
   >("free");
+
+  // Usage limits tracking for Experiential Labs free models
+  const [usageLimits, setUsageLimits] = useState<
+    Record<
+      string,
+      {
+        modelId: string;
+        name: string;
+        hourlyLimit: number;
+        hourlyUsed: number;
+        hourlyResetAt: number;
+        dailyLimit: number;
+        dailyUsed: number;
+        dailyResetAt: number;
+        isLimitReached: boolean;
+        limitType?: "hourly" | "daily";
+      }
+    >
+  >({});
+  const [, setTicker] = useState(0);
 
   // Autocomplete popovers (@ context & / slash actions)
   const [showContextPicker, setShowContextPicker] = useState(false);
@@ -478,7 +432,26 @@ function App() {
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load initial settings, models, git & problems
+  // Poll usage limits every 30 s so limit-reached state auto-refreshes
+  useEffect(() => {
+    const fetchLimits = () => {
+      if (window.g1code.getUsageLimits) {
+        void window.g1code.getUsageLimits().then((limits) => {
+          if (limits) setUsageLimits(limits);
+        });
+      }
+    };
+    fetchLimits();
+    const id = setInterval(fetchLimits, 30_000);
+    // Ticker forces re-render each second so "resets in Xs" countdown updates
+    const tickId = setInterval(() => setTicker((n) => n + 1), 1_000);
+    return () => {
+      clearInterval(id);
+      clearInterval(tickId);
+    };
+  }, []);
+
+  // Load initial settings, models, workspace, git & problems
   useEffect(() => {
     void window.g1code.getSettings().then((s) => {
       setSettings(s);
@@ -489,11 +462,44 @@ function App() {
       if (res && res.length > 0) setModels(res);
     });
 
+    // Auto-initialize active workspace from backend server if available
+    if (window.g1code.getCurrentWorkspace) {
+      void window.g1code.getCurrentWorkspace().then(async (ws) => {
+        if (ws && ws !== "No workspace open") {
+          setWorkspace(ws);
+          setWorkspaceInput(ws);
+          try {
+            const list = await window.g1code.listDirectory(ws);
+            setEntries(list);
+            const sess = await window.g1code.listSessions(ws);
+            setSessions(sess);
+            void loadGitAndProblems(ws);
+          } catch {
+            // ignore
+          }
+        }
+      });
+    }
+
     const offEvent = window.g1code.onAgentEvent((value) => {
       const event = value as Event;
-      setEvents((old) => [...old, event]);
+      setEvents((old) => {
+        // Accumulate streaming text into the active text message
+        if (event.type === "text" && event.message) {
+          const last = old[old.length - 1];
+          if (last && last.type === "text") {
+            return [
+              ...old.slice(0, -1),
+              { ...last, message: (last.message || "") + event.message },
+            ];
+          }
+        }
+        return [...old, event];
+      });
+
       if (
         event.type === "done" ||
+        event.type === "error" ||
         ["COMPLETED", "FAILED", "STOPPED", "CANCELLED"].includes(
           event.state ?? "",
         )
@@ -628,12 +634,27 @@ function App() {
   // Agent Actions
   const startAgent = async (overridePrompt?: string) => {
     const task = overridePrompt || agentPrompt;
-    if (!task.trim() || workspace === "No workspace open") return;
+    if (!task.trim()) return;
+
+    if (workspace === "No workspace open") {
+      setWorkspaceModal(true);
+      setEvents((old) => [
+        ...old,
+        {
+          type: "error",
+          message:
+            "No workspace open. Please select or open a local project folder first.",
+        },
+      ]);
+      return;
+    }
 
     setRunning(true);
     setEvents([]);
     setUserTaskPrompt(task);
     setSessionTitle(task.length > 40 ? task.slice(0, 40) + "..." : task);
+
+    const targetProvider = "experiential-labs";
 
     // Build timeline card for the requested task
     setTimelineSteps([
@@ -654,6 +675,7 @@ function App() {
         mode:
           agentMode === "plan" ? "plan" : agentMode === "ask" ? "ask" : "agent",
         model: selectedModel,
+        provider: targetProvider,
       });
       setSessionId(res.sessionId);
       setAgentPrompt("");
@@ -671,16 +693,15 @@ function App() {
   };
 
   const handleModelChange = async (newModel: string) => {
+    // Do not allow selecting a model that has reached its usage limit
+    const limit = usageLimits[newModel];
+    if (limit?.isLimitReached) return;
     setSelectedModel(newModel);
     setModelPickerOpen(false);
-    const targetModel = models.find((m) => m.id === newModel);
-    const targetProvider =
-      targetModel?.provider ||
-      (newModel.startsWith("arena-") ? "arena.ai" : "experiential-labs");
     const updated = await window.g1code.saveSettings({
       ...settings,
       model: newModel,
-      provider: targetProvider,
+      provider: "experiential-labs",
     });
     setSettings(updated as SettingsType);
     if (sessionId && window.g1code.setSessionModel) {
@@ -753,7 +774,7 @@ function App() {
       const res = await window.g1code.verifyProvider(settings.provider);
       if (res.connected) {
         setVerificationResult(
-          `✓ Connected! ${res.modelCount} models available from ${settings.provider === "arena.ai" ? "Arena.ai" : "Experiential Labs"}.`,
+          `✓ Connected! ${res.modelCount} models available from Experiential Labs.`,
         );
       } else {
         setVerificationResult(
@@ -842,20 +863,9 @@ function App() {
     textareaRef.current?.focus();
   };
 
-  // Filtered models for Model Picker
+  // Filtered models for Model Picker — only Experiential Labs free models shown
   const freeCount = models.filter((m) => m.isPromotional).length;
   const toolCount = models.filter((m) => m.supportsTools).length;
-  const arenaCount = models.filter(
-    (m) => m.provider === "arena.ai" || m.id.startsWith("arena-"),
-  ).length;
-  const experientialCount = models.filter(
-    (m) =>
-      m.provider === "experiential-labs" ||
-      (!m.provider && !m.id.startsWith("arena-")),
-  ).length;
-  const agentCount = models.filter(
-    (m) => m.recommendedRole === "agent" || m.id.includes("agent"),
-  ).length;
 
   const filteredModels = models.filter((m) => {
     const matchSearch =
@@ -863,15 +873,6 @@ function App() {
       m.id.toLowerCase().includes(modelSearch.toLowerCase());
     if (!matchSearch) return false;
     if (modelFilterTab === "free") return m.isPromotional;
-    if (modelFilterTab === "arena")
-      return m.provider === "arena.ai" || m.id.startsWith("arena-");
-    if (modelFilterTab === "experiential")
-      return (
-        m.provider === "experiential-labs" ||
-        (!m.provider && !m.id.startsWith("arena-"))
-      );
-    if (modelFilterTab === "agents")
-      return m.recommendedRole === "agent" || m.id.includes("agent");
     if (modelFilterTab === "tools") return m.supportsTools;
     if (modelFilterTab === "reasoning") {
       const id = m.id.toLowerCase();
@@ -880,12 +881,16 @@ function App() {
         id.includes("luna") ||
         id.includes("r1") ||
         id.includes("flash") ||
-        id.includes("fable") ||
-        id.includes("reasoning") ||
-        id.includes("eval")
+        id.includes("reasoning")
       );
     }
-    return true;
+    if (modelFilterTab === "coding")
+      return m.recommendedRole === "coding";
+    if (modelFilterTab === "fast")
+      return m.recommendedRole === "fast";
+    if (modelFilterTab === "balanced")
+      return m.recommendedRole === "balanced";
+    return true; // "all"
   });
 
   const activeModelMeta = models.find((m) => m.id === selectedModel) ||
@@ -897,34 +902,58 @@ function App() {
     };
 
   const renderModelCard = (m: (typeof models)[0]) => {
-    const isArena = m.provider === "arena.ai" || m.id.startsWith("arena-");
+    const limit = usageLimits[m.id];
+    const isLimited = limit?.isLimitReached === true;
+    const resetAt = isLimited
+      ? (limit.limitType === "daily" ? limit.dailyResetAt : limit.hourlyResetAt)
+      : 0;
+    const secondsUntilReset = isLimited
+      ? Math.max(0, Math.ceil((resetAt - Date.now()) / 1000))
+      : 0;
+    const resetLabel = isLimited
+      ? secondsUntilReset > 3600
+        ? `Resets in ${Math.ceil(secondsUntilReset / 3600)}h`
+        : secondsUntilReset > 60
+        ? `Resets in ${Math.ceil(secondsUntilReset / 60)}m`
+        : `Resets in ${secondsUntilReset}s`
+      : "";
+
     return (
       <div
-        className={`model-item-card ${selectedModel === m.id ? "active" : ""}`}
+        className={`model-item-card ${selectedModel === m.id ? "active" : ""} ${isLimited ? "model-item-card--limited" : ""}`}
         key={m.id}
-        onClick={() => handleModelChange(m.id)}
+        onClick={() => !isLimited && handleModelChange(m.id)}
+        style={isLimited ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+        title={isLimited ? `Usage limit reached · ${resetLabel}` : undefined}
       >
         <div className="model-item-top">
           <span className="model-item-name">
-            {selectedModel === m.id && (
+            {selectedModel === m.id && !isLimited && (
               <Check size={13} color="var(--accent-model)" />
             )}
             {m.name}
           </span>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {isArena ? (
-              <span className="model-arena-badge">Arena.ai</span>
-            ) : (
-              <span className="model-experiential-badge">Experiential</span>
-            )}
+            <span className="model-experiential-badge">Experiential</span>
             {m.recommendedRole && (
-              <span
-                className={`model-role-badge ${m.recommendedRole === "agent" ? "agent-role" : ""}`}
-              >
+              <span className="model-role-badge">
                 {m.recommendedRole}
               </span>
             )}
-            {m.isPromotional ? (
+            {isLimited ? (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "var(--accent-error, #f43f5e)",
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  background: "rgba(244,63,94,0.12)",
+                  fontWeight: 600,
+                }}
+              >
+                LIMIT REACHED
+              </span>
+            ) : m.isPromotional ? (
               <span className="model-promo-badge">FREE · $0.00</span>
             ) : (
               <span
@@ -944,6 +973,24 @@ function App() {
         {m.description && (
           <div className="model-item-desc">{m.description}</div>
         )}
+        {isLimited && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--accent-error, #f43f5e)",
+              marginTop: 4,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <Clock size={11} />
+            <span>
+              {limit.limitType === "daily" ? "Daily" : "Hourly"} limit reached
+              {resetLabel ? ` · ${resetLabel}` : ""}
+            </span>
+          </div>
+        )}
         <div className="model-caps-row" style={{ marginTop: 6 }}>
           <span>{m.contextWindowFormatted || "128K"} context</span>
           <span>·</span>
@@ -961,12 +1008,8 @@ function App() {
             </>
           )}
           <span>·</span>
-          <span
-            style={{
-              color: isArena ? "var(--accent-agent)" : "var(--accent-model)",
-            }}
-          >
-            {isArena ? "Arena Cloud" : "Experiential Cloud"}
+          <span style={{ color: "var(--accent-model)" }}>
+            Experiential Cloud
           </span>
         </div>
       </div>
@@ -1030,11 +1073,7 @@ function App() {
             title="Active AI Provider Gateway"
           >
             <span className="status-dot-pulse" />
-            <span>
-              {settings.provider === "arena.ai"
-                ? "Arena.ai Gateway"
-                : "Experiential Labs"}
-            </span>
+            <span>Experiential Labs</span>
           </div>
           <button
             className="topbar-btn"
@@ -1515,7 +1554,16 @@ function App() {
                   by Experiential Labs. Open a repository to begin autonomous
                   inspection, plan formulation, and testing.
                 </p>
-                <button className="btn-open-folder" onClick={openWorkspace}>
+                <button
+                  className="btn-open-folder"
+                  onClick={async () => {
+                    if (workspace !== "No workspace open" && window.g1code.openNativeFolder) {
+                      await window.g1code.openNativeFolder(workspace);
+                    } else {
+                      openWorkspace();
+                    }
+                  }}
+                >
                   <FolderOpen size={14} /> Open Project Folder
                 </button>
               </div>
@@ -1777,17 +1825,49 @@ function App() {
                 </button>
               </div>
 
+              {/* Agent Error Messages */}
+              {events
+                .filter((e) => e.type === "error")
+                .map((ev, i) => (
+                  <div className="agent-error-card" key={`err-${i}`}>
+                    <div className="agent-error-header">
+                      <AlertTriangle size={14} color="#f43f5e" />
+                      <span>Execution Error</span>
+                    </div>
+                    <div className="agent-error-msg">{ev.message}</div>
+                    <div className="agent-error-actions">
+                      {ev.message?.toLowerCase().includes("api key") && (
+                        <button
+                          className="btn-error-action"
+                          onClick={() => setSettingsOpen(true)}
+                        >
+                          <Key size={13} /> Configure API Key
+                        </button>
+                      )}
+                      {ev.message?.toLowerCase().includes("workspace") && (
+                        <button
+                          className="btn-error-action"
+                          onClick={() => setWorkspaceModal(true)}
+                        >
+                          <FolderOpen size={13} /> Select Workspace
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
               {/* Agent Reasoning Messages */}
               {events
                 .filter((e) => e.type === "text" || e.type === "done")
-                .slice(-3)
                 .map((ev, i) => (
                   <div className="agent-response-card" key={i}>
                     <div className="agent-provider-tag">
                       <Bot size={13} color="var(--accent-model)" />
-                      <span>Experiential Labs · {selectedModel}</span>
+                      <span>
+                        Experiential Labs · {selectedModel}
+                      </span>
                     </div>
-                    <div>{ev.message}</div>
+                    <div style={{ whiteSpace: "pre-wrap" }}>{ev.message}</div>
                   </div>
                 ))}
             </div>
@@ -1950,7 +2030,7 @@ function App() {
                         onClick={() => setModeMenuOpen(!modeMenuOpen)}
                       >
                         <span style={{ textTransform: "capitalize" }}>
-                          {agentMode === "arena-agent" ? "Arena Agent" : agentMode}
+                          {agentMode}
                         </span>
                         <ChevronDown size={11} />
                       </button>
@@ -1962,7 +2042,6 @@ function App() {
                           {(
                             [
                               "agent",
-                              "arena-agent",
                               "ask",
                               "plan",
                               "review",
@@ -1979,7 +2058,7 @@ function App() {
                               }}
                             >
                               <span style={{ textTransform: "capitalize" }}>
-                                {m === "arena-agent" ? "Arena Agent" : m}
+                                {m}
                               </span>
                             </div>
                           ))}
@@ -1996,9 +2075,7 @@ function App() {
                       title="Select AI Model"
                     >
                       <span className="model-selector-provider">
-                        {activeModelMeta.provider === "arena.ai"
-                          ? "Arena.ai"
-                          : "Experiential Labs"}
+                        Experiential Labs
                       </span>
                       <span className="model-selector-name">
                         {activeModelMeta.name}
@@ -2079,8 +2156,8 @@ function App() {
           >
             <div className="model-picker-header">
               <div className="model-picker-title">
-                <h3>Experiential Labs & Arena.ai Gateway</h3>
-                <span>High-Capability Coding Models · Free Promotional Tier · Autonomous Agents</span>
+                <h3>Experiential Labs — Free Models</h3>
+                <span>High-Capability Coding Models · Free Promotional Tier · Usage-Limited</span>
               </div>
               <button onClick={() => setModelPickerOpen(false)}>
                 <X size={16} color="var(--text-muted)" />
@@ -2090,7 +2167,7 @@ function App() {
             <div className="model-free-notice">
               <Sparkles size={14} color="var(--accent-agent)" />
               <span>
-                <strong>Multi-Provider AI Gateway:</strong> Experiential Labs (Free Promotional Tier) + Arena.ai Chat Models & Autonomous Agents.
+                <strong>Experiential Labs Free Tier:</strong> All models are free to use within their hourly and daily usage limits.
               </span>
             </div>
 
@@ -2114,13 +2191,13 @@ function App() {
               }}
             >
               {[
-                { key: "free", label: `Free Tier (${freeCount})` },
-                { key: "arena", label: `Arena.ai (${arenaCount})` },
-                { key: "experiential", label: `Experiential Labs (${experientialCount})` },
-                { key: "agents", label: `Agents (${agentCount})` },
+                { key: "free", label: `Free (${freeCount})` },
                 { key: "all", label: `All (${models.length})` },
-                { key: "tools", label: `Tool-Capable (${toolCount})` },
+                { key: "coding", label: "Coding" },
                 { key: "reasoning", label: "Reasoning" },
+                { key: "fast", label: "Fast" },
+                { key: "balanced", label: "Balanced" },
+                { key: "tools", label: `Tool-Capable (${toolCount})` },
               ].map((tab) => (
                 <button
                   key={tab.key}
@@ -2133,76 +2210,16 @@ function App() {
             </div>
 
             <div className="model-list-scroll">
-              {modelFilterTab === "free" && (
+              {filteredModels.length === 0 ? (
+                <div style={{ padding: "16px", fontSize: 12, color: "var(--text-muted)" }}>
+                  No models match your filter.
+                </div>
+              ) : (
                 <>
                   <div className="model-category-header">
-                    EXPERIENTIAL LABS FREE PROMOTIONAL MODELS ({filteredModels.length} AVAILABLE · ZERO TOKEN COST)
+                    EXPERIENTIAL LABS FREE MODELS ({filteredModels.length} AVAILABLE · ZERO TOKEN COST)
                   </div>
                   {filteredModels.map((m) => renderModelCard(m))}
-                </>
-              )}
-
-              {modelFilterTab === "arena" && (
-                <>
-                  <div className="model-category-header">
-                    ARENA.AI CHAT MODELS & AUTONOMOUS AGENTS ({filteredModels.length} AVAILABLE)
-                  </div>
-                  {filteredModels.map((m) => renderModelCard(m))}
-                </>
-              )}
-
-              {modelFilterTab === "experiential" && (
-                <>
-                  <div className="model-category-header">
-                    EXPERIENTIAL LABS CATALOG ({filteredModels.length} AVAILABLE)
-                  </div>
-                  {filteredModels.map((m) => renderModelCard(m))}
-                </>
-              )}
-
-              {modelFilterTab === "agents" && (
-                <>
-                  <div className="model-category-header">
-                    AUTONOMOUS AGENTS & CODING RUNNERS ({filteredModels.length} AVAILABLE)
-                  </div>
-                  {filteredModels.map((m) => renderModelCard(m))}
-                </>
-              )}
-
-              {(modelFilterTab === "all" || modelFilterTab === "tools" || modelFilterTab === "reasoning") && (
-                <>
-                  {filteredModels.filter((m) => m.provider === "arena.ai" || m.id.startsWith("arena-")).length > 0 && (
-                    <>
-                      <div className="model-category-header">
-                        ARENA.AI CHAT MODELS & AUTONOMOUS AGENTS
-                      </div>
-                      {filteredModels
-                        .filter((m) => m.provider === "arena.ai" || m.id.startsWith("arena-"))
-                        .map((m) => renderModelCard(m))}
-                    </>
-                  )}
-
-                  {filteredModels.filter((m) => (m.provider === "experiential-labs" || (!m.provider && !m.id.startsWith("arena-"))) && m.isPromotional).length > 0 && (
-                    <>
-                      <div className="model-category-header">
-                        EXPERIENTIAL LABS FREE MODELS ($0.00 TOKEN COST)
-                      </div>
-                      {filteredModels
-                        .filter((m) => (m.provider === "experiential-labs" || (!m.provider && !m.id.startsWith("arena-"))) && m.isPromotional)
-                        .map((m) => renderModelCard(m))}
-                    </>
-                  )}
-
-                  {filteredModels.filter((m) => (m.provider === "experiential-labs" || (!m.provider && !m.id.startsWith("arena-"))) && !m.isPromotional).length > 0 && (
-                    <>
-                      <div className="model-category-header">
-                        EXPERIENTIAL LABS CATALOG (PASSTHROUGH / CREDITS)
-                      </div>
-                      {filteredModels
-                        .filter((m) => (m.provider === "experiential-labs" || (!m.provider && !m.id.startsWith("arena-"))) && !m.isPromotional)
-                        .map((m) => renderModelCard(m))}
-                    </>
-                  )}
                 </>
               )}
             </div>
@@ -2247,22 +2264,7 @@ function App() {
 
             <div className="settings-field">
               <label>AI Provider Gateway</label>
-              <select
-                value={settings.provider || "experiential-labs"}
-                onChange={(e) => {
-                  const p = e.target.value as "experiential-labs" | "arena.ai";
-                  const defaultEndpoint =
-                    p === "arena.ai"
-                      ? "https://api.arena.ai/v1"
-                      : "https://api.experientiallabs.ai/v1";
-                  setSettings({
-                    ...settings,
-                    provider: p,
-                    endpoint: defaultEndpoint,
-                  });
-                  setVerificationResult(null);
-                  setTestModelResult(null);
-                }}
+              <div
                 style={{
                   background: "var(--bg-card)",
                   color: "var(--text-primary)",
@@ -2270,16 +2272,10 @@ function App() {
                   padding: "8px 10px",
                   borderRadius: 6,
                   fontSize: 13,
-                  outline: "none",
                 }}
               >
-                <option value="experiential-labs">
-                  Experiential Labs (Free Promotional Models & Coding Gateway)
-                </option>
-                <option value="arena.ai">
-                  Arena.ai (Chat Models & Autonomous Agent Evaluators)
-                </option>
-              </select>
+                Experiential Labs (Free Promotional Models &amp; Coding Gateway)
+              </div>
             </div>
 
             <div className="settings-field">
@@ -2289,11 +2285,7 @@ function App() {
                 onChange={(e) =>
                   setSettings({ ...settings, endpoint: e.target.value })
                 }
-                placeholder={
-                  settings.provider === "arena.ai"
-                    ? "https://api.arena.ai/v1"
-                    : "https://api.experientiallabs.ai/v1"
-                }
+                placeholder="https://api.experientiallabs.ai/v1"
               />
             </div>
 
@@ -2305,16 +2297,13 @@ function App() {
                   apiKeyDraft
                     ? ""
                     : settings.apiKeyMasked ||
-                      (settings.provider === "arena.ai"
-                        ? "Paste arena_... API Key (or use ARENA_API_KEY env)"
-                        : "Paste xpl_... API Key (or use EXPERIENTIAL_API_KEY env)")
+                      "Paste xpl_... API Key (or use EXPERIENTIAL_API_KEY env)"
                 }
                 value={apiKeyDraft}
                 onChange={(e) => setApiKeyDraft(e.target.value)}
               />
               <small style={{ color: "var(--text-dim)" }}>
-                API keys for {settings.provider === "arena.ai" ? "Arena.ai" : "Experiential Labs"} are encrypted securely on disk. Never exposed to
-                renderer.
+                API keys for Experiential Labs are encrypted securely on disk. Never exposed to renderer.
               </small>
             </div>
 
@@ -2350,9 +2339,7 @@ function App() {
                 onClick={verifyExperientialConnection}
                 disabled={verifying}
               >
-                {verifying
-                  ? "Verifying..."
-                  : `Verify ${settings.provider === "arena.ai" ? "Arena.ai" : "Experiential"}`}
+                {verifying ? "Verifying..." : "Verify Experiential"}
               </button>
               <button
                 className="btn-secondary"
@@ -2366,7 +2353,7 @@ function App() {
                 onClick={async () => {
                   const updated = await window.g1code.saveSettings({
                     ...settings,
-                    provider: settings.provider || "experiential-labs",
+                    provider: "experiential-labs",
                     ...(apiKeyDraft ? { apiKey: apiKeyDraft } : {}),
                   });
                   setSettings(updated as SettingsType);

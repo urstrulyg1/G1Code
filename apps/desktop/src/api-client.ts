@@ -85,6 +85,46 @@ if (typeof window !== "undefined" && !window.g1code) {
       return res.workspace;
     },
 
+    async getCurrentWorkspace(): Promise<string | null> {
+      try {
+        const res = await apiRequest<{ workspace: string }>(
+          "/api/workspace/choose",
+          {
+            method: "POST",
+            body: JSON.stringify({}),
+          },
+        );
+        return res.workspace || null;
+      } catch {
+        return null;
+      }
+    },
+
+    async openNativeFolder(targetPath?: string): Promise<{ success: boolean; path?: string }> {
+      return apiRequest<{ success: boolean; path?: string }>(
+        "/api/workspace/open-folder",
+        {
+          method: "POST",
+          body: JSON.stringify({ path: targetPath }),
+        },
+      );
+    },
+
+    async getUsageLimits(): Promise<Record<string, any>> {
+      return apiRequest<Record<string, any>>("/api/provider/usage-limits");
+    },
+
+    async simulateLimit(
+      modelId: string,
+      resetInSeconds = 60,
+      type: "hourly" | "daily" = "hourly",
+    ): Promise<any> {
+      return apiRequest("/api/provider/usage-limits/simulate", {
+        method: "POST",
+        body: JSON.stringify({ modelId, resetInSeconds, type }),
+      });
+    },
+
     async listDirectory(directory: string) {
       return apiRequest<Array<{ name: string; kind: "file" | "directory" }>>(
         "/api/workspace/list",
@@ -172,6 +212,7 @@ if (typeof window !== "undefined" && !window.g1code) {
       prompt: string;
       mode: "ask" | "plan" | "agent";
       model?: string;
+      provider?: string;
     }) {
       ensureEventSource();
       return apiRequest<{ sessionId: string; model?: string }>(

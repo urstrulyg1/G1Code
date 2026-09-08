@@ -3,7 +3,6 @@ import {
   ExperientialLabsProvider,
   EXPERIENTIAL_LABS_DEFAULT_ENDPOINT,
 } from "./experiential-labs";
-import { ArenaAIProvider, ARENA_DEFAULT_ENDPOINT } from "./arena";
 
 export class ProviderRegistry {
   private providers = new Map<
@@ -19,16 +18,6 @@ export class ProviderRegistry {
           endpoint || EXPERIENTIAL_LABS_DEFAULT_ENDPOINT,
           apiKey,
         ),
-    );
-    this.register(
-      "arena.ai",
-      (endpoint, apiKey) =>
-        new ArenaAIProvider(endpoint || ARENA_DEFAULT_ENDPOINT, apiKey),
-    );
-    this.register(
-      "arena",
-      (endpoint, apiKey) =>
-        new ArenaAIProvider(endpoint || ARENA_DEFAULT_ENDPOINT, apiKey),
     );
   }
 

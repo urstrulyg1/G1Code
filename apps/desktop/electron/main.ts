@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { execFile, spawn, ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -87,6 +87,20 @@ ipcMain.handle("workspace:choose", async () => {
   selectedWorkspace = path.resolve(result.filePaths[0]);
   return selectedWorkspace;
 });
+ipcMain.handle("workspace:get-current", () => {
+  return selectedWorkspace || null;
+});
+ipcMain.handle(
+  "workspace:open-native-folder",
+  async (_event, targetPath?: string) => {
+    const dir = targetPath || selectedWorkspace || process.cwd();
+    if (dir) {
+      await shell.openPath(path.resolve(dir));
+      return { success: true, path: dir };
+    }
+    return { success: false, error: "No directory specified" };
+  },
+);
 ipcMain.handle("workspace:list", async (_event, directory: string) => {
   if (
     typeof directory !== "string" ||

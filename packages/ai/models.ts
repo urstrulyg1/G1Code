@@ -12,7 +12,7 @@ export type ModelCapability = {
 export type ModelMetadata = AIModel & {
   slug: string;
   displayName: string;
-  provider?: "experiential-labs" | "arena.ai";
+  provider?: "experiential-labs";
   contextWindowFormatted: string;
   capabilities: ModelCapability;
   pricingType: "free" | "promotional" | "credits" | "paid";
@@ -380,139 +380,9 @@ export const STANDARD_CATALOG_MODELS: ModelMetadata[] = [
   },
 ];
 
-// Arena.ai Chat & Agent Models
-export const ARENA_MODELS: ModelMetadata[] = [
-  {
-    id: "arena-agent-v1",
-    name: "Arena Agent V1",
-    slug: "arena-agent-v1",
-    displayName: "Arena Agent V1",
-    provider: "arena.ai",
-    contextWindow: 256_000,
-    contextWindowFormatted: "256K",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "agent",
-    description:
-      "Autonomous agent model with tool use, multi-step planning, and bash execution evaluated on Agent Arena.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: true,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 256_000,
-    },
-  },
-  {
-    id: "arena-agent-coder",
-    name: "Arena Agent Coder",
-    slug: "arena-agent-coder",
-    displayName: "Arena Agent Coder",
-    provider: "arena.ai",
-    contextWindow: 128_000,
-    contextWindowFormatted: "128K",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "coding",
-    description:
-      "High-precision coding and refactoring agent model with verified repository repair capabilities.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: true,
-      maxOutputTokens: 32_768,
-      contextWindow: 128_000,
-    },
-  },
-  {
-    id: "arena-chat-v1",
-    name: "Arena Chat V1",
-    slug: "arena-chat-v1",
-    displayName: "Arena Chat V1",
-    provider: "arena.ai",
-    contextWindow: 128_000,
-    contextWindowFormatted: "128K",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "balanced",
-    description:
-      "Top-tier conversational reasoning and instruction following model benchmarked on Chatbot Arena.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: true,
-      maxOutputTokens: 16_384,
-      contextWindow: 128_000,
-    },
-  },
-  {
-    id: "arena-code-v1",
-    name: "Arena Code V1",
-    slug: "arena-code-v1",
-    displayName: "Arena Code V1",
-    provider: "arena.ai",
-    contextWindow: 128_000,
-    contextWindowFormatted: "128K",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    isPromotional: true,
-    pricingType: "free",
-    recommendedRole: "coding",
-    description:
-      "Specialized coding assistant model leading Arena coding leaderboards.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: false,
-      reasoning: false,
-      maxOutputTokens: 16_384,
-      contextWindow: 128_000,
-    },
-  },
-  {
-    id: "arena-frontier-eval",
-    name: "Arena Frontier Eval",
-    slug: "arena-frontier-eval",
-    displayName: "Arena Frontier Eval",
-    provider: "arena.ai",
-    contextWindow: 200_000,
-    contextWindowFormatted: "200K",
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    isPromotional: false,
-    pricingType: "credits",
-    recommendedRole: "reasoning",
-    description:
-      "Flagship frontier model evaluator with deep multi-step verification.",
-    capabilities: {
-      tools: true,
-      streaming: true,
-      vision: true,
-      reasoning: true,
-      maxOutputTokens: 65_536,
-      contextWindow: 200_000,
-    },
-  },
-];
-
 export const ALL_DEFAULT_MODELS: ModelMetadata[] = [
   ...PROMOTIONAL_MODELS,
   ...STANDARD_CATALOG_MODELS,
-  ...ARENA_MODELS,
 ];
 
 export function formatContextWindow(tokens?: number): string {
@@ -545,9 +415,9 @@ export function parseModelMetadata(
     pricing?: { free?: boolean; promotional?: boolean; input?: number; output?: number };
     is_free?: boolean;
     free?: boolean;
-    provider?: "experiential-labs" | "arena.ai";
+    provider?: "experiential-labs";
   },
-  defaultProvider: "experiential-labs" | "arena.ai" = "experiential-labs",
+  defaultProvider: "experiential-labs" = "experiential-labs",
 ): ModelMetadata {
   const id = raw.id;
   const cleanId = id.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -650,10 +520,6 @@ export class ModelCatalog {
         m.pricingType === "free" ||
         m.pricingType === "promotional",
     );
-  }
-
-  getArenaModels(): ModelMetadata[] {
-    return this.getModels("arena.ai");
   }
 
   getExperientialModels(): ModelMetadata[] {
