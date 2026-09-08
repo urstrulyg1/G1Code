@@ -651,6 +651,78 @@ test("Experiential Labs Provider: Agent runtime automatically fails over mid-str
   assert.ok(completedEvent, "Task succeeded after automatic failover");
 });
 
+test("Experiential Labs Provider: Correctly promotes free models dynamically from catalog promotions metadata with $0/$0 pricing", async () => {
+  const originalFetch = globalThis.fetch;
+  ExperientialLabsProvider.clearCatalogCache();
+  try {
+    globalThis.fetch = async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/api/models")) {
+        return new Response(
+          JSON.stringify({
+            promotions: [
+              {
+                label: "qwen3.8-27b",
+                slugs: ["qwen3.8-27b"],
+                display_order: 0,
+                free: true,
+              },
+            ],
+            models: [
+              {
+                model: {
+                  slug: "qwen3.8-27b",
+                  display_name: "Qwen3.8 27B",
+                },
+                providers: [
+                  {
+                    provider: "experiential_cloud",
+                    status: "active",
+                    input_micro_usd_per_million: 320000,
+                    output_micro_usd_per_million: 1490000,
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (urlStr.includes("/v1/models")) {
+        return new Response(
+          JSON.stringify({
+            data: [{ id: "qwen3.8-27b", name: "Qwen3.8 27B" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      return new Response("{}", { status: 200 });
+    };
+
+    const provider = new ExperientialLabsProvider(
+      "https://api.experientiallabs.ai/v1",
+      "xpl_test",
+    );
+    const free = await provider.getFreeModels();
+
+    assert.equal(free.length, 1, "Promotional model with free: true should be parsed as free");
+    const m = free[0];
+    assert.equal(m.id, "qwen3.8-27b");
+    assert.equal(m.pricingType, "free");
+    assert.equal(m.pricingDetails?.input, 0);
+    assert.equal(m.pricingDetails?.output, 0);
+    assert.equal(m.pricingFormatted, "Free ($0 input / $0 output)");
+    assert.equal(m.apiRank, 0);
+    assert.equal(m.isPromotional, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    ExperientialLabsProvider.clearCatalogCache();
+  }
+});
+
+
 
 
 

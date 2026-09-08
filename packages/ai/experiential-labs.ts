@@ -148,6 +148,10 @@ export class ExperientialLabsProvider implements AIProvider {
     data: Map<string, Record<string, unknown>>;
   } | null = null;
 
+  static clearCatalogCache(): void {
+    ExperientialLabsProvider.publicCatalogCache = null;
+  }
+
   private async fetchPublicCatalogMetadata(
     signal?: AbortSignal,
   ): Promise<Map<string, Record<string, unknown>>> {
@@ -177,7 +181,32 @@ export class ExperientialLabsProvider implements AIProvider {
             model?: Record<string, unknown>;
             providers?: Array<Record<string, unknown>>;
           }>;
+          promotions?: Array<{
+            label?: string;
+            slugs?: string[];
+            display_order?: number;
+            free?: boolean;
+            percent_off?: number;
+          }>;
         };
+
+        const promoMap = new Map<
+          string,
+          { display_order: number; free: boolean }
+        >();
+        for (const promo of json.promotions || []) {
+          if (promo.free === true || promo.percent_off === 100) {
+            for (const s of promo.slugs || []) {
+              if (s) {
+                promoMap.set(String(s).toLowerCase(), {
+                  display_order: promo.display_order ?? 0,
+                  free: true,
+                });
+              }
+            }
+          }
+        }
+
         let index = 0;
         for (const item of json.models || []) {
           index++;
@@ -193,9 +222,23 @@ export class ExperientialLabsProvider implements AIProvider {
               p.output_micro_usd_per_million === 0,
           );
           const bestProvider = zeroCostProvider || activeProviders[0];
-          const inputMicro = bestProvider?.input_micro_usd_per_million;
-          const outputMicro = bestProvider?.output_micro_usd_per_million;
+          let inputMicro = bestProvider?.input_micro_usd_per_million;
+          let outputMicro = bestProvider?.output_micro_usd_per_million;
+
+          const promo = promoMap.get(slug);
+          if (promo && promo.free) {
+            inputMicro = 0;
+            outputMicro = 0;
+          }
+
           const isZeroCost = inputMicro === 0 && outputMicro === 0;
+
+          const apiRank =
+            promo && typeof promo.display_order === "number"
+              ? promo.display_order
+              : typeof mod.preferred_rank === "number"
+                ? mod.preferred_rank
+                : index + 10;
 
           metadataMap.set(slug, {
             ...mod,
@@ -203,10 +246,8 @@ export class ExperientialLabsProvider implements AIProvider {
             input_micro: inputMicro,
             output_micro: outputMicro,
             providers: item.providers,
-            api_rank:
-              typeof mod.preferred_rank === "number"
-                ? mod.preferred_rank
-                : index,
+            api_rank: apiRank,
+            is_promotional: Boolean(promo && promo.free),
           });
         }
         ExperientialLabsProvider.publicCatalogCache = {
