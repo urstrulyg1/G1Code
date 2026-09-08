@@ -78,20 +78,29 @@ echo ""
 
 BACKEND_URL="http://127.0.0.1:3131"
 FRONTEND_URL="http://localhost:5173"
-backend_running=0
-frontend_running=0
 
-if curl -fsS "$BACKEND_URL/api/health" >/dev/null 2>&1; then
-  backend_running=1
-  echo "  [OK] Backend already running on http://127.0.0.1:3131; reusing it."
-fi
+# Kill any existing server processes so we always get fresh log output
+kill_existing() {
+  local pids
+  # Backend on port 3131
+  pids=$(lsof -ti tcp:3131 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    echo "  [..] Stopping existing backend (pid $pids)..."
+    echo "$pids" | xargs kill -TERM 2>/dev/null || true
+    sleep 1
+  fi
+  # Frontend on port 5173
+  pids=$(lsof -ti tcp:5173 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    echo "  [..] Stopping existing frontend (pid $pids)..."
+    echo "$pids" | xargs kill -TERM 2>/dev/null || true
+    sleep 1
+  fi
+}
 
-if curl -fsS "$FRONTEND_URL" >/dev/null 2>&1; then
-  frontend_running=1
-  echo "  [OK] Web UI already running on http://localhost:5173; reusing it."
-fi
+kill_existing
 
-# Open the browser automatically once the selected UI is ready.
+# Open the browser automatically once the frontend is ready.
 open_browser() {
   for _ in {1..30}; do
     if curl -fsS "$FRONTEND_URL" >/dev/null 2>&1; then
@@ -106,15 +115,5 @@ open_browser() {
   done
 }
 
-if [ "$backend_running" -eq 1 ] && [ "$frontend_running" -eq 1 ]; then
-  open_browser
-elif [ "$backend_running" -eq 1 ]; then
-  open_browser &
-  npx vite --config apps/desktop/vite.config.ts
-elif [ "$frontend_running" -eq 1 ]; then
-  open_browser &
-  npx tsx server.ts
-else
-  open_browser &
-  npm run dev:ui
-fi
+open_browser &
+npm run dev:ui
