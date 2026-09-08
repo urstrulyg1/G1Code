@@ -6,11 +6,35 @@ import { AgentTool } from "./types";
 import { spawnCommand } from "./command";
 const exec = promisify(execFile);
 export function safePath(workspace: string, requested: string) {
-  const resolved = path.resolve(workspace, requested);
-  const root = path.resolve(workspace);
-  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`))
+  const windowsStyle = /^[A-Za-z]:[\\/]/.test(workspace);
+  const pathApi = windowsStyle ? path.win32 : path;
+  const resolved = pathApi.resolve(workspace, requested);
+  const root = pathApi.resolve(workspace);
+  if (resolved !== root && !resolved.startsWith(`${root}${pathApi.sep}`))
     throw new Error("Path is outside the selected workspace");
   return resolved;
+}
+export async function safeRealPath(workspace: string, requested: string) {
+  const candidate = safePath(workspace, requested);
+  const root = await fs.realpath(workspace);
+  let existing = await fs.realpath(candidate).catch(() => null);
+  if (!existing) {
+    existing = candidate;
+    while (true) {
+      try {
+        const realParent = await fs.realpath(path.dirname(existing));
+        existing = path.join(realParent, path.basename(existing));
+        break;
+      } catch {
+        const parent = path.dirname(existing);
+        if (parent === existing) break;
+        existing = parent;
+      }
+    }
+  }
+  if (existing !== root && !existing.startsWith(`${root}${path.sep}`))
+    throw new Error("Path resolves outside the selected workspace");
+  return candidate;
 }
 const input = (properties: Record<string, unknown>) => ({
   type: "object",
@@ -33,7 +57,7 @@ export const workspaceTools = (): AgentTool[] => [
         startLine?: number;
         endLine?: number;
       };
-      const file = safePath(context.workspace, data.path);
+      const file = await safeRealPath(context.workspace, data.path);
       const stat = await fs.stat(file);
       if (stat.size > 2_000_000 && data.startLine === undefined)
         return {
@@ -62,7 +86,7 @@ export const workspaceTools = (): AgentTool[] => [
     permission: "safe",
     inputSchema: input({ path: { type: "string" } }),
     execute: async (value, context) => {
-      const directory = safePath(
+      const directory = await safeRealPath(
         context.workspace,
         String((value as { path: string }).path ?? "."),
       );
@@ -87,7 +111,7 @@ export const workspaceTools = (): AgentTool[] => [
     inputSchema: input({ query: { type: "string" }, path: { type: "string" } }),
     execute: async (value, context) => {
       const query = String((value as { query: string }).query);
-      const directory = safePath(
+      const directory = await safeRealPath(
         context.workspace,
         String((value as { path?: string }).path ?? "."),
       );
@@ -119,25 +143,23 @@ export const workspaceTools = (): AgentTool[] => [
       content: { type: "string" },
     }),
     execute: async (value, context) => {
-      const file = safePath(
+      const file = await safeRealPath(
         context.workspace,
         String((value as { path: string }).path),
       );
       const original = await fs.readFile(file, "utf8").catch(() => "");
-      const approved = await context.approve(workspaceTools()[3], {
-        path: file,
-        original,
-        proposed: String((value as { content: string }).content),
-      });
-      if (!approved)
-        return { content: "User rejected file change.", isError: true };
-      await fs.mkdir(path.dirname(file), { recursive: true });
-      await fs.writeFile(
-        file,
-        String((value as { content: string }).content),
-        "utf8",
-      );
-      return { content: `Applied change to ${file}` };
+      if (!context.changeService || !context.sessionId)
+        return { content: "Change service is unavailable; file was not changed.", isError: true };
+      const proposed = String((value as { content: string }).content);
+      const change = await context.changeService.proposeChange(context.sessionId, path.relative(context.workspace, file), proposed);
+      context.emit({ type: "CHANGE_PROPOSED", message: `Waiting for approval: ${change.path}`, detail: change.id });
+      return {
+        content: JSON.stringify({ status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch, message: "Waiting for user approval." }),
+        status: "pending_approval",
+        changeId: change.id,
+        path: change.path,
+        diff: change.patch,
+      };
     },
   },
   {
@@ -152,7 +174,7 @@ export const workspaceTools = (): AgentTool[] => [
     }),
     execute: async (value, context) => {
       const data = value as { path: string; search: string; replace: string };
-      const file = safePath(context.workspace, data.path);
+      const file = await safeRealPath(context.workspace, data.path);
       const original = await fs.readFile(file, "utf8");
       if (!original.includes(data.search))
         return {
@@ -160,14 +182,17 @@ export const workspaceTools = (): AgentTool[] => [
           isError: true,
         };
       const proposed = original.replace(data.search, data.replace);
-      const approved = await context.approve(workspaceTools()[4], {
-        path: file,
-        original,
-        proposed,
-      });
-      if (!approved) return { content: "User rejected patch.", isError: true };
-      await fs.writeFile(file, proposed, "utf8");
-      return { content: `Applied patch to ${file}` };
+      if (!context.changeService || !context.sessionId)
+        return { content: "Change service is unavailable; file was not changed.", isError: true };
+      const change = await context.changeService.proposeChange(context.sessionId, data.path, proposed);
+      context.emit({ type: "CHANGE_PROPOSED", message: `Waiting for approval: ${change.path}`, detail: change.id });
+      return {
+        content: JSON.stringify({ status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch, message: "Waiting for user approval." }),
+        status: "pending_approval",
+        changeId: change.id,
+        path: change.path,
+        diff: change.patch,
+      };
     },
   },
   {
@@ -181,7 +206,7 @@ export const workspaceTools = (): AgentTool[] => [
     }),
     execute: async (value, context) => {
       const data = value as { command: string; cwd?: string };
-      const cwd = safePath(context.workspace, data.cwd ?? ".");
+      const cwd = await safeRealPath(context.workspace, data.cwd ?? ".");
       const dangerous =
         /(^|\s)(rm|del|format|sudo)|git\s+(reset|clean|push)|npm\s+install/i.test(
           data.command,
@@ -193,7 +218,27 @@ export const workspaceTools = (): AgentTool[] => [
       )
         return { content: "User denied command execution.", isError: true };
       const execution = spawnCommand(data.command, cwd, context.signal);
-      const result = await execution.wait();
+      context.emit({ type: "command", message: `COMMAND_STARTED ${data.command}` });
+      const drain = async (stream: AsyncIterable<string>, type: string) => {
+        let buffered = "";
+        for await (const chunk of stream) {
+          buffered += chunk;
+          if (buffered.length >= 4096) {
+            context.emit({ type, message: buffered.slice(0, 4096) });
+            buffered = buffered.slice(4096);
+          }
+        }
+        if (buffered) context.emit({ type, message: buffered });
+      };
+      const [result] = await Promise.all([
+        execution.wait(),
+        drain(execution.stdout, "COMMAND_STDOUT"),
+        drain(execution.stderr, "COMMAND_STDERR"),
+      ]);
+      context.emit({
+        type: result.exitCode === 0 ? "COMMAND_COMPLETED" : "COMMAND_FAILED",
+        message: `exit ${result.exitCode}`,
+      });
       return {
         content: JSON.stringify(result),
         isError: result.exitCode !== 0,

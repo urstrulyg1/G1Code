@@ -3,12 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "description": "G1Code AI IDE",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/apps/desktop/electron/main.js",
   "scripts": {
-    "dev": "concurrently -k \"vite --config apps/desktop/vite.config.ts\" \"wait-on http://localhost:5173 && electron .\"",
+    "postinstall": "tsx scripts/ensure-electron.ts",
+    "preflight:electron": "tsx scripts/preflight-electron.ts",
+    "dev": "concurrently -k \"tsx server.ts\" \"vite --config apps/desktop/vite.config.ts\"",
+    "dev:ui": "concurrently -k \"tsx server.ts\" \"vite --config apps/desktop/vite.config.ts\"",
+    "server": "tsx server.ts",
+    "ui": "bash start-ui.sh",
+    "start": "bash start-ui.sh",
+    "electron": "electron .",
+    "electron:dev": "concurrently -k \"vite --config apps/desktop/vite.config.ts\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "tsc -p apps/desktop/tsconfig.json && vite build --config apps/desktop/vite.config.ts && tsc -p apps/desktop/tsconfig.electron.json",
-    "start": "electron .",
+    "e2e": "tsx tests/e2e/runner.ts",
+    "e2e:smoke": "tsx tests/e2e/launch-smoke.ts",
     "test": "tsx --test tests/*.test.ts",
+    "benchmark:repo": "tsx tests/benchmarks/large-repo.ts",
+    "benchmark:files": "tsx tests/benchmarks/large-files.ts",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,html,md}\" \"!package-lock.json\""
   },
   "dependencies": {
@@ -31,5 +42,8 @@
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
     "wait-on": "^8.0.1"
+  },
+  "allowScripts": {
+    "electron@32.3.3": true
   }
 }

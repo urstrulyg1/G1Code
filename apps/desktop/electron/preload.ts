@@ -37,8 +37,22 @@ contextBridge.exposeInMainWorld("g1code", {
   stopAgent: (sessionId: string) => ipcRenderer.send("agent:stop", sessionId),
   listSessions: (workspace: string) =>
     ipcRenderer.invoke("agent:sessions", workspace),
-  loadSessionEvents: (sessionId: string) =>
-    ipcRenderer.invoke("agent:events", sessionId),
+  rebuildIndex: (workspace: string) => ipcRenderer.invoke("index:rebuild", { workspace }),
+  searchSymbols: (workspace: string, query: string) => ipcRenderer.invoke("index:search", { workspace, query }),
+  loadSessionEvents: (workspace: string, sessionId: string) =>
+    ipcRenderer.invoke("agent:events", { workspace, sessionId }),
+  loadSession: (workspace: string, sessionId: string) =>
+    ipcRenderer.invoke("agent:session", { workspace, sessionId }),
+  listChanges: (workspace: string, sessionId?: string) =>
+    ipcRenderer.invoke("agent:changes", { workspace, sessionId }),
+  change: (workspace: string, sessionId: string, id: string, action: "approve" | "reject" | "apply" | "revert") =>
+    ipcRenderer.invoke("agent:change", { workspace, sessionId, id, action }),
+  approveAllChanges: (workspace: string, sessionId: string) =>
+    ipcRenderer.invoke("agent:approve-all-changes", { workspace, sessionId }),
+  rejectAllChanges: (workspace: string, sessionId: string) =>
+    ipcRenderer.invoke("agent:reject-all-changes", { workspace, sessionId }),
+  discardSession: (workspace: string, sessionId: string) =>
+    ipcRenderer.invoke("agent:discard-session", { workspace, sessionId }),
   respondPermission: (requestId: string, allowed: boolean) =>
     ipcRenderer.send("permission:response", { requestId, allowed }),
   onAgentEvent: (listener: (event: unknown) => void) => {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { safePath } from "./workspace";
+import { safeRealPath } from "./workspace";
 
 export const contentHash = (content: string) =>
   createHash("sha256").update(content).digest("hex");
@@ -46,15 +46,16 @@ export async function applyApprovedChange(
   original: string,
   proposed: string,
 ) {
-  const filePath = safePath(workspace, requestedPath);
+  const filePath = await safeRealPath(workspace, requestedPath);
   const current = await fs.readFile(filePath, "utf8").catch(() => null);
-  if (current === null)
+  if (current === null && original !== "")
     return { status: "CONFLICT" as const, reason: "File no longer exists" };
-  if (contentHash(current) !== originalHash || current !== original)
+  if (current !== null && (contentHash(current) !== originalHash || current !== original))
     return {
       status: "CONFLICT" as const,
       reason: "File changed since it was inspected",
     };
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, proposed, "utf8");
   return {
     status: "APPLIED" as const,
@@ -71,7 +72,7 @@ export async function revertAppliedChange(
   original: string,
   applied: string,
 ) {
-  const filePath = safePath(workspace, requestedPath);
+  const filePath = await safeRealPath(workspace, requestedPath);
   const current = await fs.readFile(filePath, "utf8").catch(() => null);
   if (
     current === null ||

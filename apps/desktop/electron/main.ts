@@ -1,14 +1,35 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { execFile } from "node:child_process";
+import { execFile, spawn, ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { registerRuntimeHandlers } from "./runtime";
-import { safePath } from "../../../packages/tools/workspace";
+import { safeRealPath } from "../../../packages/tools/workspace";
 
 const execFileAsync = promisify(execFile);
 const root = __dirname;
 let selectedWorkspace: string | undefined;
+let serverProcess: ChildProcess | null = null;
+
+async function ensureBackendServer() {
+  try {
+    const res = await fetch("http://127.0.0.1:3131/api/health").catch(() => null);
+    if (res && res.ok) return;
+  } catch {
+    // not running
+  }
+  const appPath = app.getAppPath();
+  const tsxPath = path.join(appPath, "node_modules", "tsx", "dist", "cli.mjs");
+  const serverScript = path.join(appPath, "server.ts");
+  try {
+    serverProcess = spawn(process.execPath, [tsxPath, serverScript], {
+      cwd: appPath,
+      stdio: "ignore",
+      env: { ...process.env, PORT: "3131" },
+    });
+  } catch {
+    // ignore
+  }
+}
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -23,8 +44,36 @@ function createWindow() {
       sandbox: true,
     },
   });
-  if (!app.isPackaged) window.loadURL("http://localhost:5173");
-  else window.loadFile(path.join(app.getAppPath(), "dist/index.html"));
+
+  // Security: prevent opening external windows or untrusted navigation
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("http://localhost:5173") && !url.startsWith("file://")) {
+      event.preventDefault();
+    }
+  });
+
+  const distIndex = path.join(app.getAppPath(), "dist", "index.html");
+  if (process.env.VITE_DEV_SERVER_URL) {
+    window.loadURL(process.env.VITE_DEV_SERVER_URL);
+  } else if (require("node:fs").existsSync(distIndex)) {
+    window.loadFile(distIndex);
+  } else {
+    window.loadURL("http://localhost:5173");
+  }
+
+  startEventBridge(window);
+
+  if (process.argv.includes("--smoke")) {
+    window.webContents.on("did-finish-load", () => {
+      console.log("SMOKE_LOAD_SUCCESS");
+      setTimeout(() => app.quit(), 500);
+    });
+    setTimeout(() => {
+      console.log("SMOKE_TIMEOUT_QUIT");
+      app.quit();
+    }, 4000);
+  }
 }
 
 ipcMain.handle("workspace:choose", async () => {
@@ -34,10 +83,12 @@ ipcMain.handle("workspace:choose", async () => {
   return selectedWorkspace;
 });
 ipcMain.handle("workspace:list", async (_event, directory: string) => {
+  if (typeof directory !== "string" || directory.length === 0 || directory.length > 4096)
+    throw new Error("Invalid workspace directory");
   if (!selectedWorkspace) throw new Error("Open a workspace first");
   const entries = await fs.readdir(
     selectedWorkspace
-      ? safePath(selectedWorkspace, path.relative(selectedWorkspace, directory))
+      ? await safeRealPath(selectedWorkspace, path.relative(selectedWorkspace, directory))
       : directory,
     { withFileTypes: true },
   );
@@ -54,20 +105,24 @@ ipcMain.handle("workspace:list", async (_event, directory: string) => {
     );
 });
 ipcMain.handle("file:read", async (_event, filePath: string) => {
+  if (typeof filePath !== "string" || filePath.length === 0 || filePath.length > 4096)
+    throw new Error("Invalid file path");
   if (!selectedWorkspace) throw new Error("Open a workspace first");
   return fs.readFile(
-    safePath(selectedWorkspace, path.relative(selectedWorkspace, filePath)),
+    await safeRealPath(selectedWorkspace, path.relative(selectedWorkspace, filePath)),
     "utf8",
   );
 });
 ipcMain.handle(
   "file:write",
   async (_event, filePath: string, contents: string) => {
+    if (typeof filePath !== "string" || filePath.length === 0 || filePath.length > 4096)
+      throw new Error("Invalid file path");
     if (!selectedWorkspace) throw new Error("Open a workspace first");
     if (typeof contents !== "string" || contents.length > 10_000_000)
       throw new Error("Invalid file contents");
     await fs.writeFile(
-      safePath(selectedWorkspace, path.relative(selectedWorkspace, filePath)),
+      await safeRealPath(selectedWorkspace, path.relative(selectedWorkspace, filePath)),
       contents,
       "utf8",
     );
@@ -77,8 +132,10 @@ ipcMain.handle(
 ipcMain.handle("terminal:run", async (_event, command: string, cwd: string) => {
   if (typeof command !== "string" || command.length > 10_000)
     throw new Error("Invalid command");
+  if (typeof cwd !== "string" || cwd.length === 0 || cwd.length > 4096)
+    throw new Error("Invalid working directory");
   if (!selectedWorkspace) throw new Error("Open a workspace first");
-  const workingDirectory = safePath(
+  const workingDirectory = await safeRealPath(
     selectedWorkspace,
     path.relative(selectedWorkspace, cwd),
   );
@@ -103,16 +160,104 @@ ipcMain.handle("terminal:run", async (_event, command: string, cwd: string) => {
     };
   }
 });
-app.whenReady().then(() => {
-  registerRuntimeHandlers(
-    () => BrowserWindow.getAllWindows()[0],
-    () => selectedWorkspace,
-  );
+const API_BASE = "http://127.0.0.1:3131";
+
+async function api(pathname: string, options?: RequestInit) {
+  await ensureBackendServer();
+  const res = await fetch(`${API_BASE}${pathname}`, {
+    headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
+    ...options,
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      if (j.error) msg = j.error;
+    } catch {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+function registerApiBridgeHandlers() {
+  ipcMain.handle("settings:get", async () => api("/api/settings"));
+  ipcMain.handle("settings:save", async (_e, input) => api("/api/settings", { method: "POST", body: JSON.stringify(input) }));
+  ipcMain.handle("provider:models", async () => api("/api/provider/models"));
+  ipcMain.handle("provider:test", async (_e, model) => api("/api/provider/test", { method: "POST", body: JSON.stringify({ model }) }));
+
+  ipcMain.handle("agent:start", async (_e, input) => api("/api/agent/start", { method: "POST", body: JSON.stringify(input) }));
+  ipcMain.on("agent:stop", (_e, sessionId) => void api("/api/agent/stop", { method: "POST", body: JSON.stringify({ sessionId }) }));
+  ipcMain.handle("agent:sessions", async (_e, ws) => api(`/api/agent/sessions?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}`));
+  ipcMain.handle("agent:session", async (_e, { workspace, sessionId }) => api(`/api/agent/session?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&sessionId=${encodeURIComponent(sessionId)}`));
+  ipcMain.handle("agent:events", async (_e, { workspace, sessionId }) => api(`/api/agent/events-history?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&sessionId=${encodeURIComponent(sessionId)}`));
+  ipcMain.handle("agent:changes", async (_e, { workspace, sessionId }) => api(`/api/agent/changes?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`));
+  ipcMain.handle("agent:change", async (_e, input) => api("/api/agent/change", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
+  ipcMain.handle("agent:approve-all-changes", async (_e, input) => api("/api/agent/approve-all", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
+  ipcMain.handle("agent:reject-all-changes", async (_e, input) => api("/api/agent/reject-all", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
+  ipcMain.handle("agent:discard-session", async (_e, input) => api("/api/agent/discard", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
+  ipcMain.on("permission:response", (_e, input) => void api("/api/agent/permission", { method: "POST", body: JSON.stringify(input) }));
+
+  ipcMain.handle("index:rebuild", async (_e, input) => api("/api/index/rebuild", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
+  ipcMain.handle("index:search", async (_e, input) => api("/api/index/search", { method: "POST", body: JSON.stringify({ workspace: selectedWorkspace, ...input }) }));
+}
+
+function startEventBridge(win: BrowserWindow) {
+  const connect = () => {
+    if (win.isDestroyed()) return;
+    try {
+      const http = require("node:http");
+      const req = http.get("http://127.0.0.1:3131/api/events", (res: any) => {
+        let buffer = "";
+        res.on("data", (chunk: any) => {
+          buffer += chunk.toString();
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
+          for (const part of parts) {
+            if (part.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(part.slice(6));
+                if (win.isDestroyed()) return;
+                if (data.type === "permission:request") {
+                  win.webContents.send("permission:request", data);
+                } else {
+                  win.webContents.send("agent:event", data);
+                }
+              } catch {}
+            }
+          }
+        });
+        res.on("end", () => {
+          setTimeout(connect, 2000);
+        });
+      });
+      req.on("error", () => {
+        setTimeout(connect, 3000);
+      });
+    } catch {
+      setTimeout(connect, 3000);
+    }
+  };
+  connect();
+}
+
+app.whenReady().then(async () => {
+  await ensureBackendServer();
+  registerApiBridgeHandlers();
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
 app.on("window-all-closed", () => {
+  if (serverProcess) {
+    serverProcess.kill("SIGTERM");
+  }
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("will-quit", () => {
+  if (serverProcess) {
+    serverProcess.kill("SIGTERM");
+  }
 });

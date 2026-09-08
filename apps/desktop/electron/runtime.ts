@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { OpenAICompatibleProvider } from "../../../packages/ai/providers/openai-compatible";
@@ -9,71 +9,18 @@ import { AgentRuntime, AgentEvent } from "../../../packages/agent/runtime";
 import { openDatabase } from "../../../packages/database/connection";
 import { DatabaseStore } from "../../../packages/database/repositories";
 import { AgentRuntimeManager } from "../../../packages/agent/manager";
-
-type Settings = {
-  provider: string;
-  endpoint: string;
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  apiKeyConfigured: boolean;
-};
-const settingsPath = () =>
-  path.join(app.getPath("userData"), "g1code-settings.json");
-const keyPath = () => path.join(app.getPath("userData"), "g1code-api-key.bin");
-
-async function readSettings(): Promise<Settings> {
-  const defaults: Settings = {
-    provider: "experimental-labs",
-    endpoint: "https://api.openai.com/v1",
-    model: "",
-    temperature: 0.2,
-    maxTokens: 4096,
-    apiKeyConfigured: false,
-  };
-  try {
-    return {
-      ...defaults,
-      ...JSON.parse(await fs.readFile(settingsPath(), "utf8")),
-      apiKeyConfigured: await fs
-        .stat(keyPath())
-        .then(() => true)
-        .catch(() => false),
-    };
-  } catch {
-    return defaults;
-  }
-}
-async function saveSettings(input: Partial<Settings> & { apiKey?: string }) {
-  const current = await readSettings();
-  const next = {
-    ...current,
-    provider: String(input.provider ?? current.provider),
-    endpoint: String(input.endpoint ?? current.endpoint),
-    model: String(input.model ?? current.model),
-    temperature: Number(input.temperature ?? current.temperature),
-    maxTokens: Number(input.maxTokens ?? current.maxTokens),
-  };
-  if (input.apiKey) {
-    if (!safeStorage.isEncryptionAvailable())
-      throw new Error("OS secure storage is unavailable");
-    await fs.mkdir(path.dirname(keyPath()), { recursive: true });
-    await fs.writeFile(keyPath(), safeStorage.encryptString(input.apiKey));
-    next.apiKeyConfigured = true;
-  }
-  await fs.mkdir(path.dirname(settingsPath()), { recursive: true });
-  await fs.writeFile(settingsPath(), JSON.stringify(next, null, 2), "utf8");
-  return next;
-}
-async function configuredProvider() {
-  const settings = await readSettings();
-  if (!settings.apiKeyConfigured) throw new Error("Configure an API key first");
-  const key = safeStorage.decryptString(await fs.readFile(keyPath()));
-  return {
-    settings,
-    provider: new OpenAICompatibleProvider(settings.endpoint, key),
-  };
-}
+import { ChangeService } from "../../../packages/tools/change-service";
+import type { ChangeApprovalResult } from "../../../packages/agent/runtime";
+import { RepositoryIndexService } from "../../../packages/indexing/service";
+import { captureGitBaseline } from "../../../packages/git/baseline";
+import { testingTools } from "../../../packages/testing/tool";
+import { attributeFiles } from "../../../packages/git/baseline";
+import {
+  readSettings,
+  saveSettings,
+  configuredProvider,
+  type Settings,
+} from "../../../packages/settings/storage";
 function validWorkspace(input: unknown) {
   if (typeof input !== "string" || !path.isAbsolute(input))
     throw new Error("A selected absolute workspace path is required");
@@ -85,7 +32,59 @@ export function registerRuntimeHandlers(
   getSelectedWorkspace: () => string | undefined,
 ) {
   const store = new DatabaseStore(openDatabase());
+  store.markRunningSessionsInterrupted();
+  for (const batch of store.activeChangeBatches()) {
+    void new ChangeService(store, batch.workspaceId).recoverActiveBatches();
+  }
   const manager = new AgentRuntimeManager();
+  const indexService = new RepositoryIndexService(store);
+  const approvalWaiters = new Map<string, {
+    sessionId: string;
+    resolve: (result: ChangeApprovalResult) => void;
+  }>();
+  const activeToolCalls = new Map<string, string>();
+  const waitForChangeApproval = (sessionId: string, changeId: string) =>
+    new Promise<ChangeApprovalResult>((resolve) => {
+      approvalWaiters.set(changeId, { sessionId, resolve });
+    });
+  const finishChangeApproval = async (
+    workspace: string,
+    changeId: string,
+    approved: boolean,
+  ) => {
+    const waiter = approvalWaiters.get(changeId);
+    if (!waiter) throw new Error("Change is not awaiting approval");
+    const change = store.getChange(changeId);
+    const session = store.getSession(waiter.sessionId);
+    if (!change || !session || change.sessionId !== waiter.sessionId || session.workspaceId !== workspace)
+      throw new Error("Change does not belong to the active session");
+    const service = new ChangeService(store, workspace);
+    const result = approved
+      ? await (async () => {
+          service.approveChange(changeId);
+          return service.applyChange(changeId);
+        })()
+      : service.rejectChange(changeId);
+    const status = result.status === "APPLIED" || result.status === "CONFLICT"
+      ? result.status
+      : "REJECTED";
+    const message = status === "APPLIED"
+      ? "Change applied successfully. Continuing agent."
+      : status === "CONFLICT"
+        ? "Change conflicted with an external edit. The file was not overwritten."
+        : "Change rejected by user.";
+    store.addEvent(waiter.sessionId, approved ? `CHANGE_${status}` : "CHANGE_REJECTED", { changeId, status, message });
+    getWindow()?.webContents.send("agent:event", {
+      type: "approval",
+      sessionId: waiter.sessionId,
+      changeId,
+      message,
+      result: { status },
+    });
+    approvalWaiters.delete(changeId);
+    waiter.resolve({ approved: status === "APPLIED", status, message });
+    return result;
+  };
   ipcMain.handle("settings:get", async () => readSettings());
   ipcMain.handle(
     "settings:save",
@@ -97,6 +96,8 @@ export function registerRuntimeHandlers(
     return provider.getModels();
   });
   ipcMain.handle("provider:test", async (_event, model?: string) => {
+    if (model !== undefined && (typeof model !== "string" || model.length > 500))
+      throw new Error("Invalid model");
     const { provider, settings } = await configuredProvider();
     const models = await provider.getModels();
     return {
@@ -105,13 +106,122 @@ export function registerRuntimeHandlers(
       models,
     };
   });
-  ipcMain.handle("agent:sessions", async (_event, workspace: string) =>
-    store.recentSessions(validWorkspace(workspace)),
-  );
-  ipcMain.handle("agent:events", async (_event, sessionId: string) => {
-    if (typeof sessionId !== "string" || sessionId.length > 100)
+  ipcMain.handle("agent:sessions", async (_event, workspace: string) => {
+    const selected = getSelectedWorkspace();
+    if (!selected || validWorkspace(workspace) !== path.resolve(selected)) throw new Error("Workspace is not selected");
+    return store.recentSessions(validWorkspace(workspace));
+  });
+  ipcMain.handle("index:rebuild", async (_event, input: { workspace: string }) => {
+    const workspace = validWorkspace(input?.workspace);
+    if (workspace !== getSelectedWorkspace()) throw new Error("Workspace is not selected");
+    const entries = await indexService.index(workspace);
+    return { files: entries.length };
+  });
+  ipcMain.handle("index:search", async (_event, input: { workspace: string; query: string }) => {
+    const workspace = validWorkspace(input?.workspace);
+    if (workspace !== getSelectedWorkspace() || typeof input.query !== "string" || input.query.length === 0 || input.query.length > 500)
+      throw new Error("Invalid search request");
+    return store.searchSymbols(workspace, input.query);
+  });
+  ipcMain.handle("agent:events", async (_event, input: { sessionId: string; workspace: string }) => {
+    const workspace = validWorkspace(input?.workspace);
+    if (workspace !== getSelectedWorkspace() || !input || typeof input.sessionId !== "string" || input.sessionId.length === 0 || input.sessionId.length > 100)
+      throw new Error("Invalid session event request");
+    const session = store.getSession(input.sessionId);
+    if (!session || session.workspaceId !== workspace) throw new Error("Session does not belong to workspace");
+    return store.sessionEvents(input.sessionId);
+  });
+  ipcMain.handle("agent:session", async (_event, input: { sessionId: string; workspace: string }) => {
+    const workspace = validWorkspace(input?.workspace);
+    if (workspace !== getSelectedWorkspace()) throw new Error("Workspace is not selected");
+    if (!input || typeof input.sessionId !== "string" || input.sessionId.length > 100)
       throw new Error("Invalid session ID");
-    return store.sessionEvents(sessionId);
+    const session = store.recentSessions(workspace, 100).find((item) => item.id === input.sessionId);
+    if (!session) throw new Error("Session not found");
+    return { session, messages: store.sessionMessages(session.id), events: store.sessionEvents(session.id), changes: store.pendingChanges(session.id), testRuns: store.sessionTestRuns(session.id), repairs: store.sessionRepairHistory(session.id), summary: store.taskSummary(session.id), checkpoint: store.checkpoint(session.id) };
+  });
+  ipcMain.handle("agent:changes", async (_event, input: { sessionId?: string; workspace: string }) => {
+    const workspace = validWorkspace(input?.workspace);
+    if (workspace !== getSelectedWorkspace()) throw new Error("Workspace is not selected");
+    if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || input.sessionId.length > 100))
+      throw new Error("Invalid session ID");
+    return store.pendingChanges(input.sessionId);
+  });
+  ipcMain.handle("agent:change", async (_event, input: { action: string; id: string; sessionId: string; workspace: string }) => {
+    const workspace = validWorkspace(input?.workspace);
+    if (workspace !== getSelectedWorkspace()) throw new Error("Workspace is not selected");
+    if (!input || typeof input.id !== "string" || input.id.length === 0 || input.id.length > 100 || typeof input.sessionId !== "string" || input.sessionId.length === 0 || input.sessionId.length > 100 || !["approve", "reject", "apply", "revert"].includes(input.action))
+      throw new Error("Invalid change request");
+    const service = new ChangeService(store, workspace);
+    const change = service.authorizeChange(input.id, input.sessionId);
+    if (input.action === "approve") {
+      return approvalWaiters.has(input.id)
+        ? finishChangeApproval(workspace, input.id, true)
+        : (async () => {
+            service.approveChange(input.id);
+            const applied = await service.applyChange(input.id);
+            store.addEvent(change.sessionId, applied.status === "APPLIED" ? "CHANGE_APPLIED" : "CHANGE_CONFLICT", { changeId: input.id, status: applied.status });
+            return applied;
+          })();
+    }
+    if (input.action === "reject") {
+      return approvalWaiters.has(input.id)
+        ? finishChangeApproval(workspace, input.id, false)
+        : service.rejectChange(input.id);
+    }
+    if (input.action === "apply") return service.applyChange(input.id);
+    return service.revertChange(input.id);
+  });
+  ipcMain.handle("agent:approve-all-changes", async (_event, input: { workspace: string; sessionId: string }) => {
+    const workspace = validWorkspace(input?.workspace);
+    if (workspace !== getSelectedWorkspace() || typeof input.sessionId !== "string") throw new Error("Invalid approval request");
+    const changes = store.pendingChanges(input.sessionId);
+    const session = store.getSession(input.sessionId);
+    if (!session || session.workspaceId !== workspace) throw new Error("Session does not belong to workspace");
+    const conflicts = await Promise.all(changes.map((change) => new ChangeService(store, workspace).detectConflict(change.id)));
+    if (conflicts.some(Boolean)) throw new Error("One or more changes conflict with external edits");
+    const service = new ChangeService(store, workspace);
+    for (const change of changes) if (change.status === "PENDING") service.approveChange(change.id);
+    const result = await service.applyBatch(input.sessionId, changes.map((change) => change.id));
+    for (const change of changes) {
+      const waiter = approvalWaiters.get(change.id);
+      if (waiter) {
+        approvalWaiters.delete(change.id);
+        waiter.resolve({ approved: true, status: "APPLIED", message: "Change batch applied successfully. Continuing agent." });
+      }
+    }
+    store.addEvent(input.sessionId, "CHANGE_BATCH_APPLIED", { batchId: result.batch?.id, changeIds: changes.map((change) => change.id) });
+    return result;
+  });
+  ipcMain.handle("agent:reject-all-changes", async (_event, input: { workspace: string; sessionId: string }) => {
+    const workspace = validWorkspace(input?.workspace);
+    if (workspace !== getSelectedWorkspace() || typeof input.sessionId !== "string") throw new Error("Invalid rejection request");
+    const session = store.getSession(input.sessionId);
+    if (!session || session.workspaceId !== workspace) throw new Error("Session does not belong to workspace");
+    return Promise.all(store.pendingChanges(input.sessionId).map((change) => {
+      if (approvalWaiters.has(change.id)) return finishChangeApproval(workspace, change.id, false);
+      const rejected = new ChangeService(store, workspace).rejectChange(change.id);
+      store.addEvent(input.sessionId, "CHANGE_REJECTED", { changeId: change.id, status: rejected.status });
+      return rejected;
+    }));
+  });
+  ipcMain.handle("agent:discard-session", async (_event, input: { workspace: string; sessionId: string }) => {
+    const workspace = validWorkspace(input?.workspace);
+    if (workspace !== getSelectedWorkspace() || typeof input.sessionId !== "string" || input.sessionId.length === 0 || input.sessionId.length > 100)
+      throw new Error("Invalid discard request");
+    const session = store.getSession(input.sessionId);
+    if (!session || session.workspaceId !== workspace) throw new Error("Session does not belong to workspace");
+    for (const change of store.pendingChanges(input.sessionId)) {
+      if (approvalWaiters.has(change.id)) {
+        approvalWaiters.get(change.id)?.resolve({ approved: false, status: "REJECTED", message: "Session discarded by user." });
+        approvalWaiters.delete(change.id);
+      }
+      new ChangeService(store, workspace).rejectChange(change.id);
+    }
+    manager.cancelSession(input.sessionId);
+    store.updateSessionStatus(input.sessionId, "STOPPED");
+    store.addEvent(input.sessionId, "SESSION_DISCARDED", { message: "Session discarded by user." });
+    return { status: "STOPPED" };
   });
   ipcMain.handle(
     "agent:start",
@@ -140,10 +250,11 @@ export function registerRuntimeHandlers(
         .readFile(path.join(workspace, ".g1code", "instructions.md"), "utf8")
         .catch(() => "");
       const registry = new ToolRegistry();
-      [...workspaceTools(), ...gitTools()].forEach((tool) =>
+      [...workspaceTools(), ...gitTools(), ...testingTools()].forEach((tool) =>
         registry.register(tool),
       );
       const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const changeService = new ChangeService(store, workspace);
       store.createSession({
         id: sessionId,
         workspaceId: workspace,
@@ -153,17 +264,46 @@ export function registerRuntimeHandlers(
         provider: settings.provider,
         status: "RUNNING",
       });
+      const baseline = await captureGitBaseline(workspace).catch(() => null);
+      if (baseline) store.saveGitBaseline(sessionId, baseline);
       store.addMessage(sessionId, "user", input.prompt);
       const emit = (agentEvent: AgentEvent) => {
         store.addEvent(sessionId, agentEvent.type, agentEvent);
+        if (agentEvent.type === "tool" && agentEvent.toolCallId) {
+          const key = `${sessionId}:${agentEvent.toolCallId}`;
+          if (agentEvent.input !== undefined && !activeToolCalls.has(key)) {
+            activeToolCalls.set(key, store.addToolCall(sessionId, agentEvent.toolName ?? "unknown", agentEvent.input));
+          }
+          if (agentEvent.result !== undefined) {
+            const recordId = activeToolCalls.get(key);
+            if (recordId) store.finishToolCall(recordId, agentEvent.result, agentEvent.result && typeof agentEvent.result === "object" && "isError" in agentEvent.result && agentEvent.result.isError ? "FAILED" : "COMPLETED");
+            activeToolCalls.delete(key);
+          }
+        }
         if (agentEvent.type === "text" || agentEvent.type === "done")
           store.addMessage(sessionId, "assistant", agentEvent.message ?? "");
+        if (agentEvent.state === "WAITING_FOR_CHANGE_APPROVAL")
+          store.updateSessionStatus(sessionId, "WAITING_FOR_APPROVAL");
+        if (agentEvent.state === "EXECUTING")
+          store.updateSessionStatus(sessionId, "RUNNING");
         if (agentEvent.state === "COMPLETED")
           store.updateSessionStatus(sessionId, "COMPLETED");
         if (agentEvent.state === "FAILED")
           store.updateSessionStatus(sessionId, "FAILED");
         if (agentEvent.state === "STOPPED")
           store.updateSessionStatus(sessionId, "STOPPED");
+        if (agentEvent.state === "CANCELLED")
+          store.updateSessionStatus(sessionId, "CANCELLED");
+        if (["COMPLETED", "FAILED", "CANCELLED", "STOPPED"].includes(agentEvent.state ?? "")) {
+          void (async () => {
+            const data = store.sessionSummaryData(sessionId);
+            const baseline = data.baseline;
+            let currentStatus = "";
+            if (baseline) currentStatus = await captureGitBaseline(workspace).then((value) => value.status).catch(() => "");
+            const attribution = baseline ? attributeFiles(baseline, data.changes.filter((change) => ["APPLIED", "REVERTED"].includes(change.status)).map((change) => change.path), currentStatus) : { preExisting: [], agent: [], overlapping: [] };
+            store.saveTaskSummary(sessionId, input.prompt, agentEvent.state === "COMPLETED" ? "COMPLETED" : agentEvent.state ?? "FAILED", JSON.stringify({ task: input.prompt, filesChanged: data.changes, tests: data.tests, repairs: data.repairs, attribution }));
+          })();
+        }
         getWindow()?.webContents.send("agent:event", {
           ...agentEvent,
           sessionId,
@@ -214,6 +354,10 @@ export function registerRuntimeHandlers(
         },
         undefined,
         sessionId,
+        changeService,
+        (changeId) => waitForChangeApproval(sessionId, changeId),
+        (run) => { const testRunId = store.addTestRun(sessionId, run); store.addEvent(sessionId, "TEST_RUN_RECORDED", { testRunId, ...run }); },
+        (attempt) => { const id = store.addRepairAttempt(sessionId, { ...attempt, evidence: attempt.evidence, changeIds: [], approvalStatus: "NOT_PROPOSED", result: attempt.result }); store.addEvent(sessionId, "REPAIR_ATTEMPT_RECORDED", { id, ...attempt }); },
       );
       manager.startSession(sessionId, runtime, (signal) =>
         runtime.run(

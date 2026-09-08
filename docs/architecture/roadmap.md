@@ -12,9 +12,9 @@ Current deliverable: Electron window, secure preload bridge, folder picker, recu
 
 Completed across the Phase 2 increments: provider interfaces, configurable OpenAI-compatible transport boundary, model discovery, streaming, normalized errors, retry/rate-limit handling, secure key storage, settings, tool registry, workspace tools, agent modes, bounded loop, streamed events, approval prompts, SQLite session/event repositories, managed cancellation, guarded changes, command spawning, read-only Git tools, repository metadata scanning, and context budgeting. Experimental Labs remains pending verified public API documentation. The remaining UI integration and end-to-end hardening are tracked in `docs/development/phase-2-hardening.md`.
 
-## Phase 3: basic chat
+## Phase 3: agentic coding loop
 
-Add persisted conversations, Markdown rendering, cancellation, retry, model selection, and provider usage telemetry without secrets.
+Persisted sessions, model selection, bounded runtime, durable change proposals, asynchronous approval, unified diff review, safe apply/revert, conflict handling, session restoration, and streamed command activity are implemented incrementally. Targeted test selection, repair, and full Electron E2E remain follow-up work.
 
 ## Phase 4: tools and permissions
 
@@ -35,6 +35,10 @@ Add read-only Git views first, then confirmation-gated mutations, test/build det
 ## Phase 8: production hardening
 
 Add crash recovery, extension API, LSP integrations, diagnostics export, performance work, packaging, installer, auto-update design, and end-to-end temporary repository tests.
+
+## Phase 3.2 status
+
+The single-agent approval boundary is durable and asynchronous. Edit proposals pause the runtime, persist in SQLite, and resume only after a session/workspace-authorized main-process decision. Project detection, targeted test discovery, and a streaming test runner are present. Full Electron E2E, model-driven repair, Git baseline comparison, context deduplication, and symbol indexing remain before the complete autonomous coding loop is considered done.
 
 ## Phase 1 acceptance criteria
 

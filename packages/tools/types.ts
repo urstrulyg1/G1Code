@@ -5,11 +5,18 @@ export type ToolContext = {
   approve: (tool: AgentTool, input: unknown) => Promise<boolean>;
   emit: (event: { type: string; message: string; detail?: string }) => void;
   signal?: AbortSignal;
+  changeService?: import("./change-service").ChangeService;
+  sessionId?: string;
+  recordTestRun?: (run: { command: string; cwd: string; targeted: boolean; exitCode?: number; passed?: boolean; stdout?: string; stderr?: string; duration?: number }) => void;
 };
 export type ToolResult = {
   content: string;
   isError?: boolean;
   exitCode?: number;
+  status?: "pending_approval" | "completed" | "rejected" | "conflict";
+  changeId?: string;
+  path?: string;
+  diff?: string;
 };
 export type AgentTool = {
   name: string;
