@@ -76,20 +76,45 @@ echo "    Press Ctrl+C to stop all servers"
 echo "  ========================================================"
 echo ""
 
-# Open browser automatically on localhost:5173 once dev server is ready
-(
+BACKEND_URL="http://127.0.0.1:3131"
+FRONTEND_URL="http://localhost:5173"
+backend_running=0
+frontend_running=0
+
+if curl -fsS "$BACKEND_URL/api/health" >/dev/null 2>&1; then
+  backend_running=1
+  echo "  [OK] Backend already running on http://127.0.0.1:3131; reusing it."
+fi
+
+if curl -fsS "$FRONTEND_URL" >/dev/null 2>&1; then
+  frontend_running=1
+  echo "  [OK] Web UI already running on http://localhost:5173; reusing it."
+fi
+
+# Open the browser automatically once the selected UI is ready.
+open_browser() {
   for _ in {1..30}; do
-    if curl -s http://localhost:5173 >/dev/null 2>&1; then
+    if curl -fsS "$FRONTEND_URL" >/dev/null 2>&1; then
       if command -v open >/dev/null 2>&1; then
-        open "http://localhost:5173"
+        open "$FRONTEND_URL"
       elif command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "http://localhost:5173" 2>/dev/null
+        xdg-open "$FRONTEND_URL" 2>/dev/null
       fi
       break
     fi
     sleep 0.5
   done
-) &
+}
 
-# Run both backend server and vite frontend concurrently
-npm run dev:ui
+if [ "$backend_running" -eq 1 ] && [ "$frontend_running" -eq 1 ]; then
+  open_browser
+elif [ "$backend_running" -eq 1 ]; then
+  open_browser &
+  npx vite --config apps/desktop/vite.config.ts
+elif [ "$frontend_running" -eq 1 ]; then
+  open_browser &
+  npx tsx server.ts
+else
+  open_browser &
+  npm run dev:ui
+fi
