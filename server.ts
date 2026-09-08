@@ -156,6 +156,27 @@ const server = http.createServer(async (req, res) => {
     `http://${req.headers.host || "localhost"}`,
   );
   const pathname = url.pathname;
+  const method = req.method || "GET";
+  const startTime = Date.now();
+
+  res.on("finish", () => {
+    if (
+      pathname.startsWith("/api") &&
+      pathname !== "/api/health" &&
+      pathname !== "/api/events"
+    ) {
+      const elapsed = Date.now() - startTime;
+      const status = res.statusCode;
+      const color =
+        status >= 500
+          ? "\x1b[31m"
+          : status >= 400
+            ? "\x1b[33m"
+            : "\x1b[32m";
+      const reset = "\x1b[0m";
+      console.log(`[HTTP] ${method} ${pathname} ${color}${status}${reset} (${elapsed}ms)`);
+    }
+  });
 
   try {
     // Health check
@@ -907,6 +928,9 @@ const server = http.createServer(async (req, res) => {
         provider: settings.provider,
         status: "RUNNING",
       });
+      console.log(
+        `[Agent] Task started for session "${sessionId}" | Model: ${selectedModel} | Mode: ${body.mode} | Prompt: "${body.prompt.slice(0, 80)}"`,
+      );
 
       const baseline = await captureGitBaseline(workspace).catch(() => null);
       if (baseline) store.saveGitBaseline(sessionId, baseline);
@@ -914,6 +938,26 @@ const server = http.createServer(async (req, res) => {
 
       const emit = (agentEvent: AgentEvent) => {
         store.addEvent(sessionId, agentEvent.type, agentEvent);
+        if (agentEvent.type === "state" && agentEvent.state) {
+          console.log(`[Agent] State -> ${agentEvent.state}`);
+        } else if (agentEvent.type === "tool" && agentEvent.toolName) {
+          if (agentEvent.input !== undefined) {
+            const preview =
+              typeof agentEvent.input === "object"
+                ? JSON.stringify(agentEvent.input).slice(0, 120)
+                : String(agentEvent.input);
+            console.log(`[Tool] -> ${agentEvent.toolName}: ${preview}`);
+          } else if (agentEvent.result !== undefined) {
+            console.log(`[Tool] <- ${agentEvent.toolName} completed`);
+          }
+        } else if (agentEvent.type === "model_failover") {
+          console.log(`[Model] Rate limit hit. Switching model to ${agentEvent.message}`);
+        } else if (agentEvent.type === "done") {
+          console.log(`[Agent] Session "${sessionId}" completed successfully.`);
+        } else if (agentEvent.type === "error") {
+          console.error(`[Agent Error] Session "${sessionId}":`, agentEvent.message);
+        }
+
         if (agentEvent.type === "tool" && agentEvent.toolCallId) {
           const key = `${sessionId}:${agentEvent.toolCallId}`;
           if (agentEvent.input !== undefined && !activeToolCalls.has(key)) {
@@ -1307,6 +1351,7 @@ const server = http.createServer(async (req, res) => {
     sendError(res, 404, `Route not found: ${pathname}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Server Error] ${pathname}:`, err);
     sendError(res, 500, message);
   }
 });

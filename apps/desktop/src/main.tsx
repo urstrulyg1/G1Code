@@ -1832,27 +1832,43 @@ function App() {
                   </div>
                 ) : (
                   <div>
-                    {events.map((ev, i) => (
-                      <div
-                        key={i}
-                        style={{ display: "flex", gap: 8, marginBottom: 4 }}
-                      >
-                        <span
-                          style={{
-                            color:
-                              ev.type === "error"
-                                ? "var(--accent-error)"
-                                : "var(--accent-agent)",
-                          }}
+                    {events.length > 0 ? (
+                      events.map((ev, i) => (
+                        <div
+                          key={i}
+                          style={{ display: "flex", gap: 8, marginBottom: 4 }}
                         >
-                          {ev.type === "error" ? "!" : "●"}
-                        </span>
-                        <span style={{ color: "var(--text-primary)" }}>
-                          <b>{ev.state || ev.toolName || ev.type}:</b>{" "}
-                          {ev.message || ""}
-                        </span>
+                          <span
+                            style={{
+                              color:
+                                ev.type === "error"
+                                  ? "var(--accent-error)"
+                                  : "var(--accent-agent)",
+                            }}
+                          >
+                            {ev.type === "error" ? "!" : "●"}
+                          </span>
+                          <span style={{ color: "var(--text-primary)" }}>
+                            <b>{ev.state || ev.toolName || ev.type}:</b>{" "}
+                            {ev.message || ""}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <div
+                        style={{
+                          color: "var(--text-muted)",
+                          fontSize: 12,
+                          padding: "12px 4px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <span style={{ color: "var(--accent-agent)" }}>●</span>
+                        System ready. Agent activity, tool calls, and execution steps will appear here in real-time.
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
@@ -2952,3 +2968,5 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </React.StrictMode>,
 );
+
+export default App;
