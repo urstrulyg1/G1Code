@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { execFile, spawn, ChildProcess } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { safeRealPath } from "../../../packages/tools/workspace";
@@ -61,7 +61,7 @@ function createWindow() {
   const distIndex = path.join(app.getAppPath(), "dist", "index.html");
   if (process.env.VITE_DEV_SERVER_URL) {
     window.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else if (require("node:fs").existsSync(distIndex)) {
+  } else if (existsSync(distIndex)) {
     window.loadFile(distIndex);
   } else {
     window.loadURL("http://localhost:5173");

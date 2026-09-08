@@ -24,7 +24,12 @@ async function runE2ESuite() {
     );
 
     const smokePass = await new Promise<boolean>((resolve) => {
-      const child = spawn(electronBinary, [".", "--smoke"], { stdio: "pipe" });
+      const env = { ...process.env };
+      delete env.ELECTRON_RUN_AS_NODE;
+      const child = spawn(electronBinary, [".", "--smoke"], {
+        stdio: "pipe",
+        env,
+      });
       let output = "";
       child.stdout?.on("data", (d) => (output += d.toString()));
       child.stderr?.on("data", (d) => (output += d.toString()));
