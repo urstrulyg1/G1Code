@@ -218,6 +218,7 @@ export class ExperientialLabsProvider implements AIProvider {
   static normalizeModelSlug(modelId: string): string {
     if (!modelId) return "gpt-6-astra";
     const s = modelId.toLowerCase().trim();
+    if (s === "gpt-6" || s === "gpt6") return "gpt-6-astra";
     if (s === "qwen-3.8-27b" || s === "qwen3.8-27b") return "qwen3.8-27b";
     if (s === "meta-llama-3.3-70b-instruct" || s === "llama-3.3-70b")
       return "llama-3.3-70b-instruct";
