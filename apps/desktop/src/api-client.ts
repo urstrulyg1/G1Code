@@ -61,49 +61,10 @@ if (typeof window !== "undefined" && !window.g1code) {
   ensureEventSource();
 
   window.g1code = {
+    // In web mode the workspace modal handles folder selection directly;
+    // this method is only used by Electron via the preload IPC bridge.
     async chooseWorkspace(): Promise<string | null> {
-      // Use native OS folder picker via <input type="file" webkitdirectory>
-      const folderName = await new Promise<string | null>((resolve) => {
-        const input = document.createElement("input");
-        input.type = "file";
-        (input as any).webkitdirectory = true;
-        input.style.display = "none";
-        document.body.appendChild(input);
-
-        input.addEventListener("change", () => {
-          const file = input.files?.[0];
-          if (file && file.webkitRelativePath) {
-            // webkitRelativePath is "folderName/..." — extract the top-level folder
-            resolve(file.webkitRelativePath.split("/")[0]);
-          } else {
-            resolve(null);
-          }
-          document.body.removeChild(input);
-        });
-
-        // Resolve null if the user closes the picker without selecting
-        input.addEventListener("cancel", () => {
-          document.body.removeChild(input);
-          resolve(null);
-        });
-
-        input.click();
-      });
-
-      if (folderName === null) return null;
-
-      // Ask the server for its cwd so we can build the absolute path
-      const { cwd } = await apiRequest<{ cwd: string }>("/api/workspace/cwd");
-      const absolutePath = cwd.replace(/\/+$/, "") + "/" + folderName;
-
-      const res = await apiRequest<{ workspace: string }>(
-        "/api/workspace/choose",
-        {
-          method: "POST",
-          body: JSON.stringify({ path: absolutePath }),
-        },
-      );
-      return res.workspace;
+      return null;
     },
 
     async getCurrentWorkspace(): Promise<string | null> {

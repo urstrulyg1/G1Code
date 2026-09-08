@@ -18,6 +18,7 @@ import {
   FileCode,
   Folder,
   FolderOpen,
+  ExternalLink,
   GitBranch,
   GitCommit,
   GitFork,
@@ -553,30 +554,67 @@ function App() {
     }
   };
 
-  const openWorkspace = async () => {
+  const openNativeProjectFolder = async () => {
     try {
-      const selected = await window.g1code.chooseWorkspace();
-      if (selected) {
-        setWorkspace(selected);
-        setWorkspaceInput(selected);
-        setEntries(await window.g1code.listDirectory(selected));
-        setSessions(await window.g1code.listSessions(selected));
-        void window.g1code.rebuildIndex(selected);
-        void loadGitAndProblems(selected);
+      if (window.g1code?.openNativeFolder) {
+        const targetPath =
+          workspace && workspace !== "No workspace open" ? workspace : undefined;
+        await window.g1code.openNativeFolder(targetPath);
       }
-    } catch {
-      setWorkspaceModal(true);
+    } catch (err) {
+      console.error("Failed to open native project folder:", err);
     }
+  };
+
+  const openWorkspace = async () => {
+    // Use the File System Access API (showDirectoryPicker) for a native VS Code-style
+    // folder picker — opens the OS panel directly with no intermediate dialog.
+    if (typeof (window as any).showDirectoryPicker === "function") {
+      try {
+        const handle = await (window as any).showDirectoryPicker({ mode: "read" });
+        const folderName: string = handle.name;
+        // Resolve to absolute path via the server's cwd
+        const { cwd } = await fetch("/api/workspace/cwd").then((r) => r.json()) as { cwd: string };
+        const absolutePath = cwd.replace(/\/+$/, "") + "/" + folderName;
+        const { workspace: serverWs } = await fetch("/api/workspace/choose", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: absolutePath }),
+        }).then((r) => r.json()) as { workspace: string };
+        const finalWs = serverWs || absolutePath;
+        setWorkspace(finalWs);
+        setWorkspaceInput(finalWs);
+        setEntries(await window.g1code.listDirectory(finalWs));
+        setSessions(await window.g1code.listSessions(finalWs));
+        void window.g1code.rebuildIndex(finalWs);
+        void loadGitAndProblems(finalWs);
+        return;
+      } catch (err: any) {
+        // User cancelled (AbortError) — do nothing. Any other error falls through to modal.
+        if (err?.name === "AbortError") return;
+      }
+    }
+    // Fallback: show the manual path-entry modal
+    setWorkspaceModal(true);
   };
 
   const submitWorkspacePath = async () => {
     if (!workspaceInput.trim()) return;
+    const chosen = workspaceInput.trim();
     try {
-      setWorkspace(workspaceInput.trim());
-      setEntries(await window.g1code.listDirectory(workspaceInput.trim()));
-      setSessions(await window.g1code.listSessions(workspaceInput.trim()));
-      void window.g1code.rebuildIndex(workspaceInput.trim());
-      void loadGitAndProblems(workspaceInput.trim());
+      // Tell the server which workspace to use, then load it
+      const { workspace: serverWs } = await fetch("/api/workspace/choose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: chosen }),
+      }).then((r) => r.json()) as { workspace: string };
+      const finalWs = serverWs || chosen;
+      setWorkspace(finalWs);
+      setWorkspaceInput(finalWs);
+      setEntries(await window.g1code.listDirectory(finalWs));
+      setSessions(await window.g1code.listSessions(finalWs));
+      void window.g1code.rebuildIndex(finalWs);
+      void loadGitAndProblems(finalWs);
       setWorkspaceModal(false);
     } catch (err) {
       alert(
@@ -1352,8 +1390,14 @@ function App() {
                   <span>EXPLORER</span>
                   <div className="sidebar-actions">
                     <button
+                      onClick={() => void openNativeProjectFolder()}
+                      title="Open in Finder / File Explorer"
+                    >
+                      <ExternalLink size={13} />
+                    </button>
+                    <button
                       onClick={openWorkspace}
-                      title="Open Workspace Folder"
+                      title="Change Workspace Folder"
                     >
                       <FolderOpen size={13} />
                     </button>
@@ -1571,7 +1615,7 @@ function App() {
                 </p>
                 <button
                   className="btn-open-folder"
-                  onClick={() => void openWorkspace()}
+                  onClick={() => void openNativeProjectFolder()}
                 >
                   <FolderOpen size={14} /> Open Project Folder
                 </button>
@@ -2444,7 +2488,7 @@ function App() {
         </div>
       )}
 
-      {/* WORKSPACE DIRECTORY MODAL */}
+      {/* WORKSPACE DIRECTORY MODAL — fallback for browsers without showDirectoryPicker */}
       {workspaceModal && (
         <div
           className="settings-modal"
@@ -2458,6 +2502,7 @@ function App() {
                 placeholder="/path/to/project"
                 value={workspaceInput}
                 onChange={(e) => setWorkspaceInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void submitWorkspacePath()}
                 autoFocus
               />
             </div>
