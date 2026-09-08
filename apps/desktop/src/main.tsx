@@ -649,6 +649,18 @@ function App() {
       return;
     }
 
+    const currentLimit = usageLimits[selectedModel];
+    if (currentLimit?.isLimitReached) {
+      setEvents((old) => [
+        ...old,
+        {
+          type: "error",
+          message: `Model "${activeModelMeta.name}" has reached its ${currentLimit.limitType || "usage"} limit. Please select another free model or wait for reset.`,
+        },
+      ]);
+      return;
+    }
+
     setRunning(true);
     setEvents([]);
     setUserTaskPrompt(task);
@@ -680,6 +692,9 @@ function App() {
       setSessionId(res.sessionId);
       setAgentPrompt("");
       setAttachedContext([]);
+      if (window.g1code.getUsageLimits) {
+        void window.g1code.getUsageLimits().then((l) => l && setUsageLimits(l));
+      }
     } catch (err) {
       setRunning(false);
       setEvents((old) => [
@@ -1556,17 +1571,7 @@ function App() {
                 </p>
                 <button
                   className="btn-open-folder"
-                  onClick={async () => {
-                    if (workspace !== "No workspace open" && window.g1code.openNativeFolder) {
-                      try {
-                        await window.g1code.openNativeFolder(workspace);
-                      } catch {
-                        openWorkspace();
-                      }
-                    } else {
-                      openWorkspace();
-                    }
-                  }}
+                  onClick={() => void openWorkspace()}
                 >
                   <FolderOpen size={14} /> Open Project Folder
                 </button>
@@ -2007,6 +2012,52 @@ function App() {
                   </div>
                 )}
 
+                {usageLimits[selectedModel]?.isLimitReached && (
+                  <div className="model-limit-warning-banner">
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
+                      <AlertTriangle size={15} color="#f59e0b" />
+                      <span>
+                        <strong>{activeModelMeta.name}</strong> has reached its{" "}
+                        {usageLimits[selectedModel].limitType === "daily"
+                          ? "daily"
+                          : "hourly"}{" "}
+                        usage limit.
+                        {(() => {
+                          const limit = usageLimits[selectedModel];
+                          const resetAt =
+                            limit.limitType === "daily"
+                              ? limit.dailyResetAt
+                              : limit.hourlyResetAt;
+                          const sec = Math.max(
+                            0,
+                            Math.ceil((resetAt - Date.now()) / 1000),
+                          );
+                          const label =
+                            sec > 3600
+                              ? `${Math.ceil(sec / 3600)}h`
+                              : sec > 60
+                                ? `${Math.ceil(sec / 60)}m`
+                                : `${sec}s`;
+                          return ` Resets in ${label}.`;
+                        })()}
+                      </span>
+                    </div>
+                    <button
+                      className="btn-switch-model"
+                      onClick={() => {
+                        const available = models.find(
+                          (m) => !usageLimits[m.id]?.isLimitReached,
+                        );
+                        if (available) void handleModelChange(available.id);
+                      }}
+                    >
+                      Switch Model
+                    </button>
+                  </div>
+                )}
+
                 <textarea
                   ref={textareaRef}
                   className="composer-textarea"
@@ -2083,9 +2134,20 @@ function App() {
                       </span>
                       <span className="model-selector-name">
                         {activeModelMeta.name}
-                        {activeModelMeta.isPromotional && (
+                        {usageLimits[selectedModel]?.isLimitReached ? (
+                          <span
+                            className="model-limit-badge"
+                            style={{
+                              fontSize: 9,
+                              padding: "1px 5px",
+                              marginLeft: 4,
+                            }}
+                          >
+                            LIMIT REACHED
+                          </span>
+                        ) : activeModelMeta.isPromotional ? (
                           <span className="model-promo-badge mini">FREE</span>
-                        )}
+                        ) : null}
                         <ChevronDown size={10} />
                       </span>
                     </div>
@@ -2094,8 +2156,16 @@ function App() {
                     <button
                       className="btn-send-agent"
                       onClick={() => void startAgent()}
-                      disabled={running || !agentPrompt.trim()}
-                      title="Send Prompt (Enter)"
+                      disabled={
+                        running ||
+                        !agentPrompt.trim() ||
+                        Boolean(usageLimits[selectedModel]?.isLimitReached)
+                      }
+                      title={
+                        usageLimits[selectedModel]?.isLimitReached
+                          ? "Model usage limit reached. Select another free model or wait for reset."
+                          : "Send Prompt (Enter)"
+                      }
                     >
                       <ArrowRight size={16} />
                     </button>
