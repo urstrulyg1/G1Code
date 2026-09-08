@@ -477,6 +477,44 @@ export class ExperientialLabsProvider implements AIProvider {
     return modelId.trim();
   }
 
+  /**
+   * Converts internal camelCase ChatMessage objects to the OpenAI-compatible
+   * wire format (snake_case). The API expects `tool_calls` and `tool_call_id`,
+   * not camelCase `toolCalls` / `toolCallId`.
+   */
+  private serializeMessages(
+    messages: ChatMessage[],
+  ): Record<string, unknown>[] {
+    return messages.map((msg) => {
+      if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
+        return {
+          role: msg.role,
+          content: msg.content ?? null,
+          tool_calls: msg.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: "function",
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.arguments ?? {}),
+            },
+          })),
+        };
+      }
+      if (msg.role === "tool") {
+        return {
+          role: "tool",
+          tool_call_id: msg.toolCallId,
+          content: msg.content,
+        };
+      }
+      // system / user / plain assistant (no tool calls)
+      return {
+        role: msg.role,
+        content: msg.content,
+      };
+    });
+  }
+
   private buildRequestBody(
     request: ChatRequest,
     stream = false,
@@ -487,7 +525,7 @@ export class ExperientialLabsProvider implements AIProvider {
     const meta = globalModelCatalog.findModel(targetModel);
     const body: Record<string, unknown> = {
       model: targetModel,
-      messages: request.messages,
+      messages: this.serializeMessages(request.messages),
       stream,
     };
 
