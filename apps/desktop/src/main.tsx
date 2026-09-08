@@ -201,21 +201,13 @@ function App() {
   // Agent State
   const [running, setRunning] = useState(false);
   const [sessionId, setSessionId] = useState("");
-  const [sessionTitle, setSessionTitle] = useState(
-    "Updating Git Repository Content",
-  );
-  const [userTaskPrompt, setUserTaskPrompt] = useState("now commit and push");
+  const [sessionTitle, setSessionTitle] = useState("");
+  const [userTaskPrompt, setUserTaskPrompt] = useState("");
   const [agentPrompt, setAgentPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<
     "agent" | "ask" | "plan" | "review" | "debug" | "refactor"
   >("agent");
-  const [events, setEvents] = useState<Event[]>([
-    {
-      type: "state",
-      state: "COMPLETED",
-      message: "Repository initialized and verified.",
-    },
-  ]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [changes, setChanges] = useState<Change[]>([]);
   const [sessions, setSessions] = useState<
     Array<{
@@ -235,30 +227,7 @@ function App() {
   // Structured Timeline Tasks (BOB / Antigravity Style)
   const [timelineSteps, setTimelineSteps] = useState<
     Array<{ title: string; bullets: string[] }>
-  >([
-    {
-      title: "1. start-ui.sh & start-ui.bat:",
-      bullets: [
-        "Single-command browser-first runner",
-        "Spins up Node services",
-        "Launches frontend dashboard",
-      ],
-    },
-    {
-      title: "2. Decoupled Architecture",
-      bullets: [
-        "Electron main process + preload security bridge",
-        "Browser API client parity",
-      ],
-    },
-    {
-      title: "3. Automated Validation",
-      bullets: [
-        "46 automated tests passing",
-        "E2E smoke tests & provider resilience",
-      ],
-    },
-  ]);
+  >([]);
 
   // Experiential Labs Provider & Models (Dynamically loaded directly from ExperientialLabs.ai)
   const [settings, setSettings] = useState<SettingsType>({
@@ -2166,7 +2135,7 @@ function App() {
                           </span>
                         ) : activeModelMeta.isPromotional ? (
                           <span className="model-promo-badge mini">
-                            Free ($0 input / $0 output)
+                            Free · $0/M
                           </span>
                         ) : null}
                         <ChevronDown size={10} />
@@ -2223,14 +2192,15 @@ function App() {
 
         <div className="statusbar-right">
           <div
-            className="statusbar-item"
+            className="statusbar-item model-pill"
             onClick={() => setModelPickerOpen(true)}
           >
-            <span>Model: {activeModelMeta.name}</span>
+            <span className="statusbar-exp-badge">EXP</span>
+            <span>{activeModelMeta.name}</span>
           </div>
           <div className="statusbar-item">
             <span>
-              Context: 34K / {activeModelMeta.contextWindowFormatted || "1.05M"}
+              Context: {activeModelMeta.contextWindowFormatted || "—"}
             </span>
           </div>
           <div className="statusbar-item">

@@ -266,12 +266,15 @@ export class AgentRuntime {
         return;
       }
       const toolCalls = [...calls.values()];
-      messages.push({ role: "assistant", content: text, toolCalls });
       if (!toolCalls.length) {
+        // No tool calls — push a plain assistant message (no toolCalls field)
+        messages.push({ role: "assistant", content: text });
         this.transition("COMPLETED", "Task completed");
         this.event({ type: "done", message: text });
         return;
       }
+      // Tool calls present — include them in the assistant message
+      messages.push({ role: "assistant", content: text, toolCalls });
       this.transition(
         mode === "plan" ? "ANALYZING" : "EXECUTING",
         `${toolCalls.length} tool request${toolCalls.length === 1 ? "" : "s"}`,
