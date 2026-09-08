@@ -131,6 +131,160 @@ type ModelItem = {
   apiRank?: number;
 };
 
+// ─── Lightweight Markdown Renderer ──────────────────────────────────────────
+// Renders the subset of Markdown that Bob/AI models typically produce:
+// fenced code blocks, inline code, bold, italic, headers, ordered/unordered
+// lists, blockquotes, horizontal rules, and plain text with file-path links.
+function renderMarkdown(
+  text: string,
+  openFile: (path: string) => void,
+  workspace: string,
+): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const lines = text.split("\n");
+  let i = 0;
+  let keyIdx = 0;
+  const key = () => keyIdx++;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Fenced code block
+    if (/^```/.test(line)) {
+      const lang = line.slice(3).trim();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing ```
+      nodes.push(
+        <div className="md-code-block" key={key()}>
+          {lang && <div className="md-code-lang">{lang}</div>}
+          <pre><code>{codeLines.join("\n")}</code></pre>
+        </div>
+      );
+      continue;
+    }
+
+    // Heading
+    const headingMatch = line.match(/^(#{1,4})\s+(.*)/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const Tag = `h${level}` as "h1" | "h2" | "h3" | "h4";
+      nodes.push(<Tag className={`md-h${level}`} key={key()}>{inlineMarkdown(headingMatch[2], openFile, workspace, key)}</Tag>);
+      i++;
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(line.trim())) {
+      nodes.push(<hr className="md-hr" key={key()} />);
+      i++;
+      continue;
+    }
+
+    // Blockquote
+    if (line.startsWith("> ")) {
+      const quoteLines: string[] = [];
+      while (i < lines.length && lines[i].startsWith("> ")) {
+        quoteLines.push(lines[i].slice(2));
+        i++;
+      }
+      nodes.push(
+        <blockquote className="md-blockquote" key={key()}>
+          {quoteLines.map((ql, qi) => <span key={qi}>{inlineMarkdown(ql, openFile, workspace, key)}<br /></span>)}
+        </blockquote>
+      );
+      continue;
+    }
+
+    // Unordered list
+    if (/^[-*+]\s/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*+]\s/.test(lines[i])) {
+        items.push(lines[i].replace(/^[-*+]\s/, ""));
+        i++;
+      }
+      nodes.push(
+        <ul className="md-ul" key={key()}>
+          {items.map((item, ii) => <li key={ii}>{inlineMarkdown(item, openFile, workspace, key)}</li>)}
+        </ul>
+      );
+      continue;
+    }
+
+    // Ordered list
+    if (/^\d+\.\s/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
+        items.push(lines[i].replace(/^\d+\.\s/, ""));
+        i++;
+      }
+      nodes.push(
+        <ol className="md-ol" key={key()}>
+          {items.map((item, ii) => <li key={ii}>{inlineMarkdown(item, openFile, workspace, key)}</li>)}
+        </ol>
+      );
+      continue;
+    }
+
+    // Empty line → spacer
+    if (line.trim() === "") {
+      nodes.push(<div className="md-spacer" key={key()} />);
+      i++;
+      continue;
+    }
+
+    // Paragraph
+    nodes.push(
+      <p className="md-p" key={key()}>
+        {inlineMarkdown(line, openFile, workspace, key)}
+      </p>
+    );
+    i++;
+  }
+
+  return nodes;
+}
+
+function inlineMarkdown(
+  text: string,
+  openFile: (path: string) => void,
+  workspace: string,
+  key: () => number,
+): React.ReactNode {
+  // Split on inline code, bold, italic, and file paths
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|_[^_]+_|\/[\w./\-]+\.[a-z]{1,5})/g;
+  const parts = text.split(pattern);
+  return parts.map((part) => {
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code className="md-inline-code" key={key()}>{part.slice(1, -1)}</code>;
+    }
+    if ((part.startsWith("**") && part.endsWith("**")) || (part.startsWith("__") && part.endsWith("__"))) {
+      return <strong key={key()}>{part.slice(2, -2)}</strong>;
+    }
+    if ((part.startsWith("*") && part.endsWith("*")) || (part.startsWith("_") && part.endsWith("_"))) {
+      return <em key={key()}>{part.slice(1, -1)}</em>;
+    }
+    if (/^\/[\w./\-]+\.[a-z]{1,5}$/.test(part) && workspace !== "No workspace open") {
+      return (
+        <span
+          key={key()}
+          className="agent-file-link"
+          onClick={() => void openFile(part.replace(workspace + "/", ""))}
+          title={`Open ${part}`}
+        >
+          {part}
+        </span>
+      );
+    }
+    return <React.Fragment key={key()}>{part}</React.Fragment>;
+  });
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function getLanguage(filePath: string): string {
   if (filePath.endsWith(".ts") || filePath.endsWith(".tsx"))
     return "typescript";
@@ -177,6 +331,11 @@ function App() {
   });
   const [resizingPane, setResizingPane] = useState<"sidebar" | "agent" | "drawer" | null>(null);
   const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
+
+  // Keep workspaceRef in sync so closures always see the latest workspace
+  useEffect(() => {
+    workspaceRef.current = workspace;
+  }, [workspace]);
 
   useEffect(() => {
     try {
@@ -332,6 +491,7 @@ function App() {
   // Structured Timeline (retired fake state — now driven by real events)
   // keep a ref to the last submitted prompt for Retry
   const lastPromptRef = useRef<string>("");
+  const workspaceRef = useRef<string>(workspace);
   const agentBodyRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
 
@@ -536,9 +696,9 @@ function App() {
         )
       ) {
         setRunning(false);
-        // Refresh changes and git status on completion
+        // Refresh changes and git status on completion — use ref to avoid stale closure
         void loadChanges();
-        void loadGitAndProblems(workspace);
+        void loadGitAndProblems(workspaceRef.current);
       }
       if (event.state === "WAITING_FOR_CHANGE_APPROVAL") {
         void loadChanges();
@@ -836,13 +996,19 @@ function App() {
     let modelToUse = selectedModel;
     const currentLimit = usageLimits[modelToUse];
     const currentMeta = models.find((m) => m.id === modelToUse);
+    // A model is valid if it is confirmed free ($0/$0) and not usage-limited.
+    // If the models list hasn't loaded yet but a model is configured, allow it through.
     const isCurrentValid =
       Boolean(modelToUse) &&
-      Boolean(currentMeta) &&
-      currentMeta?.pricingType === "free" &&
-      currentMeta?.pricingDetails?.input === 0 &&
-      currentMeta?.pricingDetails?.output === 0 &&
-      !currentLimit?.isLimitReached;
+      (models.length === 0 ||
+        (Boolean(currentMeta) &&
+          currentMeta?.pricingType === "free" &&
+          currentMeta?.pricingDetails?.input === 0 &&
+          currentMeta?.pricingDetails?.output === 0 &&
+          !currentLimit?.isLimitReached));
+
+    // Collect any pre-flight notification to show after clearing events
+    let preflightNotice: string | null = null;
 
     if (!isCurrentValid) {
       const candidateFree = models.filter((m) => {
@@ -860,13 +1026,7 @@ function App() {
       if (nextBest) {
         modelToUse = nextBest.id;
         setSelectedModel(modelToUse);
-        setEvents((old) => [
-          ...old,
-          {
-            type: "text",
-            message: `Switched automatically to next best available free model: ${nextBest.name || nextBest.id}`,
-          },
-        ]);
+        preflightNotice = `Switched automatically to next best available free model: ${nextBest.name || nextBest.id}`;
       } else {
         setEvents((old) => [
           ...old,
@@ -880,7 +1040,12 @@ function App() {
     }
 
     setRunning(true);
-    setEvents([]);
+    // Reset events; re-add any pre-flight notice so it isn't lost
+    setEvents(
+      preflightNotice
+        ? [{ type: "text", message: preflightNotice }]
+        : [],
+    );
     setChanges([]);
     setUserTaskPrompt(task);
     setSessionTitle(task.length > 50 ? task.slice(0, 50) + "…" : task);
@@ -2131,74 +2296,101 @@ function App() {
               </div>
             )}
 
-            {/* Body — Antigravity-style chronological event feed */}
-            <div className="agent-body" ref={agentBodyRef}>
-              {/* User Task Card — only shown when a task is active */}
-              {userTaskPrompt && (
-                <div className="user-task-card">
-                  <div className="user-task-eyebrow">USER TASK</div>
-                  <div className="user-task-text">{userTaskPrompt}</div>
-                </div>
-              )}
-
+            {/* Bob-style Chat Body */}
+            <div className="chat-body" ref={agentBodyRef}>
               {/* Empty state */}
               {!userTaskPrompt && events.length === 0 && (
-                <div className="agent-empty-state">
-                  <Bot size={32} color="var(--text-dim)" />
-                  <div className="agent-empty-title">G1Code Agent Ready</div>
-                  <div className="agent-empty-hint">Type a task below to start. The agent will inspect, plan, edit, and verify autonomously.</div>
+                <div className="chat-empty-state">
+                  <div className="chat-empty-logo">
+                    <Bot size={36} />
+                  </div>
+                  <div className="chat-empty-title">G1Code Agent</div>
+                  <div className="chat-empty-hint">
+                    Ask anything. The agent will inspect, plan, edit, and verify autonomously.
+                  </div>
+                  <div className="chat-empty-pills">
+                    {[
+                      "Explain this codebase",
+                      "Fix failing tests",
+                      "Refactor for clarity",
+                      "Add a new feature",
+                    ].map((s) => (
+                      <button
+                        key={s}
+                        className="chat-empty-pill"
+                        onClick={() => {
+                          setAgentPrompt(s);
+                          textareaRef.current?.focus();
+                        }}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
-              {/* Chronological event feed */}
-              {events.map((ev, i) => {
-                // State transition → timeline step card
-                if (ev.type === "state" && ev.state && ev.state !== "IDLE") {
-                  const stateColors: Record<string, string> = {
-                    UNDERSTANDING: "var(--accent-model)",
-                    ANALYZING: "var(--accent-model)",
-                    PLANNING: "var(--accent-model)",
-                    EXECUTING: "var(--accent-agent)",
-                    OBSERVING: "var(--accent-agent)",
-                    VERIFYING: "#f59e0b",
-                    COMPLETED: "#10b981",
-                    FAILED: "var(--accent-error)",
-                    CANCELLED: "var(--text-dim)",
-                    STOPPED: "var(--text-dim)",
-                    DIAGNOSING: "#f59e0b",
-                    REPAIRING: "#f59e0b",
-                    WAITING_FOR_APPROVAL: "#f59e0b",
-                  };
-                  const color = stateColors[ev.state] || "var(--text-dim)";
-                  return (
-                    <div className="agent-state-row" key={i}>
-                      <span className="agent-state-dot" style={{ background: color }} />
-                      <span className="agent-state-label" style={{ color }}>{ev.state.replace(/_/g, " ")}</span>
-                      {ev.message && <span className="agent-state-msg">{ev.message}</span>}
-                    </div>
-                  );
-                }
+              {/* User bubble — shown when a task is active */}
+              {userTaskPrompt && (
+                <div className="chat-row chat-row--user">
+                  <div className="chat-bubble chat-bubble--user">
+                    {userTaskPrompt}
+                  </div>
+                </div>
+              )}
 
-                // Failover notification card
+              {/* Bob-style event feed */}
+              {events.map((ev, i) => {
+                // Failover notification
                 if (
                   (ev.type === "text" || ev.type === "state") &&
                   (ev.message?.includes("[Failover]") ||
                     ev.message?.includes("Switched automatically"))
                 ) {
                   return (
-                    <div className="agent-failover-card" key={`failover-${i}`}>
-                      <Sparkles size={14} color="var(--accent-model)" />
-                      <div className="agent-failover-text">
-                        {ev.message.replace(/^\[Failover\]\s*/, "")}
-                      </div>
+                    <div className="chat-system-notice" key={`failover-${i}`}>
+                      <Sparkles size={12} color="var(--accent-model)" />
+                      <span>{ev.message!.replace(/^\[Failover\]\s*/, "")}</span>
                     </div>
                   );
                 }
 
-                // Tool event → compact tool row with parameters snippet
+                // State transition → subtle inline pill
+                if (ev.type === "state" && ev.state && ev.state !== "IDLE") {
+                  const stateIcon: Record<string, React.ReactNode> = {
+                    UNDERSTANDING: <Activity size={11} />,
+                    ANALYZING: <Search size={11} />,
+                    PLANNING: <ListChecks size={11} />,
+                    EXECUTING: <Zap size={11} />,
+                    OBSERVING: <Activity size={11} />,
+                    VERIFYING: <CheckCircle2 size={11} />,
+                    COMPLETED: <CheckCircle2 size={11} />,
+                    FAILED: <AlertTriangle size={11} />,
+                    CANCELLED: <X size={11} />,
+                    STOPPED: <X size={11} />,
+                    DIAGNOSING: <HelpCircle size={11} />,
+                    REPAIRING: <RefreshCw size={11} />,
+                    WAITING_FOR_CHANGE_APPROVAL: <GitFork size={11} />,
+                  };
+                  const stateClass: Record<string, string> = {
+                    COMPLETED: "chat-state-pill--done",
+                    FAILED: "chat-state-pill--fail",
+                    CANCELLED: "chat-state-pill--stopped",
+                    STOPPED: "chat-state-pill--stopped",
+                  };
+                  return (
+                    <div className={`chat-state-pill ${stateClass[ev.state] || ""}`} key={i}>
+                      {stateIcon[ev.state] || <Activity size={11} />}
+                      <span>{ev.state.replace(/_/g, " ")}</span>
+                      {ev.message && <span className="chat-state-pill-msg">{ev.message}</span>}
+                    </div>
+                  );
+                }
+
+                // Tool call → compact inline row
                 if (ev.type === "tool") {
-                  const isDone = ev.message?.includes("completed") || ev.result;
-                  const isFail = ev.message?.includes("failed");
+                  const isDone = Boolean(ev.message?.includes("completed") || ev.result);
+                  const isFail = Boolean(ev.message?.includes("failed"));
                   const toolArg =
                     ev.input && typeof ev.input === "object"
                       ? (ev.input as any).path ||
@@ -2206,91 +2398,60 @@ function App() {
                         (ev.input as any).query
                       : null;
                   return (
-                    <div className="tool-event-row" key={i}>
-                      <div className="tool-status-icon">
+                    <div className={`chat-tool-row ${isFail ? "chat-tool-row--fail" : isDone ? "chat-tool-row--done" : "chat-tool-row--running"}`} key={i}>
+                      <span className="chat-tool-icon">
                         {isFail ? (
-                          <AlertTriangle size={13} color="var(--accent-error)" />
+                          <AlertTriangle size={12} />
                         ) : isDone ? (
-                          <Check size={13} color="var(--accent-agent)" />
+                          <Check size={12} />
                         ) : (
-                          <RefreshCw
-                            size={12}
-                            color="var(--text-dim)"
-                            className="spin-icon"
-                          />
+                          <RefreshCw size={11} className="spin-icon" />
                         )}
-                      </div>
-                      <div className="tool-event-msg">
-                        <strong>{ev.toolName || "tool"}</strong>
-                        {toolArg && (
-                          <code className="tool-arg-badge">
-                            {String(toolArg).slice(0, 60)}
-                          </code>
-                        )}
-                        <span className="tool-status-text">
-                          : {ev.message || "Running"}
-                        </span>
-                      </div>
+                      </span>
+                      <span className="chat-tool-name">{ev.toolName || "tool"}</span>
+                      {toolArg && (
+                        <code className="chat-tool-arg">
+                          {String(toolArg).slice(0, 55)}
+                        </code>
+                      )}
                     </div>
                   );
                 }
 
-                // Approval event → interactive approval card
+                // Approval card
                 if (ev.type === "approval") {
                   const changeInput = ev.input as
-                    | {
-                        changeId?: string;
-                        path?: string;
-                        diff?: string;
-                        status?: string;
-                      }
+                    | { changeId?: string; path?: string; diff?: string; status?: string }
                     | undefined;
                   const targetChangeId = changeInput?.changeId || ev.changeId;
                   const filePath =
-                    changeInput?.path ||
-                    (ev.toolName ? `${ev.toolName}` : "File change");
+                    changeInput?.path || (ev.toolName ? `${ev.toolName}` : "File change");
                   const isApplied =
-                    ev.result &&
-                    typeof ev.result === "object" &&
+                    ev.result && typeof ev.result === "object" &&
                     (ev.result as any).status === "APPLIED";
                   const isRejected =
-                    ev.result &&
-                    typeof ev.result === "object" &&
+                    ev.result && typeof ev.result === "object" &&
                     (ev.result as any).status === "REJECTED";
-
                   return (
-                    <div className="agent-approval-card" key={`appr-${i}`}>
-                      <div className="agent-approval-header">
-                        <GitFork size={14} color="var(--accent-warning)" />
-                        <span className="agent-approval-title">
-                          {isApplied
-                            ? "Change Applied"
-                            : isRejected
-                              ? "Change Rejected"
-                              : "Approval Required"}
+                    <div className="chat-approval-card" key={`appr-${i}`}>
+                      <div className="chat-approval-header">
+                        <GitFork size={13} />
+                        <span>
+                          {isApplied ? "Change Applied" : isRejected ? "Change Rejected" : "Approval Required"}
                         </span>
+                        <code className="chat-approval-file">{filePath}</code>
                       </div>
-                      <div className="agent-approval-body">
-                        <div className="agent-approval-file">
-                          <span>File:</span> <code>{filePath}</code>
-                        </div>
-                        {changeInput?.diff && (
-                          <pre className="agent-diff-snippet">
-                            {changeInput.diff
-                              .split("\n")
-                              .slice(0, 8)
-                              .join("\n")}
-                          </pre>
-                        )}
-                      </div>
+                      {changeInput?.diff && (
+                        <pre className="chat-approval-diff">
+                          {changeInput.diff.split("\n").slice(0, 8).join("\n")}
+                        </pre>
+                      )}
                       {!isApplied && !isRejected && targetChangeId && (
-                        <div className="agent-approval-actions">
+                        <div className="chat-approval-actions">
                           <button
-                            className="btn-diff-review"
+                            className="chat-approval-btn chat-approval-btn--neutral"
                             onClick={() => {
-                              const found = changes.find(
-                                (c) => c.id === targetChangeId,
-                              );
+                              const found = changes.find((c) => c.id === targetChangeId);
                               if (found) setActiveDiff(found);
                               else if (changeInput) {
                                 setActiveDiff({
@@ -2302,19 +2463,19 @@ function App() {
                               }
                             }}
                           >
-                            <ExternalLink size={13} /> Review Diff
+                            <ExternalLink size={12} /> View Diff
                           </button>
                           <button
-                            className="btn-diff-approve"
+                            className="chat-approval-btn chat-approval-btn--approve"
                             onClick={() => void approveChange(targetChangeId)}
                           >
-                            <Check size={13} /> Approve & Apply
+                            <Check size={12} /> Apply
                           </button>
                           <button
-                            className="btn-diff-reject"
+                            className="chat-approval-btn chat-approval-btn--reject"
                             onClick={() => void rejectChange(targetChangeId)}
                           >
-                            <X size={13} /> Reject
+                            <X size={12} /> Reject
                           </button>
                         </div>
                       )}
@@ -2322,90 +2483,71 @@ function App() {
                   );
                 }
 
-                // Error event → error card with Retry
+                // Error → error bubble
                 if (ev.type === "error") {
                   return (
-                    <div className="agent-error-card" key={`err-${i}`}>
-                      <div className="agent-error-header">
-                        <AlertTriangle size={14} color="#f43f5e" />
-                        <span>EXECUTION ERROR</span>
+                    <div className="chat-row chat-row--assistant" key={`err-${i}`}>
+                      <div className="chat-avatar chat-avatar--error">
+                        <AlertTriangle size={14} />
                       </div>
-                      <div className="agent-error-msg">{ev.message}</div>
-                      <div className="agent-error-actions">
-                        {lastPromptRef.current && !running && (
-                          <button
-                            className="btn-error-action btn-error-retry"
-                            onClick={() => void startAgent(lastPromptRef.current)}
-                          >
-                            <RefreshCw size={13} /> Retry
-                          </button>
-                        )}
-                        {ev.message?.toLowerCase().includes("api key") && (
-                          <button
-                            className="btn-error-action"
-                            onClick={() => setSettingsOpen(true)}
-                          >
-                            <Key size={13} /> Configure API Key
-                          </button>
-                        )}
-                        {ev.message?.toLowerCase().includes("workspace") && (
-                          <button
-                            className="btn-error-action"
-                            onClick={() => setWorkspaceModal(true)}
-                          >
-                            <FolderOpen size={13} /> Select Workspace
-                          </button>
-                        )}
-                        {ev.message?.toLowerCase().includes("model") && (
-                          <button
-                            className="btn-error-action"
-                            onClick={() => setModelPickerOpen(true)}
-                          >
-                            <Sparkles size={13} /> Switch Model
-                          </button>
-                        )}
+                      <div className="chat-bubble chat-bubble--error">
+                        <div className="chat-error-title">Error</div>
+                        <div className="chat-error-body">{ev.message}</div>
+                        <div className="chat-error-actions">
+                          {lastPromptRef.current && !running && (
+                            <button
+                              className="chat-action-btn chat-action-btn--retry"
+                              onClick={() => void startAgent(lastPromptRef.current)}
+                            >
+                              <RefreshCw size={12} /> Retry
+                            </button>
+                          )}
+                          {ev.message?.toLowerCase().includes("api key") && (
+                            <button
+                              className="chat-action-btn"
+                              onClick={() => setSettingsOpen(true)}
+                            >
+                              <Key size={12} /> Configure Key
+                            </button>
+                          )}
+                          {ev.message?.toLowerCase().includes("workspace") && (
+                            <button
+                              className="chat-action-btn"
+                              onClick={() => setWorkspaceModal(true)}
+                            >
+                              <FolderOpen size={12} /> Open Workspace
+                            </button>
+                          )}
+                          {ev.message?.toLowerCase().includes("model") && (
+                            <button
+                              className="chat-action-btn"
+                              onClick={() => setModelPickerOpen(true)}
+                            >
+                              <Sparkles size={12} /> Switch Model
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
                 }
 
-                // Text / done → model response card
+                // Text / done → AI message bubble with markdown
                 if (ev.type === "text" || ev.type === "done") {
-                  // Render message with clickable file paths
-                  const renderMessage = (msg: string) => {
-                    const parts = msg.split(
-                      /((?:\/[\w./\-]+(?:\.ts|\.tsx|\.js|\.jsx|\.css|\.json|\.md|\.py|\.go|\.sh))+)/g,
-                    );
-                    return parts.map((part, pi) => {
-                      const isFilePath = /^\/[\w./\-]+\.[a-z]+$/.test(part);
-                      if (isFilePath && workspace !== "No workspace open") {
-                        return (
-                          <span
-                            key={pi}
-                            className="agent-file-link"
-                            onClick={() =>
-                              void openFile(part.replace(workspace + "/", ""))
-                            }
-                            title={`Open ${part}`}
-                          >
-                            {part}
-                          </span>
-                        );
-                      }
-                      return <span key={pi}>{part}</span>;
-                    });
-                  };
                   return (
-                    <div className="agent-response-card" key={i}>
-                      <div className="agent-provider-tag">
-                        <Bot size={13} color="var(--accent-model)" />
-                        <span>
-                          Experiential Labs ·{" "}
-                          {activeModelMeta.name || selectedModel}
-                        </span>
+                    <div className="chat-row chat-row--assistant" key={i}>
+                      <div className="chat-avatar chat-avatar--bot">
+                        <Bot size={14} />
                       </div>
-                      <div className="agent-response-text">
-                        {renderMessage(ev.message || "")}
+                      <div className="chat-bubble chat-bubble--assistant">
+                        <div className="chat-bubble-meta">
+                          <span className="chat-model-label">
+                            {activeModelMeta.name || selectedModel}
+                          </span>
+                        </div>
+                        <div className="chat-markdown">
+                          {renderMarkdown(ev.message || "", openFile, workspace)}
+                        </div>
                       </div>
                     </div>
                   );
@@ -2414,50 +2556,93 @@ function App() {
                 return null;
               })}
 
-              {/* Running pulse indicator */}
+              {/* Streaming indicator */}
               {running && (
-                <div className="agent-thinking-row">
-                  <span className="thinking-dot" />
-                  <span className="thinking-dot" />
-                  <span className="thinking-dot" />
+                <div className="chat-row chat-row--assistant">
+                  <div className="chat-avatar chat-avatar--bot">
+                    <Bot size={14} />
+                  </div>
+                  <div className="chat-thinking">
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
+                  </div>
                 </div>
               )}
 
-              {/* Change Review Bar — always visible */}
-              <div className="changes-review-bar">
-                <span className="changes-count-label">
-                  {changes.length} {changes.length === 1 ? "File" : "Files"} With Changes
-                </span>
-                <div className="changes-review-buttons">
-                  <button
-                    className="btn-review-changes"
-                    onClick={() => {
-                      if (changes.length > 0) setActiveDiff(changes[0]);
-                      else void loadChanges();
-                    }}
-                  >
-                    Review
-                  </button>
-                  {changes.length > 0 && (
-                    <>
-                      <button
-                        className="btn-review-approve-all"
-                        onClick={() => void approveAllChanges()}
-                        title="Approve all pending changes"
-                      >
-                        <Check size={12} /> Approve All
-                      </button>
-                      <button
-                        className="btn-review-reject-all"
-                        onClick={() => void rejectAllChanges()}
-                        title="Reject all pending changes"
-                      >
-                        <X size={12} /> Reject All
-                      </button>
-                    </>
-                  )}
+              {/* Change Review Bar — only when there are changes */}
+              {changes.length > 0 && (
+                <div className="chat-changes-bar">
+                  <div className="chat-changes-info">
+                    <GitFork size={13} color="var(--accent-warning)" />
+                    <span>{changes.length} file{changes.length > 1 ? "s" : ""} changed</span>
+                  </div>
+                  <div className="chat-changes-actions">
+                    <button
+                      className="chat-changes-btn chat-changes-btn--neutral"
+                      onClick={() => {
+                        if (changes.length > 0) setActiveDiff(changes[0]);
+                        else void loadChanges();
+                      }}
+                    >
+                      Review
+                    </button>
+                    <button
+                      className="chat-changes-btn chat-changes-btn--approve"
+                      onClick={() => void approveAllChanges()}
+                    >
+                      <Check size={11} /> Apply All
+                    </button>
+                    <button
+                      className="chat-changes-btn chat-changes-btn--reject"
+                      onClick={() => void rejectAllChanges()}
+                    >
+                      <X size={11} /> Reject All
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* Inline permission request card — appears in chat like Bob */}
+              {permission && (
+                <div className="chat-permission-card">
+                  <div className="chat-permission-header">
+                    <Shield size={14} />
+                    <span>Permission Required</span>
+                  </div>
+                  <div className="chat-permission-body">
+                    <p className="chat-permission-desc">
+                      The agent wants to run{" "}
+                      <code className="chat-permission-tool">{permission.tool}</code>
+                    </p>
+                    {Boolean(permission.input) && (
+                      <pre className="chat-permission-input">
+                        {JSON.stringify(permission.input, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                  <div className="chat-permission-actions">
+                    <button
+                      className="chat-approval-btn chat-approval-btn--reject"
+                      onClick={() => {
+                        window.g1code.respondPermission(permission.requestId, false);
+                        setPermission(null);
+                      }}
+                    >
+                      <X size={12} /> Deny
+                    </button>
+                    <button
+                      className="chat-approval-btn chat-approval-btn--approve"
+                      onClick={() => {
+                        window.g1code.respondPermission(permission.requestId, true);
+                        setPermission(null);
+                      }}
+                    >
+                      <Check size={12} /> Allow Once
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Bottom Agent Composer (Command Surface) */}
@@ -2740,11 +2925,27 @@ function App() {
                       disabled={
                         running ||
                         !agentPrompt.trim() ||
-                        Boolean(usageLimits[selectedModel]?.isLimitReached)
+                        // Only disable when the selected model is limited AND no other free model is available
+                        (Boolean(usageLimits[selectedModel]?.isLimitReached) &&
+                          !models.some(
+                            (m) =>
+                              m.pricingType === "free" &&
+                              m.pricingDetails?.input === 0 &&
+                              m.pricingDetails?.output === 0 &&
+                              !usageLimits[m.id]?.isLimitReached,
+                          ))
                       }
                       title={
                         usageLimits[selectedModel]?.isLimitReached
-                          ? "Model usage limit reached. Select another free model or wait for reset."
+                          ? models.some(
+                              (m) =>
+                                m.pricingType === "free" &&
+                                m.pricingDetails?.input === 0 &&
+                                m.pricingDetails?.output === 0 &&
+                                !usageLimits[m.id]?.isLimitReached,
+                            )
+                            ? "Current model limit reached — will auto-switch to next available free model."
+                            : "All free models are usage-limited. Please wait for reset."
                           : "Send Prompt (Enter)"
                       }
                     >
@@ -3056,54 +3257,6 @@ function App() {
               </button>
               <button className="btn-primary" onClick={submitWorkspacePath}>
                 Open Folder
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* PERMISSION REQUIRED MODAL */}
-      {permission && (
-        <div className="settings-modal">
-          <div className="settings-dialog">
-            <div
-              style={{
-                color: "var(--accent-warning)",
-                fontWeight: 700,
-                fontSize: 12,
-              }}
-            >
-              TOOL EXECUTION APPROVAL REQUIRED
-            </div>
-            <h2>G1Code wants to execute: {permission.tool}</h2>
-            <pre
-              style={{
-                background: "var(--bg-muted)",
-                padding: 10,
-                borderRadius: 6,
-                overflowX: "auto",
-              }}
-            >
-              {JSON.stringify(permission.input, null, 2)}
-            </pre>
-            <div className="settings-dialog-actions">
-              <button
-                className="btn-secondary"
-                onClick={() => {
-                  window.g1code.respondPermission(permission.requestId, false);
-                  setPermission(null);
-                }}
-              >
-                Deny
-              </button>
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  window.g1code.respondPermission(permission.requestId, true);
-                  setPermission(null);
-                }}
-              >
-                Allow Once
               </button>
             </div>
           </div>
