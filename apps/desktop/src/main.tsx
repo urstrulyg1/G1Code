@@ -1558,7 +1558,11 @@ function App() {
                   className="btn-open-folder"
                   onClick={async () => {
                     if (workspace !== "No workspace open" && window.g1code.openNativeFolder) {
-                      await window.g1code.openNativeFolder(workspace);
+                      try {
+                        await window.g1code.openNativeFolder(workspace);
+                      } catch {
+                        openWorkspace();
+                      }
                     } else {
                       openWorkspace();
                     }

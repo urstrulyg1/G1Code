@@ -198,6 +198,11 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJsonBody<{ path?: string }>(req);
       const targetDir = validWorkspace(body.path);
       try {
+        await fs.stat(targetDir);
+      } catch {
+        return sendError(res, 400, `Directory does not exist: ${targetDir}`);
+      }
+      try {
         if (process.platform === "darwin") {
           await execFileAsync("open", [targetDir]);
         } else if (process.platform === "win32") {
