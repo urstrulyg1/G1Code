@@ -487,6 +487,15 @@ function App() {
     input: unknown;
   } | null>(null);
   const [showSessionHistory, setShowSessionHistory] = useState(false);
+  // Track which activity groups are expanded (by group index key)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (key: string) =>
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // Structured Timeline (retired fake state — now driven by real events)
   // keep a ref to the last submitted prompt for Retry
@@ -913,15 +922,43 @@ function App() {
     if (workspace === "No workspace open" || !sessId) return;
     try {
       setSessionId(sessId);
+      setShowSessionHistory(false);
       const targetSession = sessions.find((s) => s.id === sessId);
       if (targetSession) {
         setSessionTitle(targetSession.title);
-        setUserTaskPrompt(targetSession.title);
       }
-      setShowSessionHistory(false);
       const sessEvents = await window.g1code.loadSessionEvents(workspace, sessId);
       if (Array.isArray(sessEvents)) {
-        setEvents(sessEvents.map((e: any) => (e && e.data ? e.data : e)));
+        // DB records have shape { id, sessionId, eventType, payload }
+        // payload IS the original AgentEvent ({ type, state, message, ... })
+        // Merge consecutive streaming text chunks into a single event (same as live)
+        const rawEvents: Event[] = sessEvents.map((e: any) => {
+          const ev = e?.payload ?? e?.data ?? e;
+          // Normalise eventType → type (DB stores eventType, renderer expects type)
+          if (ev && !ev.type && e?.eventType) {
+            return { ...ev, type: e.eventType.toLowerCase() };
+          }
+          return ev as Event;
+        });
+
+        // Collapse consecutive text events (replays streaming chunks as one bubble)
+        const merged: Event[] = [];
+        for (const ev of rawEvents) {
+          if (ev.type === "text" && ev.message) {
+            const last = merged[merged.length - 1];
+            if (last && last.type === "text") {
+              merged[merged.length - 1] = {
+                ...last,
+                message: (last.message || "") + ev.message,
+              };
+              continue;
+            }
+          }
+          merged.push(ev);
+        }
+        setEvents(merged);
+        // Restore the user task prompt from the session title (full prompt stored as title)
+        setUserTaskPrompt(targetSession?.title || "");
       }
       const sessChanges = await window.g1code.listChanges(workspace, sessId);
       if (Array.isArray(sessChanges)) {
@@ -1211,9 +1248,18 @@ function App() {
     }
   };
 
+  // Auto-resize textarea as content grows (up to max-height from CSS)
+  const autoResizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, []);
+
   // Autocomplete triggers
   const handlePromptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Enter without shift → send; Cmd/Ctrl+Enter also sends
+    if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void startAgent();
       return;
@@ -1223,6 +1269,7 @@ function App() {
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setAgentPrompt(val);
+    autoResizeTextarea();
 
     // Check for @ mention
     const atMatch = val.match(/@([a-zA-Z0-9_\-\./]*)$/);
@@ -2339,84 +2386,153 @@ function App() {
                 </div>
               )}
 
-              {/* Bob-style event feed */}
-              {events.map((ev, i) => {
-                // Failover notification
-                if (
-                  (ev.type === "text" || ev.type === "state") &&
-                  (ev.message?.includes("[Failover]") ||
-                    ev.message?.includes("Switched automatically"))
-                ) {
-                  return (
-                    <div className="chat-system-notice" key={`failover-${i}`}>
-                      <Sparkles size={12} color="var(--accent-model)" />
-                      <span>{ev.message!.replace(/^\[Failover\]\s*/, "")}</span>
-                    </div>
-                  );
+              {/* Bob-style event feed — tools grouped into collapsible activity blocks */}
+              {(() => {
+                // ── Segment events into activity groups and standalone events ──────
+                type Segment =
+                  | { kind: "activity"; events: Event[]; groupKey: string }
+                  | { kind: "event"; ev: Event; idx: number };
+
+                const segments: Segment[] = [];
+                let i = 0;
+                while (i < events.length) {
+                  const ev = events[i];
+                  const isToolOrState =
+                    ev.type === "tool" ||
+                    (ev.type === "state" &&
+                      ev.state !== "IDLE" &&
+                      !["COMPLETED", "FAILED", "CANCELLED", "STOPPED"].includes(ev.state ?? "") &&
+                      !(ev.message?.includes("[Failover]") || ev.message?.includes("Switched automatically")));
+
+                  if (isToolOrState) {
+                    const groupEvents: Event[] = [];
+                    const startIdx = i;
+                    while (i < events.length) {
+                      const cur = events[i];
+                      const stillTool =
+                        cur.type === "tool" ||
+                        (cur.type === "state" &&
+                          cur.state !== "IDLE" &&
+                          !["COMPLETED", "FAILED", "CANCELLED", "STOPPED"].includes(cur.state ?? "") &&
+                          !(cur.message?.includes("[Failover]") || cur.message?.includes("Switched automatically")));
+                      if (!stillTool) break;
+                      groupEvents.push(cur);
+                      i++;
+                    }
+                    segments.push({ kind: "activity", events: groupEvents, groupKey: `grp-${startIdx}` });
+                  } else {
+                    segments.push({ kind: "event", ev, idx: i });
+                    i++;
+                  }
                 }
 
-                // State transition → subtle inline pill
-                if (ev.type === "state" && ev.state && ev.state !== "IDLE") {
-                  const stateIcon: Record<string, React.ReactNode> = {
-                    UNDERSTANDING: <Activity size={11} />,
-                    ANALYZING: <Search size={11} />,
-                    PLANNING: <ListChecks size={11} />,
-                    EXECUTING: <Zap size={11} />,
-                    OBSERVING: <Activity size={11} />,
-                    VERIFYING: <CheckCircle2 size={11} />,
-                    COMPLETED: <CheckCircle2 size={11} />,
-                    FAILED: <AlertTriangle size={11} />,
-                    CANCELLED: <X size={11} />,
-                    STOPPED: <X size={11} />,
-                    DIAGNOSING: <HelpCircle size={11} />,
-                    REPAIRING: <RefreshCw size={11} />,
-                    WAITING_FOR_CHANGE_APPROVAL: <GitFork size={11} />,
-                  };
-                  const stateClass: Record<string, string> = {
-                    COMPLETED: "chat-state-pill--done",
-                    FAILED: "chat-state-pill--fail",
-                    CANCELLED: "chat-state-pill--stopped",
-                    STOPPED: "chat-state-pill--stopped",
-                  };
-                  return (
-                    <div className={`chat-state-pill ${stateClass[ev.state] || ""}`} key={i}>
-                      {stateIcon[ev.state] || <Activity size={11} />}
-                      <span>{ev.state.replace(/_/g, " ")}</span>
-                      {ev.message && <span className="chat-state-pill-msg">{ev.message}</span>}
-                    </div>
-                  );
-                }
+                // ── Render each segment ───────────────────────────────────────────
+                return segments.map((seg) => {
+                  // ── Activity group block ──────────────────────────────────────
+                  if (seg.kind === "activity") {
+                    const grpKey = seg.groupKey;
+                    const isExpanded = expandedGroups.has(grpKey);
+                    const toolEvts = seg.events.filter((e) => e.type === "tool");
+                    const isDone = toolEvts.every((e) => Boolean(e.result || e.message?.includes("completed")));
+                    const hasFail = toolEvts.some((e) => e.message?.includes("failed"));
 
-                // Tool call → compact inline row
-                if (ev.type === "tool") {
-                  const isDone = Boolean(ev.message?.includes("completed") || ev.result);
-                  const isFail = Boolean(ev.message?.includes("failed"));
-                  const toolArg =
-                    ev.input && typeof ev.input === "object"
-                      ? (ev.input as any).path ||
-                        (ev.input as any).command ||
-                        (ev.input as any).query
-                      : null;
-                  return (
-                    <div className={`chat-tool-row ${isFail ? "chat-tool-row--fail" : isDone ? "chat-tool-row--done" : "chat-tool-row--running"}`} key={i}>
-                      <span className="chat-tool-icon">
-                        {isFail ? (
-                          <AlertTriangle size={12} />
-                        ) : isDone ? (
-                          <Check size={12} />
-                        ) : (
-                          <RefreshCw size={11} className="spin-icon" />
+                    // Build summary counts: files read, searches, commands, writes
+                    let fileCount = 0, searchCount = 0, cmdCount = 0, writeCount = 0;
+                    for (const e of toolEvts) {
+                      if (!e.input) continue;
+                      const n = e.toolName || "";
+                      if (n === "read_file" || n === "list_directory") fileCount++;
+                      else if (n === "search_files" || n === "search_symbols") searchCount++;
+                      else if (n === "run_command" || n === "run_tests") cmdCount++;
+                      else if (n === "write_file" || n === "apply_patch") writeCount++;
+                      else fileCount++; // fallback count
+                    }
+                    const summaryParts: string[] = [];
+                    if (fileCount > 0) summaryParts.push(`${fileCount} file${fileCount > 1 ? "s" : ""}`);
+                    if (searchCount > 0) summaryParts.push(`${searchCount} search${searchCount > 1 ? "es" : ""}`);
+                    if (cmdCount > 0) summaryParts.push(`${cmdCount} command${cmdCount > 1 ? "s" : ""}`);
+                    if (writeCount > 0) summaryParts.push(`${writeCount} edit${writeCount > 1 ? "s" : ""}`);
+                    const summary = summaryParts.length > 0 ? summaryParts.join(", ") : `${toolEvts.length} action${toolEvts.length !== 1 ? "s" : ""}`;
+
+                    return (
+                      <div className="activity-group" key={grpKey}>
+                        {/* Collapsible header row */}
+                        <button
+                          className={`activity-group-header ${hasFail ? "activity-group-header--fail" : isDone ? "activity-group-header--done" : "activity-group-header--running"}`}
+                          onClick={() => toggleGroup(grpKey)}
+                        >
+                          <span className="activity-group-icon">
+                            {hasFail ? (
+                              <AlertTriangle size={13} />
+                            ) : isDone ? (
+                              <CheckCircle2 size={13} />
+                            ) : (
+                              <RefreshCw size={12} className="spin-icon" />
+                            )}
+                          </span>
+                          <span className="activity-group-label">
+                            {hasFail ? "Failed" : isDone ? "Explored" : "Exploring"}
+                          </span>
+                          <span className="activity-group-summary">{summary}</span>
+                          <span className="activity-group-chevron">
+                            {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          </span>
+                        </button>
+
+                        {/* Expanded detail rows */}
+                        {isExpanded && (
+                          <div className="activity-group-body">
+                            {seg.events.map((e, ei) => {
+                              if (e.type === "state") {
+                                return (
+                                  <div className="activity-state-row" key={ei}>
+                                    <span className="activity-state-dot" />
+                                    <span className="activity-state-label">{e.state?.replace(/_/g, " ")}</span>
+                                    {e.message && <span className="activity-state-msg">{e.message}</span>}
+                                  </div>
+                                );
+                              }
+                              const done = Boolean(e.result || e.message?.includes("completed"));
+                              const fail = Boolean(e.message?.includes("failed"));
+                              const inp = e.input && typeof e.input === "object" ? e.input as Record<string, unknown> : null;
+                              const arg = inp
+                                ? String(inp.path || inp.filePath || inp.command || inp.query || inp.pattern || "").slice(0, 70)
+                                : "";
+                              const toolIcon: Record<string, React.ReactNode> = {
+                                read_file: <FileCode size={12} />,
+                                list_directory: <Folder size={12} />,
+                                write_file: <Edit3 size={12} />,
+                                apply_patch: <Edit3 size={12} />,
+                                run_command: <TerminalIcon size={12} />,
+                                run_tests: <CheckCircle2 size={12} />,
+                                search_files: <Search size={12} />,
+                                search_symbols: <Search size={12} />,
+                                get_git_status: <GitBranch size={12} />,
+                              };
+                              return (
+                                <div
+                                  className={`activity-tool-row ${fail ? "activity-tool-row--fail" : done ? "activity-tool-row--done" : "activity-tool-row--running"}`}
+                                  key={ei}
+                                >
+                                  <span className="activity-tool-icon">
+                                    {fail ? <AlertTriangle size={12} /> : done ? <Check size={12} /> : <RefreshCw size={11} className="spin-icon" />}
+                                  </span>
+                                  <span className="activity-tool-type-icon">
+                                    {toolIcon[e.toolName || ""] || <Zap size={12} />}
+                                  </span>
+                                  <span className="activity-tool-name">{e.toolName || "tool"}</span>
+                                  {arg && <code className="activity-tool-arg">{arg}</code>}
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
-                      </span>
-                      <span className="chat-tool-name">{ev.toolName || "tool"}</span>
-                      {toolArg && (
-                        <code className="chat-tool-arg">
-                          {String(toolArg).slice(0, 55)}
-                        </code>
-                      )}
-                    </div>
-                  );
-                }
+                      </div>
+                    );
+                  }
+
+                  // ── Standalone event ──────────────────────────────────────────
+                  const { ev, idx: i } = seg;
 
                 // Approval card
                 if (ev.type === "approval") {
@@ -2532,8 +2648,24 @@ function App() {
                   );
                 }
 
-                // Text / done → AI message bubble with markdown
-                if (ev.type === "text" || ev.type === "done") {
+                  // Failover / auto-switch system notice — must come before text bubble check
+                  if (
+                    ev.message?.includes("[Failover]") ||
+                    ev.message?.includes("Switched automatically")
+                  ) {
+                    return (
+                      <div className="chat-system-notice" key={`failover-${i}`}>
+                        <Sparkles size={12} color="var(--accent-model)" />
+                        <span>{ev.message!.replace(/^\[Failover\]\s*/, "")}</span>
+                      </div>
+                    );
+                  }
+
+                // Streaming text → AI message bubble with markdown
+                // `done` events carry the full accumulated message but the individual
+                // `text` chunks were already merged into a bubble above — skip `done`
+                // when it has no message or when text events already rendered content.
+                if (ev.type === "text" && ev.message) {
                   return (
                     <div className="chat-row chat-row--assistant" key={i}>
                       <div className="chat-avatar chat-avatar--bot">
@@ -2546,18 +2678,67 @@ function App() {
                           </span>
                         </div>
                         <div className="chat-markdown">
-                          {renderMarkdown(ev.message || "", openFile, workspace)}
+                          {renderMarkdown(ev.message, openFile, workspace)}
                         </div>
                       </div>
                     </div>
                   );
                 }
 
-                return null;
-              })}
+                // `done` event: the runtime emits this with the full accumulated text,
+                // but streaming already rendered it via `text` events.
+                // Only render a bubble if this done event carries content that was
+                // NOT preceded by any text events (non-streaming completion).
+                if (ev.type === "done" && ev.message) {
+                  // Check if any text bubble was already rendered before this event index
+                  const hasTextBefore = events
+                    .slice(0, i)
+                    .some((e) => e.type === "text" && e.message);
+                  if (!hasTextBefore) {
+                    return (
+                      <div className="chat-row chat-row--assistant" key={i}>
+                        <div className="chat-avatar chat-avatar--bot">
+                          <Bot size={14} />
+                        </div>
+                        <div className="chat-bubble chat-bubble--assistant">
+                          <div className="chat-bubble-meta">
+                            <span className="chat-model-label">
+                              {activeModelMeta.name || selectedModel}
+                            </span>
+                          </div>
+                          <div className="chat-markdown">
+                            {renderMarkdown(ev.message, openFile, workspace)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                }
 
-              {/* Streaming indicator */}
-              {running && (
+                  // Terminal state pills (COMPLETED / FAILED / STOPPED / CANCELLED)
+                  if (ev.type === "state" && ev.state && ev.state !== "IDLE") {
+                    const stateClass: Record<string, string> = {
+                      COMPLETED: "chat-state-pill--done",
+                      FAILED: "chat-state-pill--fail",
+                      CANCELLED: "chat-state-pill--stopped",
+                      STOPPED: "chat-state-pill--stopped",
+                    };
+                    return (
+                      <div className={`chat-state-pill ${stateClass[ev.state] || ""}`} key={`state-${i}`}>
+                        {["COMPLETED"].includes(ev.state) ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
+                        <span>{ev.state.replace(/_/g, " ")}</span>
+                        {ev.message && <span className="chat-state-pill-msg">{ev.message}</span>}
+                      </div>
+                    );
+                  }
+
+                  return null;
+                });
+              })()}
+
+              {/* Streaming indicator — only show thinking dots when NOT already streaming text */}
+              {running && events[events.length - 1]?.type !== "text" && (
                 <div className="chat-row chat-row--assistant">
                   <div className="chat-avatar chat-avatar--bot">
                     <Bot size={14} />

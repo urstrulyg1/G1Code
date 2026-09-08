@@ -1762,9 +1762,11 @@ button {
   color: var(--text-primary);
   font-size: 13px;
   resize: none;
+  height: auto;
   min-height: 48px;
   max-height: 140px;
   line-height: 1.4;
+  overflow-y: auto;
 }
 
 .composer-textarea:focus {
@@ -3233,4 +3235,172 @@ button {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ACTIVITY GROUP — Bob-style collapsible "Explored N files, M searches" block
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.activity-group {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0;
+  align-self: stretch;
+}
+
+/* ── Collapsible header button ───────────────────────────────────────────── */
+.activity-group-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  width: 100%;
+}
+.activity-group-header:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.07);
+}
+.activity-group-header--done {
+  color: var(--text-secondary);
+}
+.activity-group-header--running {
+  color: var(--text-muted);
+}
+.activity-group-header--fail {
+  color: var(--accent-error);
+}
+
+.activity-group-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.activity-group-header--done .activity-group-icon { color: #10b981; }
+.activity-group-header--running .activity-group-icon { color: var(--accent-model); }
+.activity-group-header--fail .activity-group-icon { color: var(--accent-error); }
+
+.activity-group-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+.activity-group-header--running .activity-group-label { color: var(--text-secondary); }
+.activity-group-header--fail .activity-group-label { color: var(--accent-error); }
+
+.activity-group-summary {
+  color: var(--text-muted);
+  font-size: 12px;
+  flex: 1;
+}
+
+.activity-group-chevron {
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: color 0.12s;
+}
+.activity-group-header:hover .activity-group-chevron { color: var(--text-muted); }
+
+/* ── Expanded body ───────────────────────────────────────────────────────── */
+.activity-group-body {
+  margin: 0 0 2px 10px;
+  padding: 2px 0 4px 14px;
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* State row inside expanded body */
+.activity-state-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 4px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+.activity-state-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  flex-shrink: 0;
+}
+.activity-state-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-size: 9.5px;
+  color: var(--text-dim);
+}
+.activity-state-msg {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+/* Individual tool row inside expanded body */
+.activity-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  transition: background 0.1s;
+}
+.activity-tool-row:hover { background: rgba(255,255,255,0.03); }
+
+.activity-tool-row--done { }
+.activity-tool-row--running { }
+.activity-tool-row--fail { color: var(--accent-error); }
+
+.activity-tool-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.activity-tool-row--done .activity-tool-icon { color: #10b981; }
+.activity-tool-row--running .activity-tool-icon { color: var(--text-dim); }
+.activity-tool-row--fail .activity-tool-icon { color: var(--accent-error); }
+
+.activity-tool-type-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.activity-tool-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.activity-tool-arg {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: #93c5fd;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
 }
