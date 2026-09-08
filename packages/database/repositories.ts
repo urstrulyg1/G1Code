@@ -7,23 +7,80 @@ import {
   Session,
   SessionStatus,
 } from "./types";
+import { ChatStorage } from "./chat-storage";
 
 const now = () => new Date().toISOString();
 export class DatabaseStore {
-  constructor(private readonly db: Database.Database) {}
+  private readonly unsubscribeEviction?: () => void;
+
+  constructor(private readonly db: Database.Database) {
+    this.unsubscribeEviction = ChatStorage.onSessionEvicted((sessionId) => {
+      try {
+        if (this.db?.open) {
+          this.deleteSession(sessionId);
+        }
+      } catch {
+        // ignore
+      }
+    });
+  }
+
+  dispose() {
+    this.unsubscribeEviction?.();
+  }
+
+  deleteSession(id: string) {
+    if (!this.db || !this.db.open) return;
+    try {
+      this.db.transaction(() => {
+        try { this.db.prepare("DELETE FROM messages WHERE session_id = ?").run(id); } catch {}
+        try { this.db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run(id); } catch {}
+        try { this.db.prepare("DELETE FROM agent_events WHERE session_id = ?").run(id); } catch {}
+        try { this.db.prepare("DELETE FROM task_summaries WHERE session_id = ?").run(id); } catch {}
+        try { this.db.prepare("DELETE FROM task_memory WHERE session_id = ?").run(id); } catch {}
+        try { this.db.prepare("DELETE FROM execution_checkpoints WHERE session_id = ?").run(id); } catch {}
+        try { this.db.prepare("DELETE FROM test_runs WHERE session_id = ?").run(id); } catch {}
+        try { this.db.prepare("DELETE FROM repair_attempts WHERE session_id = ?").run(id); } catch {}
+        try { this.db.prepare("DELETE FROM git_baselines WHERE session_id = ?").run(id); } catch {}
+        try { this.db.prepare("DELETE FROM file_changes WHERE session_id = ?").run(id); } catch {}
+        try {
+          this.db.prepare("DELETE FROM change_batch_items WHERE batch_id IN (SELECT id FROM change_batches WHERE session_id = ?)").run(id);
+          this.db.prepare("DELETE FROM change_batches WHERE session_id = ?").run(id);
+        } catch {}
+        try { this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id); } catch {}
+      })();
+    } catch (err) {
+      console.error(`[DatabaseStore] Failed to delete session ${id}:`, err);
+    }
+  }
+
   createSession(input: Omit<Session, "createdAt" | "updatedAt">) {
     const timestamp = now();
+    const session = { ...input, createdAt: timestamp, updatedAt: timestamp };
     this.db
       .prepare(
         "INSERT INTO sessions (id,workspace_id,title,mode,model,provider,status,created_at,updated_at) VALUES (@id,@workspaceId,@title,@mode,@model,@provider,@status,@createdAt,@updatedAt)",
       )
-      .run({ ...input, createdAt: timestamp, updatedAt: timestamp });
-    return { ...input, createdAt: timestamp, updatedAt: timestamp };
+      .run(session);
+    try {
+      ChatStorage.persistChat(session, []);
+    } catch {
+      // ignore
+    }
+    return session;
   }
   updateSessionStatus(id: string, status: SessionStatus) {
     this.db
       .prepare("UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?")
       .run(status, now(), id);
+    try {
+      const session = this.getSession(id);
+      if (session) {
+        ChatStorage.persistChat(session, this.sessionMessages(id));
+      }
+    } catch {
+      // ignore
+    }
   }
   markRunningSessionsInterrupted() {
     this.db
@@ -309,6 +366,18 @@ export class DatabaseStore {
         "INSERT OR REPLACE INTO task_summaries (session_id,task,status,summary,created_at,updated_at) VALUES (?,?,?,?,COALESCE((SELECT created_at FROM task_summaries WHERE session_id = ?),?),?)",
       )
       .run(sessionId, task, status, summary, sessionId, timestamp, timestamp);
+    try {
+      const session = this.getSession(sessionId);
+      if (session) {
+        ChatStorage.persistChat(
+          session,
+          this.sessionMessages(sessionId),
+          summary,
+        );
+      }
+    } catch {
+      // ignore
+    }
   }
   taskSummary(sessionId: string) {
     return this.db
@@ -384,11 +453,20 @@ export class DatabaseStore {
   }
   addMessage(sessionId: string, role: string, content: string) {
     const id = randomUUID();
+    const timestamp = now();
     this.db
       .prepare(
         "INSERT INTO messages (id,session_id,role,content,created_at) VALUES (?,?,?,?,?)",
       )
-      .run(id, sessionId, role, content, now());
+      .run(id, sessionId, role, content, timestamp);
+    try {
+      const session = this.getSession(sessionId);
+      if (session) {
+        ChatStorage.persistChat(session, this.sessionMessages(sessionId));
+      }
+    } catch {
+      // ignore
+    }
     return id;
   }
   addToolCall(

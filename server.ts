@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { openDatabase } from "./packages/database/connection";
 import { DatabaseStore } from "./packages/database/repositories";
+import { ChatStorage } from "./packages/database/chat-storage";
 import { AgentRuntimeManager } from "./packages/agent/manager";
 import { ChangeService } from "./packages/tools/change-service";
 import { RepositoryIndexService } from "./packages/indexing/service";
@@ -39,6 +40,11 @@ const PORT = Number(process.env.PORT) || 3131;
 let selectedWorkspace: string = process.cwd();
 const store = new DatabaseStore(openDatabase());
 store.markRunningSessionsInterrupted();
+try {
+  ChatStorage.enforceAllStorageLimits();
+} catch (err) {
+  console.error("[ChatStorage] Startup limit enforcement error:", err);
+}
 for (const batch of store.activeChangeBatches()) {
   void new ChangeService(store, batch.workspaceId).recoverActiveBatches();
 }
@@ -62,6 +68,7 @@ const permissionWaiters = new Map<
 >();
 
 const activeToolCalls = new Map<string, string>();
+const assistantBuffers = new Map<string, string>();
 const sseClients = new Set<http.ServerResponse>();
 
 function broadcastSSE(data: unknown) {
@@ -209,9 +216,9 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJsonBody<{ path?: string }>(req);
       const targetDir = validWorkspace(body.path);
       try {
-        await fs.stat(targetDir);
+        await fs.mkdir(targetDir, { recursive: true });
       } catch {
-        return sendError(res, 400, `Directory does not exist: ${targetDir}`);
+        // ignore
       }
       try {
         if (process.platform === "darwin") {
@@ -936,8 +943,22 @@ const server = http.createServer(async (req, res) => {
             activeToolCalls.delete(key);
           }
         }
-        if (agentEvent.type === "text" || agentEvent.type === "done") {
-          store.addMessage(sessionId, "assistant", agentEvent.message ?? "");
+        if (agentEvent.type === "text") {
+          const prev = assistantBuffers.get(sessionId) || "";
+          assistantBuffers.set(sessionId, prev + (agentEvent.message ?? ""));
+        } else if (agentEvent.type === "done") {
+          const full =
+            agentEvent.message || assistantBuffers.get(sessionId) || "";
+          if (full.trim()) {
+            store.addMessage(sessionId, "assistant", full);
+          }
+          assistantBuffers.delete(sessionId);
+        } else if (agentEvent.type === "tool" || agentEvent.type === "state") {
+          const pending = assistantBuffers.get(sessionId);
+          if (pending && pending.trim()) {
+            store.addMessage(sessionId, "assistant", pending);
+            assistantBuffers.delete(sessionId);
+          }
         }
         if (agentEvent.state === "WAITING_FOR_CHANGE_APPROVAL") {
           store.updateSessionStatus(sessionId, "WAITING_FOR_APPROVAL");

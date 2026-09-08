@@ -669,6 +669,16 @@ function App() {
     }
   };
 
+  const openChatsFolder = async () => {
+    const target =
+      workspace !== "No workspace open"
+        ? `${workspace}/G1Code/chats`
+        : "G1Code/chats";
+    if (window.g1code?.openNativeFolder) {
+      await window.g1code.openNativeFolder(target);
+    }
+  };
+
   const closeTab = (path: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setTabs((old) => old.filter((t) => t.path !== path));
@@ -1916,9 +1926,21 @@ function App() {
               <div className="session-history-popover">
                 <div className="session-history-header">
                   <span>SESSION HISTORY</span>
-                  <button className="close-history-btn" onClick={() => setShowSessionHistory(false)}>
-                    <X size={12} />
-                  </button>
+                  <div className="session-history-header-actions">
+                    <button
+                      className="open-chats-folder-btn"
+                      onClick={() => void openChatsFolder()}
+                      title="Open local G1Code/chats folder in system file manager"
+                    >
+                      <Folder size={11} /> Open Chats Folder
+                    </button>
+                    <button
+                      className="close-history-btn"
+                      onClick={() => setShowSessionHistory(false)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
                 </div>
                 <div className="session-history-list">
                   {sessions.length > 0 ? (

@@ -22,10 +22,24 @@ export function openDatabase(customDir?: string) {
     }
   }
   if (!directory) {
-    directory = path.join(os.homedir(), ".g1code");
+    if (process.env.G1CODE_DATA_DIR) {
+      directory = process.env.G1CODE_DATA_DIR;
+    } else {
+      // Store in local system root folder named G1Code
+      directory = path.join(process.cwd(), "G1Code");
+    }
   }
   fs.mkdirSync(directory, { recursive: true });
-  const database = new Database(path.join(directory, "g1code.sqlite"));
+  const targetDb = path.join(directory, "g1code.sqlite");
+  const legacyDb = path.join(os.homedir(), ".g1code", "g1code.sqlite");
+  if (!fs.existsSync(targetDb) && fs.existsSync(legacyDb)) {
+    try {
+      fs.copyFileSync(legacyDb, targetDb);
+    } catch {
+      // ignore
+    }
+  }
+  const database = new Database(targetDb);
   database.pragma("journal_mode = WAL");
   database.pragma("foreign_keys = ON");
   database.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL); INSERT INTO schema_version SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);

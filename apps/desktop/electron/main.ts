@@ -95,8 +95,16 @@ ipcMain.handle(
   async (_event, targetPath?: string) => {
     const dir = targetPath || selectedWorkspace || process.cwd();
     if (dir) {
-      await shell.openPath(path.resolve(dir));
-      return { success: true, path: dir };
+      const resolved = path.resolve(dir);
+      try {
+        if (!existsSync(resolved)) {
+          await fs.mkdir(resolved, { recursive: true });
+        }
+      } catch {
+        // ignore
+      }
+      await shell.openPath(resolved);
+      return { success: true, path: resolved };
     }
     return { success: false, error: "No directory specified" };
   },

@@ -8,6 +8,7 @@ import { gitTools } from "../../../packages/tools/git";
 import { AgentRuntime, AgentEvent } from "../../../packages/agent/runtime";
 import { openDatabase } from "../../../packages/database/connection";
 import { DatabaseStore } from "../../../packages/database/repositories";
+import { ChatStorage } from "../../../packages/database/chat-storage";
 import { AgentRuntimeManager } from "../../../packages/agent/manager";
 import { ChangeService } from "../../../packages/tools/change-service";
 import type { ChangeApprovalResult } from "../../../packages/agent/runtime";
@@ -35,6 +36,11 @@ export function registerRuntimeHandlers(
 ) {
   const store = new DatabaseStore(openDatabase());
   store.markRunningSessionsInterrupted();
+  try {
+    ChatStorage.enforceAllStorageLimits(getSelectedWorkspace());
+  } catch (err) {
+    console.error("[ChatStorage] Desktop startup limit enforcement error:", err);
+  }
   for (const batch of store.activeChangeBatches()) {
     void new ChangeService(store, batch.workspaceId).recoverActiveBatches();
   }
@@ -48,6 +54,7 @@ export function registerRuntimeHandlers(
     }
   >();
   const activeToolCalls = new Map<string, string>();
+  const assistantBuffers = new Map<string, string>();
   const waitForChangeApproval = (sessionId: string, changeId: string) =>
     new Promise<ChangeApprovalResult>((resolve) => {
       approvalWaiters.set(changeId, { sessionId, resolve });
@@ -650,8 +657,23 @@ export function registerRuntimeHandlers(
             activeToolCalls.delete(key);
           }
         }
-        if (agentEvent.type === "text" || agentEvent.type === "done")
-          store.addMessage(sessionId, "assistant", agentEvent.message ?? "");
+        if (agentEvent.type === "text") {
+          const prev = assistantBuffers.get(sessionId) || "";
+          assistantBuffers.set(sessionId, prev + (agentEvent.message ?? ""));
+        } else if (agentEvent.type === "done") {
+          const full =
+            agentEvent.message || assistantBuffers.get(sessionId) || "";
+          if (full.trim()) {
+            store.addMessage(sessionId, "assistant", full);
+          }
+          assistantBuffers.delete(sessionId);
+        } else if (agentEvent.type === "tool" || agentEvent.type === "state") {
+          const pending = assistantBuffers.get(sessionId);
+          if (pending && pending.trim()) {
+            store.addMessage(sessionId, "assistant", pending);
+            assistantBuffers.delete(sessionId);
+          }
+        }
         if (agentEvent.state === "WAITING_FOR_CHANGE_APPROVAL")
           store.updateSessionStatus(sessionId, "WAITING_FOR_APPROVAL");
         if (agentEvent.state === "EXECUTING")
