@@ -15,6 +15,14 @@ export type AIModel = {
   supportsVision?: boolean;
   isPromotional?: boolean;
   description?: string;
+  pricingType?: "free" | "promotional" | "credits" | "paid" | "unknown";
+  pricingFormatted?: string;
+  pricingDetails?: {
+    input?: number;
+    output?: number;
+  };
+  recommendedRole?: string;
+  apiRank?: number;
 };
 export type ToolDefinition = {
   name: string;

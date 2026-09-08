@@ -216,12 +216,34 @@ export class DatabaseStore {
       );
     return id;
   }
-  sessionTestRuns(sessionId: string) {
+  sessionTestRuns(sessionId: string): Array<{
+    id: string;
+    command: string;
+    cwd: string;
+    targeted: number;
+    exitCode?: number;
+    passed?: number;
+    stdout?: string;
+    stderr?: string;
+    duration?: number;
+    createdAt: string;
+  }> {
     return this.db
       .prepare(
         "SELECT id, command, cwd, targeted, exit_code as exitCode, passed, stdout, stderr, duration, created_at as createdAt FROM test_runs WHERE session_id = ? ORDER BY created_at",
       )
-      .all(sessionId);
+      .all(sessionId) as Array<{
+      id: string;
+      command: string;
+      cwd: string;
+      targeted: number;
+      exitCode?: number;
+      passed?: number;
+      stdout?: string;
+      stderr?: string;
+      duration?: number;
+      createdAt: string;
+    }>;
   }
   addRepairAttempt(
     sessionId: string,

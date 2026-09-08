@@ -31,6 +31,7 @@ import {
   globalModelCatalog,
 } from "./packages/ai/models";
 import { globalUsageLimitManager } from "./packages/ai/usage-limits";
+import type { ChatRequest } from "./packages/ai/types";
 
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.PORT) || 3131;
@@ -996,7 +997,7 @@ const server = http.createServer(async (req, res) => {
       const agentProvider = {
         getModels: provider.getModels.bind(provider),
         chat: provider.chat.bind(provider),
-        streamChat: (reqChat: Parameters<typeof provider.streamChat>[0]) =>
+        streamChat: (reqChat: ChatRequest) =>
           provider.streamChat({
             ...reqChat,
             model: reqChat.model || selectedModel,
@@ -1244,7 +1245,12 @@ const server = http.createServer(async (req, res) => {
       }> = [];
 
       for (const s of recentSessions) {
-        const testRuns = store.sessionTestRuns(s.id);
+        const testRuns = store.sessionTestRuns(s.id) as Array<{
+          id: string;
+          command: string;
+          exitCode?: number;
+          passed?: number;
+        }>;
         for (const tr of testRuns) {
           if (
             tr.passed === 0 ||

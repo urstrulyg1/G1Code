@@ -264,12 +264,17 @@ export async function getApiKey(customDir?: string): Promise<string | null> {
   }
 }
 
-export async function configuredProvider(customDir?: string): Promise<{
+export async function configuredProvider(
+  customDir?: string,
+  customProvider?: string,
+): Promise<{
   settings: Settings;
   provider: AIProvider;
 }> {
   const dir = getAppDataDir(customDir);
   const settings = await readSettings(dir);
+  const targetProvider =
+    customProvider || settings.provider || "experiential-labs";
   const key = await getApiKey(dir);
   if (!key) {
     throw new Error(
@@ -279,7 +284,7 @@ export async function configuredProvider(customDir?: string): Promise<{
   return {
     settings,
     provider: globalProviderRegistry.create(
-      "experiential-labs",
+      targetProvider,
       settings.endpoint,
       key,
     ),
