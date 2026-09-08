@@ -182,6 +182,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Server cwd — lets the browser client build absolute paths from folder-picker results
+    if (pathname === "/api/workspace/cwd" && req.method === "GET") {
+      return sendJson(res, 200, { cwd: process.cwd() });
+    }
+
     // Workspace choose
     if (pathname === "/api/workspace/choose" && req.method === "POST") {
       const body = await parseJsonBody<{ path?: string }>(req);

@@ -62,24 +62,45 @@ if (typeof window !== "undefined" && !window.g1code) {
 
   window.g1code = {
     async chooseWorkspace(): Promise<string | null> {
-      // In web browser mode, prompt user for directory path or use default server workspace
-      const current = await apiRequest<{ workspace: string }>(
-        "/api/workspace/choose",
-        {
-          method: "POST",
-          body: JSON.stringify({}),
-        },
-      );
-      const input = window.prompt(
-        "Enter local workspace directory path:",
-        current.workspace,
-      );
-      if (input === null) return null; // Cancelled
+      // Use native OS folder picker via <input type="file" webkitdirectory>
+      const folderName = await new Promise<string | null>((resolve) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        (input as any).webkitdirectory = true;
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.addEventListener("change", () => {
+          const file = input.files?.[0];
+          if (file && file.webkitRelativePath) {
+            // webkitRelativePath is "folderName/..." — extract the top-level folder
+            resolve(file.webkitRelativePath.split("/")[0]);
+          } else {
+            resolve(null);
+          }
+          document.body.removeChild(input);
+        });
+
+        // Resolve null if the user closes the picker without selecting
+        input.addEventListener("cancel", () => {
+          document.body.removeChild(input);
+          resolve(null);
+        });
+
+        input.click();
+      });
+
+      if (folderName === null) return null;
+
+      // Ask the server for its cwd so we can build the absolute path
+      const { cwd } = await apiRequest<{ cwd: string }>("/api/workspace/cwd");
+      const absolutePath = cwd.replace(/\/+$/, "") + "/" + folderName;
+
       const res = await apiRequest<{ workspace: string }>(
         "/api/workspace/choose",
         {
           method: "POST",
-          body: JSON.stringify({ path: input.trim() || current.workspace }),
+          body: JSON.stringify({ path: absolutePath }),
         },
       );
       return res.workspace;
@@ -118,10 +139,11 @@ if (typeof window !== "undefined" && !window.g1code) {
       modelId: string,
       resetInSeconds = 60,
       type: "hourly" | "daily" = "hourly",
+      reset = false,
     ): Promise<any> {
       return apiRequest("/api/provider/usage-limits/simulate", {
         method: "POST",
-        body: JSON.stringify({ modelId, resetInSeconds, type }),
+        body: JSON.stringify({ modelId, resetInSeconds, type, reset }),
       });
     },
 
