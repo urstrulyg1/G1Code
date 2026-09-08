@@ -15,6 +15,8 @@ import {
   readApiKeyFromZshrcSync,
   getApiKey,
 } from "../packages/settings/storage";
+import { AgentRuntime, type AgentEvent } from "../packages/agent/runtime";
+import { ToolRegistry } from "../packages/tools/types";
 
 test("Experiential Labs Provider: parseModelMetadata correctly parses dynamic models with inferred roles and free pricing", () => {
   const metaFree = parseModelMetadata({
@@ -572,9 +574,6 @@ test("Cross-Platform Workspace: safePath correctly handles Windows path casing",
 });
 
 test("Experiential Labs Provider: Agent runtime automatically fails over mid-stream to next best free model on 429 RateLimitError without credit consumption", async () => {
-  const { AgentRuntime } = require("../packages/agent/runtime");
-  const { ToolRegistry } = require("../packages/tools/types");
-
   // Setup dynamic catalog with 2 free models
   globalModelCatalog.setModels([
     parseModelMetadata({
@@ -616,12 +615,12 @@ test("Experiential Labs Provider: Agent runtime automatically fails over mid-str
   };
 
   const tools = new ToolRegistry();
-  const events: any[] = [];
+  const events: AgentEvent[] = [];
   const runtime = new AgentRuntime(
-    mockProvider,
+    mockProvider as any,
     tools,
     "/test/workspace",
-    (evt) => events.push(evt),
+    (evt: AgentEvent) => events.push(evt),
     async () => true,
     undefined,
     "test-failover-session",
@@ -643,7 +642,7 @@ test("Experiential Labs Provider: Agent runtime automatically fails over mid-str
   );
   assert.ok(failoverEvent, "Failover notification event was emitted to user");
   assert.ok(
-    failoverEvent.message.includes("free-secondary-rank-2"),
+    failoverEvent.message?.includes("free-secondary-rank-2"),
     "Failover event specifies next best free model",
   );
 
@@ -655,7 +654,7 @@ test("Experiential Labs Provider: Correctly promotes free models dynamically fro
   const originalFetch = globalThis.fetch;
   ExperientialLabsProvider.clearCatalogCache();
   try {
-    globalThis.fetch = async (url) => {
+    globalThis.fetch = async (url: any) => {
       const urlStr = String(url);
       if (urlStr.includes("/api/models")) {
         return new Response(
