@@ -42,6 +42,7 @@ import {
   Trash2,
   User,
   X,
+  Zap,
 } from "lucide-react";
 import "./styles.css";
 
@@ -126,6 +127,7 @@ type ModelItem = {
   };
   recommendedRole?: string;
   description?: string;
+  apiRank?: number;
 };
 
 function getLanguage(filePath: string): string {
@@ -938,7 +940,7 @@ function App() {
       isPromotional: false,
     };
 
-  const renderModelCard = (m: (typeof models)[0]) => {
+  const renderModelCard = (m: (typeof models)[0], index: number) => {
     const limit = usageLimits[m.id];
     const isLimited = limit?.isLimitReached === true;
     const resetAt = isLimited
@@ -955,6 +957,22 @@ function App() {
         : `Resets in ${secondsUntilReset}s`
       : "";
 
+    const rankNumber = index + 1;
+    const rankBadgeClass =
+      rankNumber === 1
+        ? "model-rank-badge rank-1"
+        : rankNumber === 2
+        ? "model-rank-badge rank-2"
+        : rankNumber === 3
+        ? "model-rank-badge rank-3"
+        : "model-rank-badge";
+
+    const rankLabel = rankNumber === 1 ? "★ #1" : `#${rankNumber}`;
+
+    const isGenericDesc =
+      !m.description ||
+      m.description.includes("Free ($0 input / $0 output) model on Experiential Labs gateway");
+
     return (
       <div
         className={`model-item-card ${selectedModel === m.id ? "active" : ""} ${isLimited ? "model-item-card--limited" : ""}`}
@@ -964,58 +982,44 @@ function App() {
         title={isLimited ? `Usage limit reached · ${resetLabel}` : undefined}
       >
         <div className="model-item-top">
-          <span className="model-item-name">
+          <div className="model-item-title-group">
+            <span className={rankBadgeClass}>{rankLabel}</span>
             {selectedModel === m.id && !isLimited && (
-              <Check size={13} color="var(--accent-model)" />
+              <Check size={14} className="model-check-icon" />
             )}
-            {m.name}
-          </span>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span className="model-experiential-badge">Experiential</span>
+            <span className="model-item-name">{m.name}</span>
+            {m.isPromotional && (
+              <span className="model-promo-tag">Featured</span>
+            )}
+          </div>
+          <div className="model-badges-group">
             {m.recommendedRole && (
               <span className="model-role-badge">
                 {m.recommendedRole}
               </span>
             )}
             {isLimited ? (
-              <span
-                style={{
-                  fontSize: 10,
-                  color: "var(--accent-error, #f43f5e)",
-                  padding: "2px 6px",
-                  borderRadius: 4,
-                  background: "rgba(244,63,94,0.12)",
-                  fontWeight: 600,
-                }}
-              >
-                LIMIT REACHED
-              </span>
+              <span className="model-limit-badge">LIMIT REACHED</span>
             ) : isTrulyFree(m) ? (
-              <span className="model-promo-badge">{m.pricingFormatted || "Free ($0 input / $0 output)"}</span>
-            ) : (
-              <span
-                style={{
-                  fontSize: 10,
-                  color: "var(--text-muted)",
-                  padding: "2px 6px",
-                  borderRadius: 4,
-                  background: "rgba(255,255,255,0.05)",
-                }}
-              >
-                Credits
+              <span className="model-free-pill" title={m.pricingFormatted || "Free ($0 input / $0 output)"}>
+                <Zap size={10} /> Free · $0/M
               </span>
+            ) : (
+              <span className="model-role-badge">Credits</span>
             )}
           </div>
         </div>
-        {m.description && (
+
+        {!isGenericDesc && m.description && (
           <div className="model-item-desc">{m.description}</div>
         )}
+
         {isLimited && (
           <div
             style={{
               fontSize: 11,
               color: "var(--accent-error, #f43f5e)",
-              marginTop: 4,
+              marginTop: 2,
               display: "flex",
               alignItems: "center",
               gap: 4,
@@ -1028,26 +1032,13 @@ function App() {
             </span>
           </div>
         )}
-        <div className="model-caps-row" style={{ marginTop: 6 }}>
-          <span>{m.contextWindowFormatted || "128K"} context</span>
-          <span>·</span>
-          <span className="model-cap-item">
-            Tools {m.supportsTools ? "✓" : "✗"}
-          </span>
-          <span>·</span>
-          <span className="model-cap-item">
-            Streaming {m.supportsStreaming !== false ? "✓" : "✗"}
-          </span>
-          {m.supportsVision && (
-            <>
-              <span>·</span>
-              <span className="model-cap-item">Vision ✓</span>
-            </>
-          )}
-          <span>·</span>
-          <span style={{ color: "var(--accent-model)" }}>
-            Experiential Cloud
-          </span>
+
+        <div className="model-caps-row">
+          <span className="model-cap-tag">{m.contextWindowFormatted || "128K"} Context</span>
+          {m.supportsTools && <span className="model-cap-tag cap-accent">Tools ✓</span>}
+          {m.supportsStreaming !== false && <span className="model-cap-tag">Streaming ✓</span>}
+          {m.supportsVision && <span className="model-cap-tag cap-accent">Vision ✓</span>}
+          <span className="model-host-label">Experiential Cloud</span>
         </div>
       </div>
     );
@@ -2269,10 +2260,11 @@ function App() {
             </div>
 
             <div className="model-free-notice">
-              <Sparkles size={14} color="var(--accent-agent)" />
-              <span>
-                <strong>Experiential Labs Free Tier:</strong> Only models confirmed free by the live API (Input = $0/M · Output = $0/M) appear in the Free tab. Catalog refreshes every 30 seconds automatically.
-              </span>
+              <div className="live-pulse-dot" />
+              <div className="live-tier-text">
+                <strong>Live Free Tier:</strong> Confirmed $0/M Input · $0/M Output · Refreshes every 30s
+              </div>
+              <span className="live-badge">100% Free</span>
             </div>
 
             <div className="model-search-box">
@@ -2285,15 +2277,7 @@ function App() {
               />
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                padding: "8px 16px",
-                borderBottom: "1px solid var(--border-subtle)",
-                flexWrap: "wrap",
-              }}
-            >
+            <div className="model-filter-tabs">
               {[
                 { key: "free", label: `Free (${freeCount})` },
                 { key: "all", label: `All (${models.length})` },
@@ -2301,11 +2285,11 @@ function App() {
                 { key: "reasoning", label: "Reasoning" },
                 { key: "fast", label: "Fast" },
                 { key: "balanced", label: "Balanced" },
-                { key: "tools", label: `Tool-Capable (${toolCount})` },
+                { key: "tools", label: `Tools (${toolCount})` },
               ].map((tab) => (
                 <button
                   key={tab.key}
-                  className={`editor-action-btn ${modelFilterTab === tab.key ? "active" : ""}`}
+                  className={`model-filter-btn ${modelFilterTab === tab.key ? "active" : ""}`}
                   onClick={() => setModelFilterTab(tab.key as any)}
                 >
                   {tab.label}
@@ -2315,15 +2299,19 @@ function App() {
 
             <div className="model-list-scroll">
               {filteredModels.length === 0 ? (
-                <div style={{ padding: "16px", fontSize: 12, color: "var(--text-muted)" }}>
+                <div style={{ padding: "24px 16px", fontSize: 13, color: "var(--text-muted)", textAlign: "center" }}>
                   No models match your filter.
                 </div>
               ) : (
                 <>
                   <div className="model-category-header">
-                    EXPERIENTIAL LABS LIVE FREE MODELS (FREE: $0 INPUT / $0 OUTPUT · AUTO-REFRESHES EVERY 30S)
+                    <div className="model-cat-left">
+                      <Sparkles size={11} color="var(--accent-primary, #6366f1)" />
+                      <span>AVAILABLE FREE MODELS ({filteredModels.length})</span>
+                    </div>
+                    <span className="model-cat-right">SORTED BY PERFORMANCE & PROMOTIONS</span>
                   </div>
-                  {filteredModels.map((m) => renderModelCard(m))}
+                  {filteredModels.map((m, index) => renderModelCard(m, index))}
                 </>
               )}
             </div>
