@@ -113,6 +113,7 @@ interface Window {
       mode: "ask" | "plan" | "agent";
       model?: string;
       provider?: string;
+      attachedContext?: string[];
     }): Promise<{ sessionId: string; model?: string }>;
     setSessionModel(
       sessionId: string,

@@ -196,6 +196,7 @@ if (typeof window !== "undefined" && !window.g1code) {
       mode: "ask" | "plan" | "agent";
       model?: string;
       provider?: string;
+      attachedContext?: string[];
     }) {
       ensureEventSource();
       return apiRequest<{ sessionId: string; model?: string }>(

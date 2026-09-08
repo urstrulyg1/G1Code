@@ -818,6 +818,7 @@ const server = http.createServer(async (req, res) => {
         prompt: string;
         mode: "ask" | "plan" | "agent";
         model?: string;
+        attachedContext?: string[];
       }>(req);
 
       if (!body.prompt || !["ask", "plan", "agent"].includes(body.mode)) {
@@ -1060,6 +1061,7 @@ const server = http.createServer(async (req, res) => {
           `${instructions ? `Project instructions:\n${instructions}\n\n` : ""}${body.prompt}`,
           body.mode,
           signal,
+          body.attachedContext ?? [],
         ),
       );
 

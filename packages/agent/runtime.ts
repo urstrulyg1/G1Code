@@ -41,7 +41,50 @@ export type ChangeApprovalResult = {
   status: "APPLIED" | "REJECTED" | "CONFLICT";
   message: string;
 };
-const system = `You are G1Code Agent, an autonomous coding assistant. Work only inside the supplied workspace. Inspect before editing. Prefer apply_patch for small changes. Explain briefly, use tools when needed, and verify edits with tests or a relevant command. Never claim a tool ran unless its result is provided.`;
+const BASE_SYSTEM = `You are G1Code Agent, an elite autonomous coding assistant embedded in an AI IDE (Antigravity-style). You are given direct access to the user's local workspace via tools.
+
+## Core Rules
+- ALWAYS inspect files before editing them (use read_file or list_directory first).
+- Prefer apply_patch for targeted edits; use write_file only for new files or full rewrites.
+- After making changes, verify with run_command (run tests or a lint check) when relevant.
+- Never claim a tool ran unless its result was actually returned to you.
+- Work only inside the supplied workspace path. Never access paths outside it.
+- Be concise in your reasoning — show work through tool calls, not long explanations.
+- If you encounter an error, diagnose it from the tool output and retry with a fix.
+- On completion, summarise what you changed and why.
+
+## Available Tools
+- read_file — Read any file (with optional line range)
+- list_directory — List directory contents
+- search_files — Full-text search across the workspace
+- get_project_info — Project metadata (package.json scripts, README excerpt)
+- write_file — Create or fully overwrite a file (goes through approval)
+- apply_patch — SEARCH/REPLACE patch on an existing file (goes through approval)
+- run_command — Execute shell commands (e.g. npm test, tsc, git, etc.)
+- run_tests — Run project tests for changed files
+- get_git_status — Complete git context (branch, modified files, recent commits)
+- git_status / git_diff / git_branch / git_log — Read-only git information`;
+
+async function buildSystemPrompt(workspace: string, mode: string): Promise<string> {
+  const lines: string[] = [BASE_SYSTEM, "", `## Session Context`, `- Workspace: ${workspace}`, `- Mode: ${mode}`];
+  // Inject package.json project info if available
+  try {
+    const { promises: fs } = await import("node:fs");
+    const pkgRaw = await fs.readFile(`${workspace}/package.json`, "utf8").catch(() => null);
+    if (pkgRaw) {
+      const pkg = JSON.parse(pkgRaw) as { name?: string; description?: string; scripts?: Record<string, string> };
+      if (pkg.name) lines.push(`- Project: ${pkg.name}${pkg.description ? ` — ${pkg.description}` : ""}`);
+      if (pkg.scripts && Object.keys(pkg.scripts).length > 0) {
+        const scriptList = Object.entries(pkg.scripts).slice(0, 8).map(([k, v]) => `  • npm run ${k}`).join("\n");
+        lines.push(`- Available scripts:\n${scriptList}`);
+      }
+    }
+  } catch { /* ignore */ }
+  if (mode === "ask") lines.push("- Instruction: CHAT ONLY — do not use tools.");
+  else if (mode === "plan") lines.push("- Instruction: INSPECT ONLY — list_directory and read_file are allowed; do NOT write or run commands.");
+  else lines.push("- Instruction: Full autonomous agent — inspect, edit, and verify as needed.");
+  return lines.join("\n");
+}
 
 export class AgentRuntime {
   private state: AgentState = "IDLE";
@@ -114,6 +157,7 @@ export class AgentRuntime {
     prompt: string,
     mode: "ask" | "plan" | "agent",
     signal?: AbortSignal,
+    attachedContext: string[] = [],
   ) {
     const started = Date.now();
     this.stopped = false;
@@ -131,17 +175,22 @@ export class AgentRuntime {
       this.transition("FAILED", "Model does not support tools");
       this.event({
         type: "error",
-        message: `Model '${this.model}' cannot run autonomous coding tools. Use Chat/Ask mode or select a tool-capable model.`,
+        message: `Model '${this.model}' does not support tool calls. Switch to a Tools-capable model or use Ask mode.`,
       });
       return;
     }
 
+    const systemPrompt = await buildSystemPrompt(this.workspace, mode);
+
+    // Build user message — prepend any attached context file snippets
+    let userContent = prompt;
+    if (attachedContext.length > 0) {
+      userContent = `## Attached Context\n${attachedContext.join("\n\n")}\n\n## Task\n${prompt}`;
+    }
+
     const messages: ChatMessage[] = [
-      {
-        role: "system",
-        content: `${system}\nWorkspace: ${this.workspace}\nMode: ${mode}. ${mode === "ask" ? "Do not use tools." : mode === "plan" ? "You may inspect only. Do not modify files or run commands." : "You may use approved tools."}`,
-      },
-      { role: "user", content: prompt },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
     ];
     const definitions: ToolDefinition[] =
       mode === "ask"

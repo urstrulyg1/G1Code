@@ -54,6 +54,7 @@ type Event = {
   message?: string;
   toolName?: string;
   toolCallId?: string;
+  changeId?: string;
   input?: unknown;
   result?: unknown;
 };
@@ -223,11 +224,13 @@ function App() {
     tool: string;
     input: unknown;
   } | null>(null);
+  const [showSessionHistory, setShowSessionHistory] = useState(false);
 
-  // Structured Timeline Tasks (BOB / Antigravity Style)
-  const [timelineSteps, setTimelineSteps] = useState<
-    Array<{ title: string; bullets: string[] }>
-  >([]);
+  // Structured Timeline (retired fake state — now driven by real events)
+  // keep a ref to the last submitted prompt for Retry
+  const lastPromptRef = useRef<string>("");
+  const agentBodyRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<HTMLPreElement>(null);
 
   // Experiential Labs Provider & Models (Dynamically loaded directly from ExperientialLabs.ai)
   const [settings, setSettings] = useState<SettingsType>({
@@ -430,6 +433,9 @@ function App() {
         )
       ) {
         setRunning(false);
+        // Refresh changes and git status on completion
+        void loadChanges();
+        void loadGitAndProblems(workspace);
       }
       if (event.state === "WAITING_FOR_CHANGE_APPROVAL") {
         void loadChanges();
@@ -438,6 +444,7 @@ function App() {
         setTerminalOutput(
           (old) => `${old}${event.message!.replace(/^COMMAND_[A-Z]+ /, "")}\n`,
         );
+        setBottomTab("terminal");
       }
     });
 
@@ -473,6 +480,7 @@ function App() {
     try {
       const list = await window.g1code.listChanges(workspace, sessionId);
       setChanges(list);
+      void reloadOpenTabs();
     } catch {
       // ignore
     }
@@ -549,15 +557,116 @@ function App() {
   };
 
   const openFile = async (name: string) => {
-    const filePath = `${workspace}/${name}`;
-    const content = await window.g1code.readFile(filePath);
-    setTabs((old) =>
-      old.some((tab) => tab.path === filePath)
-        ? old
-        : [...old, { path: filePath, content, dirty: false }],
-    );
-    setActiveTabPath(filePath);
-    setActiveDiff(null);
+    const filePath = name.startsWith("/") ? name : `${workspace}/${name}`;
+    try {
+      const content = await window.g1code.readFile(filePath);
+      setTabs((old) =>
+        old.some((tab) => tab.path === filePath)
+          ? old.map((t) =>
+              t.path === filePath && !t.dirty ? { ...t, content } : t,
+            )
+          : [...old, { path: filePath, content, dirty: false }],
+      );
+      setActiveTabPath(filePath);
+      setActiveDiff(null);
+    } catch (err) {
+      console.error("Failed to open file:", err);
+    }
+  };
+
+  const reloadOpenTabs = async () => {
+    setTabs((oldTabs) => {
+      oldTabs.forEach(async (tab) => {
+        if (!tab.dirty) {
+          try {
+            const fresh = await window.g1code.readFile(tab.path);
+            setTabs((current) =>
+              current.map((t) =>
+                t.path === tab.path && !t.dirty ? { ...t, content: fresh } : t,
+              ),
+            );
+          } catch {
+            // ignore
+          }
+        }
+      });
+      return oldTabs;
+    });
+  };
+
+  const approveChange = async (changeId: string) => {
+    if (!sessionId || workspace === "No workspace open") return;
+    try {
+      await window.g1code.change(workspace, sessionId, changeId, "approve");
+      await loadChanges();
+      await reloadOpenTabs();
+      void loadGitAndProblems(workspace);
+      if (activeDiff?.id === changeId) {
+        setActiveDiff(null);
+      }
+    } catch (err) {
+      console.error("Failed to approve change:", err);
+    }
+  };
+
+  const rejectChange = async (changeId: string) => {
+    if (!sessionId || workspace === "No workspace open") return;
+    try {
+      await window.g1code.change(workspace, sessionId, changeId, "reject");
+      await loadChanges();
+      if (activeDiff?.id === changeId) {
+        setActiveDiff(null);
+      }
+    } catch (err) {
+      console.error("Failed to reject change:", err);
+    }
+  };
+
+  const approveAllChanges = async () => {
+    if (!sessionId || workspace === "No workspace open") return;
+    try {
+      await window.g1code.approveAllChanges(workspace, sessionId);
+      await loadChanges();
+      await reloadOpenTabs();
+      void loadGitAndProblems(workspace);
+      setActiveDiff(null);
+    } catch (err) {
+      console.error("Failed to approve all changes:", err);
+    }
+  };
+
+  const rejectAllChanges = async () => {
+    if (!sessionId || workspace === "No workspace open") return;
+    try {
+      await window.g1code.rejectAllChanges(workspace, sessionId);
+      await loadChanges();
+      setActiveDiff(null);
+    } catch (err) {
+      console.error("Failed to reject all changes:", err);
+    }
+  };
+
+  const switchSession = async (sessId: string) => {
+    if (workspace === "No workspace open" || !sessId) return;
+    try {
+      setSessionId(sessId);
+      const targetSession = sessions.find((s) => s.id === sessId);
+      if (targetSession) {
+        setSessionTitle(targetSession.title);
+        setUserTaskPrompt(targetSession.title);
+      }
+      setShowSessionHistory(false);
+      const sessEvents = await window.g1code.loadSessionEvents(workspace, sessId);
+      if (Array.isArray(sessEvents)) {
+        setEvents(sessEvents.map((e: any) => (e && e.data ? e.data : e)));
+      }
+      const sessChanges = await window.g1code.listChanges(workspace, sessId);
+      if (Array.isArray(sessChanges)) {
+        setChanges(sessChanges);
+      }
+    } catch (err) {
+      console.error("Failed to switch session:", err);
+    }
   };
 
   const closeTab = (path: string, e: React.MouseEvent) => {
@@ -659,22 +768,10 @@ function App() {
 
     setRunning(true);
     setEvents([]);
+    setChanges([]);
     setUserTaskPrompt(task);
-    setSessionTitle(task.length > 40 ? task.slice(0, 40) + "..." : task);
-
-    const targetProvider = "experiential-labs";
-
-    // Build timeline card for the requested task
-    setTimelineSteps([
-      {
-        title: `Task: ${task}`,
-        bullets: [
-          `Active Model: Experiential Labs / ${modelToUse}`,
-          "Inspecting workspace repository baseline",
-          "Autonomous tool execution engaged",
-        ],
-      },
-    ]);
+    setSessionTitle(task.length > 50 ? task.slice(0, 50) + "…" : task);
+    lastPromptRef.current = task;
 
     try {
       const res = await window.g1code.startAgent({
@@ -683,7 +780,8 @@ function App() {
         mode:
           agentMode === "plan" ? "plan" : agentMode === "ask" ? "ask" : "agent",
         model: modelToUse,
-        provider: targetProvider,
+        provider: "experiential-labs",
+        attachedContext,
       });
       setSessionId(res.sessionId);
       setAgentPrompt("");
@@ -702,6 +800,18 @@ function App() {
       ]);
     }
   };
+
+  // Auto-scroll agent body to bottom whenever new events arrive
+  useEffect(() => {
+    const el = agentBodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [events]);
+
+  // Auto-scroll terminal panel to bottom on new output
+  useEffect(() => {
+    const el = terminalRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [terminalOutput]);
 
   const handleModelChange = async (newModel: string) => {
     // Do not allow selecting a model that has reached its usage limit
@@ -743,13 +853,11 @@ function App() {
       await window.g1code.commitGit(workspace, commitMessage.trim());
       setCommitMessage("");
       void loadGitAndProblems(workspace);
-      setTimelineSteps((old) => [
+      setEvents((old) => [
         ...old,
         {
-          title: "Git Commit Successful",
-          bullets: [
-            `Committed to ${gitStatus.branch}: "${commitMessage.trim()}"`,
-          ],
+          type: "text",
+          message: `Git commit successful (${gitStatus.branch}): "${commitMessage.trim()}"`,
         },
       ]);
     } catch (err) {
@@ -1478,16 +1586,32 @@ function App() {
                 </button>
               )}
               {activeDiff && (
-                <button
-                  className={`editor-action-btn ${diffViewMode === "split" ? "active" : ""}`}
-                  onClick={() =>
-                    setDiffViewMode(
-                      diffViewMode === "split" ? "unified" : "split",
-                    )
-                  }
-                >
-                  {diffViewMode === "split" ? "Side-by-Side" : "Inline"}
-                </button>
+                <div className="diff-header-action-group">
+                  <button
+                    className={`editor-action-btn ${diffViewMode === "split" ? "active" : ""}`}
+                    onClick={() =>
+                      setDiffViewMode(
+                        diffViewMode === "split" ? "unified" : "split",
+                      )
+                    }
+                  >
+                    {diffViewMode === "split" ? "Side-by-Side" : "Inline"}
+                  </button>
+                  <button
+                    className="editor-action-btn editor-btn-approve"
+                    onClick={() => void approveChange(activeDiff.id)}
+                    title="Approve & Apply this change"
+                  >
+                    <Check size={13} /> Approve
+                  </button>
+                  <button
+                    className="editor-action-btn editor-btn-reject"
+                    onClick={() => void rejectChange(activeDiff.id)}
+                    title="Reject this change"
+                  >
+                    <X size={13} /> Reject
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -1609,7 +1733,7 @@ function App() {
               <div className="drawer-content">
                 {bottomTab === "terminal" ? (
                   <div>
-                    <pre className="terminal-pre">
+                    <pre className="terminal-pre" ref={terminalRef}>
                       {terminalOutput ||
                         "Terminal ready. Commands execute securely within workspace."}
                     </pre>
@@ -1679,8 +1803,8 @@ function App() {
                         </div>
                       ))
                     ) : (
-                      <div style={{ color: "var(--text-muted)" }}>
-                        46 automated tests passing in test suite.
+                      <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                        No test runs recorded for this session. Use the terminal or ask the agent to run tests.
                       </div>
                     )}
                   </div>
@@ -1750,13 +1874,32 @@ function App() {
                   className="agent-icon-btn"
                   onClick={() => {
                     setSessionId("");
-                    setSessionTitle("New Agent Task");
+                    setSessionTitle("");
                     setUserTaskPrompt("");
                     setEvents([]);
+                    setChanges([]);
+                    setAgentPrompt("");
+                    lastPromptRef.current = "";
                   }}
                   title="New Task / Reset"
                 >
                   <Plus size={16} />
+                </button>
+                {running && (
+                  <button
+                    className="agent-icon-btn agent-icon-btn--stop"
+                    onClick={() => sessionId && window.g1code.stopAgent(sessionId)}
+                    title="Stop Agent"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+                <button
+                  className={`agent-icon-btn ${showSessionHistory ? "active" : ""}`}
+                  onClick={() => setShowSessionHistory(!showSessionHistory)}
+                  title="Session History"
+                >
+                  <Clock size={16} />
                 </button>
                 <button
                   className="agent-icon-btn"
@@ -1768,105 +1911,365 @@ function App() {
               </div>
             </div>
 
-            {/* Body */}
-            <div className="agent-body">
-              {/* User Task Card */}
-              <div className="user-task-card">
-                <div className="user-task-eyebrow">User task</div>
-                <div className="user-task-text">
-                  {userTaskPrompt || "Waiting for task prompt..."}
+            {/* Session History Popover */}
+            {showSessionHistory && (
+              <div className="session-history-popover">
+                <div className="session-history-header">
+                  <span>SESSION HISTORY</span>
+                  <button className="close-history-btn" onClick={() => setShowSessionHistory(false)}>
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="session-history-list">
+                  {sessions.length > 0 ? (
+                    sessions.map((s) => (
+                      <div
+                        key={s.id}
+                        className={`session-history-item ${s.id === sessionId ? "active" : ""}`}
+                        onClick={() => void switchSession(s.id)}
+                      >
+                        <div className="session-history-title">{s.title || "Untitled Task"}</div>
+                        <div className="session-history-meta">
+                          <span className={`session-status-tag status-${s.status.toLowerCase()}`}>{s.status}</span>
+                          <span className="session-mode-tag">{s.mode}</span>
+                          {s.model && <span className="session-model-name">{s.model.split("/").pop()}</span>}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="session-history-empty">No past sessions found</div>
+                  )}
                 </div>
               </div>
+            )}
 
-              {/* Structured Timeline Steps */}
-              {timelineSteps.map((step, idx) => (
-                <div className="timeline-card" key={idx}>
-                  <div className="timeline-step-title">{step.title}</div>
-                  <ul className="timeline-step-bullets">
-                    {step.bullets.map((b, bi) => (
-                      <li key={bi}>{b}</li>
-                    ))}
-                  </ul>
+            {/* Body — Antigravity-style chronological event feed */}
+            <div className="agent-body" ref={agentBodyRef}>
+              {/* User Task Card — only shown when a task is active */}
+              {userTaskPrompt && (
+                <div className="user-task-card">
+                  <div className="user-task-eyebrow">USER TASK</div>
+                  <div className="user-task-text">{userTaskPrompt}</div>
                 </div>
-              ))}
+              )}
 
-              {/* Tool Events */}
-              {events
-                .filter((e) => e.type === "tool" || e.type === "command")
-                .slice(-4)
-                .map((ev, i) => (
-                  <div className="tool-event-row" key={i}>
-                    <div className="tool-status-icon">
-                      <Check size={13} color="var(--accent-agent)" />
-                    </div>
-                    <div className="tool-event-msg">
-                      <strong>{ev.toolName || "tool"}</strong>:{" "}
-                      {ev.message || "Executed successfully"}
-                    </div>
-                  </div>
-                ))}
+              {/* Empty state */}
+              {!userTaskPrompt && events.length === 0 && (
+                <div className="agent-empty-state">
+                  <Bot size={32} color="var(--text-dim)" />
+                  <div className="agent-empty-title">G1Code Agent Ready</div>
+                  <div className="agent-empty-hint">Type a task below to start. The agent will inspect, plan, edit, and verify autonomously.</div>
+                </div>
+              )}
 
-              {/* Change Review Bar */}
+              {/* Chronological event feed */}
+              {events.map((ev, i) => {
+                // State transition → timeline step card
+                if (ev.type === "state" && ev.state && ev.state !== "IDLE") {
+                  const stateColors: Record<string, string> = {
+                    UNDERSTANDING: "var(--accent-model)",
+                    ANALYZING: "var(--accent-model)",
+                    PLANNING: "var(--accent-model)",
+                    EXECUTING: "var(--accent-agent)",
+                    OBSERVING: "var(--accent-agent)",
+                    VERIFYING: "#f59e0b",
+                    COMPLETED: "#10b981",
+                    FAILED: "var(--accent-error)",
+                    CANCELLED: "var(--text-dim)",
+                    STOPPED: "var(--text-dim)",
+                    DIAGNOSING: "#f59e0b",
+                    REPAIRING: "#f59e0b",
+                    WAITING_FOR_APPROVAL: "#f59e0b",
+                  };
+                  const color = stateColors[ev.state] || "var(--text-dim)";
+                  return (
+                    <div className="agent-state-row" key={i}>
+                      <span className="agent-state-dot" style={{ background: color }} />
+                      <span className="agent-state-label" style={{ color }}>{ev.state.replace(/_/g, " ")}</span>
+                      {ev.message && <span className="agent-state-msg">{ev.message}</span>}
+                    </div>
+                  );
+                }
+
+                // Failover notification card
+                if (
+                  (ev.type === "text" || ev.type === "state") &&
+                  (ev.message?.includes("[Failover]") ||
+                    ev.message?.includes("Switched automatically"))
+                ) {
+                  return (
+                    <div className="agent-failover-card" key={`failover-${i}`}>
+                      <Sparkles size={14} color="var(--accent-model)" />
+                      <div className="agent-failover-text">
+                        {ev.message.replace(/^\[Failover\]\s*/, "")}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Tool event → compact tool row with parameters snippet
+                if (ev.type === "tool") {
+                  const isDone = ev.message?.includes("completed") || ev.result;
+                  const isFail = ev.message?.includes("failed");
+                  const toolArg =
+                    ev.input && typeof ev.input === "object"
+                      ? (ev.input as any).path ||
+                        (ev.input as any).command ||
+                        (ev.input as any).query
+                      : null;
+                  return (
+                    <div className="tool-event-row" key={i}>
+                      <div className="tool-status-icon">
+                        {isFail ? (
+                          <AlertTriangle size={13} color="var(--accent-error)" />
+                        ) : isDone ? (
+                          <Check size={13} color="var(--accent-agent)" />
+                        ) : (
+                          <RefreshCw
+                            size={12}
+                            color="var(--text-dim)"
+                            className="spin-icon"
+                          />
+                        )}
+                      </div>
+                      <div className="tool-event-msg">
+                        <strong>{ev.toolName || "tool"}</strong>
+                        {toolArg && (
+                          <code className="tool-arg-badge">
+                            {String(toolArg).slice(0, 60)}
+                          </code>
+                        )}
+                        <span className="tool-status-text">
+                          : {ev.message || "Running"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Approval event → interactive approval card
+                if (ev.type === "approval") {
+                  const changeInput = ev.input as
+                    | {
+                        changeId?: string;
+                        path?: string;
+                        diff?: string;
+                        status?: string;
+                      }
+                    | undefined;
+                  const targetChangeId = changeInput?.changeId || ev.changeId;
+                  const filePath =
+                    changeInput?.path ||
+                    (ev.toolName ? `${ev.toolName}` : "File change");
+                  const isApplied =
+                    ev.result &&
+                    typeof ev.result === "object" &&
+                    (ev.result as any).status === "APPLIED";
+                  const isRejected =
+                    ev.result &&
+                    typeof ev.result === "object" &&
+                    (ev.result as any).status === "REJECTED";
+
+                  return (
+                    <div className="agent-approval-card" key={`appr-${i}`}>
+                      <div className="agent-approval-header">
+                        <GitFork size={14} color="var(--accent-warning)" />
+                        <span className="agent-approval-title">
+                          {isApplied
+                            ? "Change Applied"
+                            : isRejected
+                              ? "Change Rejected"
+                              : "Approval Required"}
+                        </span>
+                      </div>
+                      <div className="agent-approval-body">
+                        <div className="agent-approval-file">
+                          <span>File:</span> <code>{filePath}</code>
+                        </div>
+                        {changeInput?.diff && (
+                          <pre className="agent-diff-snippet">
+                            {changeInput.diff
+                              .split("\n")
+                              .slice(0, 8)
+                              .join("\n")}
+                          </pre>
+                        )}
+                      </div>
+                      {!isApplied && !isRejected && targetChangeId && (
+                        <div className="agent-approval-actions">
+                          <button
+                            className="btn-diff-review"
+                            onClick={() => {
+                              const found = changes.find(
+                                (c) => c.id === targetChangeId,
+                              );
+                              if (found) setActiveDiff(found);
+                              else if (changeInput) {
+                                setActiveDiff({
+                                  id: targetChangeId,
+                                  path: changeInput.path || filePath,
+                                  patch: changeInput.diff || "",
+                                  status: "pending_approval",
+                                });
+                              }
+                            }}
+                          >
+                            <ExternalLink size={13} /> Review Diff
+                          </button>
+                          <button
+                            className="btn-diff-approve"
+                            onClick={() => void approveChange(targetChangeId)}
+                          >
+                            <Check size={13} /> Approve & Apply
+                          </button>
+                          <button
+                            className="btn-diff-reject"
+                            onClick={() => void rejectChange(targetChangeId)}
+                          >
+                            <X size={13} /> Reject
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
+                // Error event → error card with Retry
+                if (ev.type === "error") {
+                  return (
+                    <div className="agent-error-card" key={`err-${i}`}>
+                      <div className="agent-error-header">
+                        <AlertTriangle size={14} color="#f43f5e" />
+                        <span>EXECUTION ERROR</span>
+                      </div>
+                      <div className="agent-error-msg">{ev.message}</div>
+                      <div className="agent-error-actions">
+                        {lastPromptRef.current && !running && (
+                          <button
+                            className="btn-error-action btn-error-retry"
+                            onClick={() => void startAgent(lastPromptRef.current)}
+                          >
+                            <RefreshCw size={13} /> Retry
+                          </button>
+                        )}
+                        {ev.message?.toLowerCase().includes("api key") && (
+                          <button
+                            className="btn-error-action"
+                            onClick={() => setSettingsOpen(true)}
+                          >
+                            <Key size={13} /> Configure API Key
+                          </button>
+                        )}
+                        {ev.message?.toLowerCase().includes("workspace") && (
+                          <button
+                            className="btn-error-action"
+                            onClick={() => setWorkspaceModal(true)}
+                          >
+                            <FolderOpen size={13} /> Select Workspace
+                          </button>
+                        )}
+                        {ev.message?.toLowerCase().includes("model") && (
+                          <button
+                            className="btn-error-action"
+                            onClick={() => setModelPickerOpen(true)}
+                          >
+                            <Sparkles size={13} /> Switch Model
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Text / done → model response card
+                if (ev.type === "text" || ev.type === "done") {
+                  // Render message with clickable file paths
+                  const renderMessage = (msg: string) => {
+                    const parts = msg.split(
+                      /((?:\/[\w./\-]+(?:\.ts|\.tsx|\.js|\.jsx|\.css|\.json|\.md|\.py|\.go|\.sh))+)/g,
+                    );
+                    return parts.map((part, pi) => {
+                      const isFilePath = /^\/[\w./\-]+\.[a-z]+$/.test(part);
+                      if (isFilePath && workspace !== "No workspace open") {
+                        return (
+                          <span
+                            key={pi}
+                            className="agent-file-link"
+                            onClick={() =>
+                              void openFile(part.replace(workspace + "/", ""))
+                            }
+                            title={`Open ${part}`}
+                          >
+                            {part}
+                          </span>
+                        );
+                      }
+                      return <span key={pi}>{part}</span>;
+                    });
+                  };
+                  return (
+                    <div className="agent-response-card" key={i}>
+                      <div className="agent-provider-tag">
+                        <Bot size={13} color="var(--accent-model)" />
+                        <span>
+                          Experiential Labs ·{" "}
+                          {activeModelMeta.name || selectedModel}
+                        </span>
+                      </div>
+                      <div className="agent-response-text">
+                        {renderMessage(ev.message || "")}
+                      </div>
+                    </div>
+                  );
+                }
+
+                return null;
+              })}
+
+              {/* Running pulse indicator */}
+              {running && (
+                <div className="agent-thinking-row">
+                  <span className="thinking-dot" />
+                  <span className="thinking-dot" />
+                  <span className="thinking-dot" />
+                </div>
+              )}
+
+              {/* Change Review Bar — always visible */}
               <div className="changes-review-bar">
                 <span className="changes-count-label">
-                  {changes.length} Files With Changes
+                  {changes.length} {changes.length === 1 ? "File" : "Files"} With Changes
                 </span>
-                <button
-                  className="btn-review-changes"
-                  onClick={() => {
-                    if (changes.length > 0) setActiveDiff(changes[0]);
-                    else void loadChanges();
-                  }}
-                >
-                  Review Changes
-                </button>
+                <div className="changes-review-buttons">
+                  <button
+                    className="btn-review-changes"
+                    onClick={() => {
+                      if (changes.length > 0) setActiveDiff(changes[0]);
+                      else void loadChanges();
+                    }}
+                  >
+                    Review
+                  </button>
+                  {changes.length > 0 && (
+                    <>
+                      <button
+                        className="btn-review-approve-all"
+                        onClick={() => void approveAllChanges()}
+                        title="Approve all pending changes"
+                      >
+                        <Check size={12} /> Approve All
+                      </button>
+                      <button
+                        className="btn-review-reject-all"
+                        onClick={() => void rejectAllChanges()}
+                        title="Reject all pending changes"
+                      >
+                        <X size={12} /> Reject All
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
-
-              {/* Agent Error Messages */}
-              {events
-                .filter((e) => e.type === "error")
-                .map((ev, i) => (
-                  <div className="agent-error-card" key={`err-${i}`}>
-                    <div className="agent-error-header">
-                      <AlertTriangle size={14} color="#f43f5e" />
-                      <span>Execution Error</span>
-                    </div>
-                    <div className="agent-error-msg">{ev.message}</div>
-                    <div className="agent-error-actions">
-                      {ev.message?.toLowerCase().includes("api key") && (
-                        <button
-                          className="btn-error-action"
-                          onClick={() => setSettingsOpen(true)}
-                        >
-                          <Key size={13} /> Configure API Key
-                        </button>
-                      )}
-                      {ev.message?.toLowerCase().includes("workspace") && (
-                        <button
-                          className="btn-error-action"
-                          onClick={() => setWorkspaceModal(true)}
-                        >
-                          <FolderOpen size={13} /> Select Workspace
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-
-              {/* Agent Reasoning Messages */}
-              {events
-                .filter((e) => e.type === "text" || e.type === "done")
-                .map((ev, i) => (
-                  <div className="agent-response-card" key={i}>
-                    <div className="agent-provider-tag">
-                      <Bot size={13} color="var(--accent-model)" />
-                      <span>
-                        Experiential Labs · {selectedModel}
-                      </span>
-                    </div>
-                    <div style={{ whiteSpace: "pre-wrap" }}>{ev.message}</div>
-                  </div>
-                ))}
             </div>
 
             {/* Bottom Agent Composer (Command Surface) */}

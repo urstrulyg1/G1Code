@@ -1144,6 +1144,463 @@ button {
   border-color: #f43f5e;
 }
 
+/* Retry button (green tint) */
+.btn-error-retry {
+  background: rgba(16, 185, 129, 0.12) !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+  color: #34d399 !important;
+}
+.btn-error-retry:hover {
+  background: rgba(16, 185, 129, 0.25) !important;
+  color: #fff !important;
+  border-color: #10b981 !important;
+}
+
+/* Stop agent button (red) */
+.agent-icon-btn--stop {
+  color: var(--accent-error) !important;
+}
+.agent-icon-btn--stop:hover {
+  background: rgba(244, 63, 94, 0.15) !important;
+}
+
+/* Empty state */
+.agent-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-dim);
+}
+.agent-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.agent-empty-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 280px;
+}
+
+/* State transition row */
+.agent-state-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 11.5px;
+}
+.agent-state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.agent-state-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10.5px;
+}
+.agent-state-msg {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+/* Clickable file path in agent response */
+.agent-file-link {
+  color: var(--accent-model);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  cursor: pointer;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  transition: color 0.15s;
+}
+.agent-file-link:hover {
+  color: #a78bfa;
+}
+
+/* Response text */
+.agent-response-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* Thinking / streaming pulse */
+.agent-thinking-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 2px;
+}
+.thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-agent);
+  animation: thinkPulse 1.2s ease-in-out infinite;
+}
+.thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes thinkPulse {
+  0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+/* Spinning icon for in-progress tool */
+/* Tool parameter badge */
+.tool-arg-badge {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: #93c5fd;
+  margin: 0 4px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.tool-status-text {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Failover notification card */
+.agent-failover-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 4px 0;
+  animation: fadeIn 0.2s ease-in;
+}
+
+.agent-failover-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #c4b5fd;
+  font-weight: 500;
+}
+
+/* Agent Approval Card */
+.agent-approval-card {
+  background: rgba(245, 158, 11, 0.05);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0;
+  animation: fadeIn 0.2s ease-in;
+}
+
+.agent-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-approval-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f59e0b;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.agent-approval-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-approval-file {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agent-approval-file code {
+  font-family: var(--font-mono, monospace);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.agent-diff-snippet {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  max-height: 110px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.agent-approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn-diff-review,
+.btn-diff-approve,
+.btn-diff-reject {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-diff-review {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+}
+.btn-diff-review:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.btn-diff-approve {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+.btn-diff-approve:hover {
+  background: rgba(16, 185, 129, 0.3);
+  border-color: #10b981;
+  color: #fff;
+}
+
+.btn-diff-reject {
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  color: #fb7185;
+}
+.btn-diff-reject:hover {
+  background: rgba(244, 63, 94, 0.25);
+  border-color: #f43f5e;
+  color: #fff;
+}
+
+/* Diff Header Action Group */
+.diff-header-action-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.editor-btn-approve {
+  background: rgba(16, 185, 129, 0.15) !important;
+  border-color: rgba(16, 185, 129, 0.35) !important;
+  color: #34d399 !important;
+}
+.editor-btn-approve:hover {
+  background: rgba(16, 185, 129, 0.3) !important;
+  border-color: #10b981 !important;
+  color: #fff !important;
+}
+
+.editor-btn-reject {
+  background: rgba(244, 63, 94, 0.12) !important;
+  border-color: rgba(244, 63, 94, 0.3) !important;
+  color: #fb7185 !important;
+}
+.editor-btn-reject:hover {
+  background: rgba(244, 63, 94, 0.25) !important;
+  border-color: #f43f5e !important;
+  color: #fff !important;
+}
+
+/* Changes Review Buttons */
+.changes-review-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-review-approve-all,
+.btn-review-reject-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-review-approve-all {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+.btn-review-approve-all:hover {
+  background: rgba(16, 185, 129, 0.3);
+  color: #fff;
+}
+
+.btn-review-reject-all {
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  color: #fb7185;
+}
+.btn-review-reject-all:hover {
+  background: rgba(244, 63, 94, 0.25);
+  color: #fff;
+}
+
+/* Session History Popover */
+.session-history-popover {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  margin: 0 10px 10px 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.session-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.close-history-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+}
+.close-history-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.session-history-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.session-history-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background 0.15s;
+}
+.session-history-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.session-history-item.active {
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.session-history-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-history-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.session-status-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+.session-status-tag.status-completed {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+.session-status-tag.status-running {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+.session-status-tag.status-failed {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+}
+.session-status-tag.status-stopped {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+}
+
+.session-mode-tag {
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.session-model-name {
+  color: var(--accent-model);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+}
+
+.session-history-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* Agent Bottom Command Surface */
 .agent-composer {
   padding: 14px;

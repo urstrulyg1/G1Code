@@ -103,16 +103,50 @@ export const workspaceTools = (): AgentTool[] => [
         String((value as { path: string }).path ?? "."),
       );
       const entries = await fs.readdir(directory, { withFileTypes: true });
+      const IGNORE = new Set(["node_modules", ".git", ".next", "dist", "dist-electron", ".cache", "coverage"]);
       return {
         content: JSON.stringify(
           entries
-            .filter((entry) => !entry.name.startsWith("node_modules"))
+            .filter((entry) => !IGNORE.has(entry.name) && !entry.name.startsWith("."))
             .map((entry) => ({
               name: entry.name,
               kind: entry.isDirectory() ? "directory" : "file",
             })),
         ),
       };
+    },
+  },
+  {
+    name: "get_project_info",
+    description: "Returns project metadata: package.json (name, scripts, dependencies) and README excerpt. Use this at the start of any task to understand the project structure before diving in.",
+    permission: "safe",
+    inputSchema: { type: "object", properties: {} },
+    execute: async (_value, context) => {
+      const results: Record<string, unknown> = {};
+      try {
+        const pkgRaw = await fs.readFile(path.join(context.workspace, "package.json"), "utf8");
+        const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
+        results.package = {
+          name: pkg.name,
+          version: pkg.version,
+          description: pkg.description,
+          scripts: pkg.scripts,
+          dependencies: Object.keys((pkg.dependencies as Record<string,string>) || {}).slice(0, 20),
+          devDependencies: Object.keys((pkg.devDependencies as Record<string,string>) || {}).slice(0, 20),
+        };
+      } catch { results.package = null; }
+      try {
+        const readme = await fs.readFile(path.join(context.workspace, "README.md"), "utf8");
+        results.readme = readme.slice(0, 1500);
+      } catch { results.readme = null; }
+      try {
+        const entries = await fs.readdir(context.workspace, { withFileTypes: true });
+        const IGNORE = new Set(["node_modules", ".git", ".next", "dist", "dist-electron", "coverage"]);
+        results.rootFiles = entries
+          .filter(e => !IGNORE.has(e.name))
+          .map(e => ({ name: e.name, kind: e.isDirectory() ? "directory" : "file" }));
+      } catch { results.rootFiles = []; }
+      return { content: JSON.stringify(results, null, 2) };
     },
   },
   {
@@ -244,7 +278,7 @@ export const workspaceTools = (): AgentTool[] => [
   {
     name: "run_command",
     description:
-      "Run a command in the workspace. Dangerous commands require explicit approval.",
+      "Run a shell command in the workspace directory (e.g. npm test, npm run build, tsc, git status). Use for running tests, linting, builds, or inspecting command output. Requires user approval for destructive commands. Output is truncated at 30KB.",
     permission: "moderate",
     inputSchema: input({
       command: { type: "string" },
@@ -268,10 +302,14 @@ export const workspaceTools = (): AgentTool[] => [
         type: "command",
         message: `COMMAND_STARTED ${data.command}`,
       });
+      const MAX_OUTPUT = 30_000;
       const drain = async (stream: AsyncIterable<string>, type: string) => {
         let buffered = "";
+        let total = 0;
         for await (const chunk of stream) {
+          if (total >= MAX_OUTPUT) break;
           buffered += chunk;
+          total += chunk.length;
           if (buffered.length >= 4096) {
             context.emit({ type, message: buffered.slice(0, 4096) });
             buffered = buffered.slice(4096);
@@ -288,8 +326,10 @@ export const workspaceTools = (): AgentTool[] => [
         type: result.exitCode === 0 ? "COMMAND_COMPLETED" : "COMMAND_FAILED",
         message: `exit ${result.exitCode}`,
       });
+      // Truncate final result content for context window safety
+      const truncated = (result.stdout + result.stderr).slice(0, MAX_OUTPUT);
       return {
-        content: JSON.stringify(result),
+        content: JSON.stringify({ ...result, stdout: truncated, stderr: "" }),
         isError: result.exitCode !== 0,
         exitCode: result.exitCode,
       };

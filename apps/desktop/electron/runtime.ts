@@ -548,6 +548,7 @@ export function registerRuntimeHandlers(
         prompt: string;
         mode: "ask" | "plan" | "agent";
         model?: string;
+        attachedContext?: string[];
       },
     ) => {
       if (
@@ -783,6 +784,7 @@ export function registerRuntimeHandlers(
           `${instructions ? `Project instructions:\n${instructions}\n\n` : ""}${input.prompt}`,
           input.mode,
           signal,
+          input.attachedContext ?? [],
         ),
       );
       return { sessionId, model: selectedModel };

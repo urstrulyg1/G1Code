@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld("g1code", {
     prompt: string;
     mode: "ask" | "plan" | "agent";
     model?: string;
+    provider?: string;
+    attachedContext?: string[];
   }) => ipcRenderer.invoke("agent:start", input),
   setSessionModel: (sessionId: string, model: string) =>
     ipcRenderer.invoke("agent:session-model", { sessionId, model }),
