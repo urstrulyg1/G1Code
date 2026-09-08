@@ -184,43 +184,57 @@ export async function saveSettings(
   return next;
 }
 
+function extractApiKeyFromContent(content: string): string | null {
+  const match = content.match(
+    /(?:export\s+)?(?:EXPLABS_API_KEY|EXPERIENTIAL_LABS_API_KEY|XPL_API_KEY|EXPERIENTIAL_API_KEY)\s*=\s*["']?([^"'\s#;]+)["']?/,
+  );
+  if (match && match[1]) {
+    const key = match[1].replace(/^["']|["';\s]+$/g, "").trim();
+    if (key.length > 0) return key;
+  }
+  return null;
+}
+
+const SHELL_RC_FILES = [".zshrc", ".zshenv", ".bashrc", ".bash_profile"];
+
 export function readApiKeyFromZshrcSync(): string | null {
   try {
-    const zshrcPath = path.join(os.homedir(), ".zshrc");
-    if (!fsSync.existsSync(zshrcPath)) return null;
-    const content = fsSync.readFileSync(zshrcPath, "utf8");
-    const match = content.match(
-      /(?:export\s+)?(?:EXPLABS_API_KEY|EXPERIENTIAL_LABS_API_KEY|XPL_API_KEY|EXPERIENTIAL_API_KEY)\s*=\s*["']?([^"'\s#]+)["']?/,
-    );
-    if (match && match[1]?.trim()) {
-      const key = match[1].trim();
-      if (!process.env.EXPLABS_API_KEY) {
-        process.env.EXPLABS_API_KEY = key;
+    const home = os.homedir();
+    for (const filename of SHELL_RC_FILES) {
+      const filePath = path.join(home, filename);
+      if (fsSync.existsSync(filePath)) {
+        const content = fsSync.readFileSync(filePath, "utf8");
+        const key = extractApiKeyFromContent(content);
+        if (key) {
+          process.env.EXPLABS_API_KEY = key;
+          return key;
+        }
       }
-      return key;
     }
   } catch {
-    // Ignore if ~/.zshrc cannot be accessed
+    // Ignore if shell config cannot be accessed
   }
   return null;
 }
 
 export async function readApiKeyFromZshrc(): Promise<string | null> {
   try {
-    const zshrcPath = path.join(os.homedir(), ".zshrc");
-    const content = await fs.readFile(zshrcPath, "utf8");
-    const match = content.match(
-      /(?:export\s+)?(?:EXPLABS_API_KEY|EXPERIENTIAL_LABS_API_KEY|XPL_API_KEY|EXPERIENTIAL_API_KEY)\s*=\s*["']?([^"'\s#]+)["']?/,
-    );
-    if (match && match[1]?.trim()) {
-      const key = match[1].trim();
-      if (!process.env.EXPLABS_API_KEY) {
-        process.env.EXPLABS_API_KEY = key;
+    const home = os.homedir();
+    for (const filename of SHELL_RC_FILES) {
+      const filePath = path.join(home, filename);
+      try {
+        const content = await fs.readFile(filePath, "utf8");
+        const key = extractApiKeyFromContent(content);
+        if (key) {
+          process.env.EXPLABS_API_KEY = key;
+          return key;
+        }
+      } catch {
+        // Continue to next file
       }
-      return key;
     }
   } catch {
-    // Ignore if ~/.zshrc cannot be accessed
+    // Ignore if shell config cannot be accessed
   }
   return null;
 }

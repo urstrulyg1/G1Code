@@ -33,8 +33,9 @@ class UsageLimitManager {
   private usage = new Map<string, UsageRecord>();
 
   private getNextHourReset(): number {
-    const now = Date.now();
-    return now + (60 - (new Date(now).getMinutes())) * 60 * 1000 - (new Date(now).getSeconds() * 1000);
+    const d = new Date();
+    d.setHours(d.getHours() + 1, 0, 0, 0);
+    return d.getTime();
   }
 
   private getNextDayReset(): number {

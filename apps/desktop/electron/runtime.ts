@@ -141,6 +141,53 @@ export function registerRuntimeHandlers(
       }
     },
   );
+  ipcMain.handle("provider:usage-limits", async () => {
+    let currentFreeModels: Array<{ id: string; name: string }>;
+    try {
+      const { provider } = await configuredProvider();
+      if (typeof (provider as any).getFreeModels === "function") {
+        const free = await (provider as any).getFreeModels();
+        currentFreeModels = free.map((m: any) => ({
+          id: m.id,
+          name: m.name || m.displayName || m.id,
+        }));
+      } else {
+        currentFreeModels = globalModelCatalog
+          .getFreeModels()
+          .map((m) => ({ id: m.id, name: m.displayName || m.name }));
+      }
+    } catch {
+      currentFreeModels = globalModelCatalog
+        .getFreeModels()
+        .map((m) => ({ id: m.id, name: m.displayName || m.name }));
+    }
+    globalUsageLimitManager.pruneExpiredModels(
+      new Set(currentFreeModels.map((m) => m.id)),
+    );
+    return globalUsageLimitManager.getAllUsage(currentFreeModels);
+  });
+  ipcMain.handle(
+    "provider:usage-limits:simulate",
+    async (
+      _event,
+      input: {
+        modelId: string;
+        resetInSeconds?: number;
+        reset?: boolean;
+        type?: "hourly" | "daily";
+      },
+    ) => {
+      if (!input?.modelId) throw new Error("modelId is required");
+      if (input.reset) {
+        return globalUsageLimitManager.resetModelLimit(input.modelId);
+      }
+      return globalUsageLimitManager.setSimulatedLimit(
+        input.modelId,
+        input.resetInSeconds || 60,
+        input.type || "hourly",
+      );
+    },
+  );
   ipcMain.handle(
     "provider:verify",
     async (_event, input?: { provider?: string }) => {
@@ -517,16 +564,35 @@ export function registerRuntimeHandlers(
         globalModelCatalog.getModels()[0]?.id ||
         "";
 
-      // If selected model is limit-reached, auto-failover to next best available free model
-      const usage = globalUsageLimitManager.getModelUsage(selectedModel);
-      if (usage.isLimitReached) {
+      // Enforce usage limits for Experiential Labs free models & auto-failover
+      let { allowed, limitInfo } =
+        globalUsageLimitManager.checkAndIncrement(selectedModel);
+      if (!allowed) {
+        // Automatically switch to the next best available free model based on API ranking
         const nextBest = globalModelCatalog.getNextBestFreeModel(
           selectedModel,
           new Set([selectedModel]),
         );
         if (nextBest) {
           selectedModel = nextBest.id;
+          const retryCheck =
+            globalUsageLimitManager.checkAndIncrement(selectedModel);
+          allowed = retryCheck.allowed;
+          limitInfo = retryCheck.limitInfo;
         }
+      }
+
+      if (!allowed) {
+        const remainingMs = Math.max(
+          0,
+          (limitInfo.limitType === "daily"
+            ? limitInfo.dailyResetAt
+            : limitInfo.hourlyResetAt) - Date.now(),
+        );
+        const mins = Math.ceil(remainingMs / 60000);
+        throw new Error(
+          `Model "${limitInfo.name}" has reached its ${limitInfo.limitType} usage limit (${limitInfo.limitType === "daily" ? limitInfo.dailyLimit : limitInfo.hourlyLimit} requests). Resets in ${mins} minute${mins === 1 ? "" : "s"}. No other free models currently available.`,
+        );
       }
       const workspace = validWorkspace(input.workspace);
       const selectedWorkspace = getSelectedWorkspace();

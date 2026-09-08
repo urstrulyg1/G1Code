@@ -534,5 +534,123 @@ test("Experiential Labs Provider: Model discovery, 30s refresh, and verification
   }
 });
 
+test("Experiential Labs Provider: API key extraction cleanly handles trailing semicolons, quotes, and whitespace", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const os = require("node:os");
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "g1code-keytest-"));
+  try {
+    const fakeZshrc = path.join(tmpDir, ".zshrc");
+    // Trailing semicolon and quotes
+    fs.writeFileSync(fakeZshrc, 'export EXPLABS_API_KEY="xpl_test_clean_key_123";\n', "utf8");
+
+    const originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    try {
+      const parsed = readApiKeyFromZshrcSync();
+      assert.equal(parsed, "xpl_test_clean_key_123", "Must strip quotes and trailing semicolon");
+    } finally {
+      process.env.HOME = originalHome;
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("Cross-Platform Workspace: safePath correctly handles Windows path casing", () => {
+  const { safePath } = require("../packages/tools/workspace");
+  // Drive letter casing differs: C:\project vs c:\project\src\file.ts
+  const resolved = safePath("C:\\project", "src\\file.ts");
+  assert.ok(resolved.toLowerCase().includes("project"), "Resolved path should include project");
+
+  // Rejection outside workspace
+  assert.throws(
+    () => safePath("C:\\project", "..\\secret.txt"),
+    /Path is outside the selected workspace/,
+  );
+});
+
+test("Experiential Labs Provider: Agent runtime automatically fails over mid-stream to next best free model on 429 RateLimitError without credit consumption", async () => {
+  const { AgentRuntime } = require("../packages/agent/runtime");
+  const { ToolRegistry } = require("../packages/tools/types");
+
+  // Setup dynamic catalog with 2 free models
+  globalModelCatalog.setModels([
+    parseModelMetadata({
+      id: "free-primary-rank-1",
+      name: "Free Primary Rank 1",
+      pricing: { input: 0, output: 0 },
+      apiRank: 1,
+    }),
+    parseModelMetadata({
+      id: "free-secondary-rank-2",
+      name: "Free Secondary Rank 2",
+      pricing: { input: 0, output: 0 },
+      apiRank: 2,
+    }),
+  ]);
+
+  let primaryAttempts = 0;
+  let secondaryAttempts = 0;
+  const modelsUsed: string[] = [];
+
+  const mockProvider = {
+    id: "experiential-labs",
+    name: "Experiential Labs",
+    getModels: async () => globalModelCatalog.getModels(),
+    chat: async () => ({ message: { role: "assistant", content: "ok" } }),
+    streamChat: async function* (req: any) {
+      modelsUsed.push(req.model);
+      if (req.model === "free-primary-rank-1") {
+        primaryAttempts++;
+        throw new RateLimitError("Experiential Labs rate limit reached (429): Rate limit exceeded for primary free model.");
+      }
+      if (req.model === "free-secondary-rank-2") {
+        secondaryAttempts++;
+        yield { content: "Successfully recovered via auto-failover to secondary free model!" };
+      }
+    },
+    supportsTools: () => true,
+    supportsVision: () => false,
+  };
+
+  const tools = new ToolRegistry();
+  const events: any[] = [];
+  const runtime = new AgentRuntime(
+    mockProvider,
+    tools,
+    "/test/workspace",
+    (evt) => events.push(evt),
+    async () => true,
+    undefined,
+    "test-failover-session",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    "free-primary-rank-1",
+  );
+
+  await runtime.run("Perform task", "ask");
+
+  assert.equal(primaryAttempts, 1, "Primary model was attempted once and failed with 429");
+  assert.equal(secondaryAttempts, 1, "Secondary model was picked up automatically via failover");
+  assert.deepEqual(modelsUsed, ["free-primary-rank-1", "free-secondary-rank-2"]);
+
+  const failoverEvent = events.find(
+    (e) => e.type === "text" && e.message?.includes("[Failover]"),
+  );
+  assert.ok(failoverEvent, "Failover notification event was emitted to user");
+  assert.ok(
+    failoverEvent.message.includes("free-secondary-rank-2"),
+    "Failover event specifies next best free model",
+  );
+
+  const completedEvent = events.find((e) => e.state === "COMPLETED");
+  assert.ok(completedEvent, "Task succeeded after automatic failover");
+});
+
+
 
 

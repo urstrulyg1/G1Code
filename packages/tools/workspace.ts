@@ -10,8 +10,20 @@ export function safePath(workspace: string, requested: string) {
   const pathApi = windowsStyle ? path.win32 : path;
   const resolved = pathApi.resolve(workspace, requested);
   const root = pathApi.resolve(workspace);
-  if (resolved !== root && !resolved.startsWith(`${root}${pathApi.sep}`))
-    throw new Error("Path is outside the selected workspace");
+  if (windowsStyle) {
+    const normResolved = resolved.toLowerCase();
+    const normRoot = root.toLowerCase();
+    if (
+      normResolved !== normRoot &&
+      !normResolved.startsWith(`${normRoot}${pathApi.sep}`)
+    ) {
+      throw new Error("Path is outside the selected workspace");
+    }
+  } else {
+    if (resolved !== root && !resolved.startsWith(`${root}${pathApi.sep}`)) {
+      throw new Error("Path is outside the selected workspace");
+    }
+  }
   return resolved;
 }
 export async function safeRealPath(workspace: string, requested: string) {

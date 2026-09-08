@@ -161,6 +161,12 @@ export class AgentRuntime {
               inputSchema: tool.inputSchema,
             }));
     this.transition("UNDERSTANDING", "Understanding request");
+    let activeModel =
+      this.model ||
+      globalModelCatalog.getFreeModels()[0]?.id ||
+      globalModelCatalog.getModels()[0]?.id ||
+      "";
+    const restrictedModels = new Set<string>();
     for (
       let iteration = 0;
       iteration < this.limits.maxIterations;
@@ -187,40 +193,76 @@ export class AgentRuntime {
       if (iteration > 0) this.transition("OBSERVING", "Reviewing tool results");
       let text = "";
       const calls = new Map<string, ToolCall>();
-      try {
-        for await (const chunk of this.provider.streamChat({
-          model:
-            this.model ||
-            globalModelCatalog.getFreeModels()[0]?.id ||
-            globalModelCatalog.getModels()[0]?.id ||
-            "",
-          messages,
-          tools: definitions,
-          temperature: 0.2,
-          maxTokens: 4096,
-          signal,
-        })) {
-          if (chunk.content) {
-            text += chunk.content;
-            this.event({ type: "text", message: chunk.content });
+      let streamSucceeded = false;
+      const maxStreamAttempts = 3;
+
+      for (let attempt = 0; attempt < maxStreamAttempts; attempt++) {
+        text = "";
+        calls.clear();
+        try {
+          for await (const chunk of this.provider.streamChat({
+            model: activeModel,
+            messages,
+            tools: definitions,
+            temperature: 0.2,
+            maxTokens: 4096,
+            signal,
+          })) {
+            if (chunk.content) {
+              text += chunk.content;
+              this.event({ type: "text", message: chunk.content });
+            }
+            for (const call of chunk.toolCalls ?? []) calls.set(call.id, call);
           }
-          for (const call of chunk.toolCalls ?? []) calls.set(call.id, call);
-        }
-      } catch (error) {
-        if (signal?.aborted || this.stopped) {
-          this.transition(
-            this.cancelled ? "CANCELLED" : "STOPPED",
-            this.cancelled
-              ? "Agent cancelled by user"
-              : "Agent stopped by user",
-          );
+          streamSucceeded = true;
+          break;
+        } catch (error) {
+          if (signal?.aborted || this.stopped) {
+            this.transition(
+              this.cancelled ? "CANCELLED" : "STOPPED",
+              this.cancelled
+                ? "Agent cancelled by user"
+                : "Agent stopped by user",
+            );
+            return;
+          }
+
+          const errorMsg =
+            error instanceof Error ? error.message : String(error);
+          const isRateLimitOrUnavailable =
+            errorMsg.includes("429") ||
+            errorMsg.toLowerCase().includes("rate limit") ||
+            errorMsg.includes("404") ||
+            errorMsg.includes("503") ||
+            errorMsg.toLowerCase().includes("unavailable") ||
+            errorMsg.toLowerCase().includes("limit reached");
+
+          if (isRateLimitOrUnavailable && attempt < maxStreamAttempts - 1) {
+            restrictedModels.add(activeModel);
+            const nextBest = globalModelCatalog.getNextBestFreeModel(
+              activeModel,
+              restrictedModels,
+            );
+            if (nextBest && nextBest.id !== activeModel) {
+              this.event({
+                type: "text",
+                message: `\n[Failover] Model "${activeModel}" encountered an issue (${errorMsg.slice(0, 100)}). Automatically switching to next best available free model: "${nextBest.name || nextBest.id}" (${nextBest.id})...\n`,
+              });
+              activeModel = nextBest.id;
+              continue;
+            }
+          }
+
+          this.transition("FAILED", "Provider request failed");
+          this.event({
+            type: "error",
+            message: errorMsg,
+          });
           return;
         }
-        this.transition("FAILED", "Provider request failed");
-        this.event({
-          type: "error",
-          message: error instanceof Error ? error.message : String(error),
-        });
+      }
+
+      if (!streamSucceeded) {
         return;
       }
       const toolCalls = [...calls.values()];

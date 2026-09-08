@@ -10,6 +10,20 @@ contextBridge.exposeInMainWorld("g1code", {
       success: boolean;
       path?: string;
     }>,
+  getUsageLimits: () =>
+    ipcRenderer.invoke("provider:usage-limits"),
+  simulateLimit: (
+    modelId: string,
+    resetInSeconds = 60,
+    type: "hourly" | "daily" = "hourly",
+    reset = false,
+  ) =>
+    ipcRenderer.invoke("provider:usage-limits:simulate", {
+      modelId,
+      resetInSeconds,
+      type,
+      reset,
+    }),
   listDirectory: (directory: string) =>
     ipcRenderer.invoke("workspace:list", directory) as Promise<
       Array<{ name: string; kind: "file" | "directory" }>

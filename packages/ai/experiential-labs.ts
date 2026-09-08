@@ -51,8 +51,14 @@ export class ExperientialLabsProvider implements AIProvider {
   }
 
   private headers(): Record<string, string> {
+    const activeKey =
+      this.apiKey ||
+      process.env.EXPLABS_API_KEY ||
+      process.env.EXPERIENTIAL_LABS_API_KEY ||
+      process.env.XPL_API_KEY ||
+      "";
     return {
-      Authorization: `Bearer ${this.apiKey}`,
+      Authorization: `Bearer ${activeKey}`,
       "Content-Type": "application/json",
       Accept: "application/json",
       "User-Agent": "G1Code-AI-IDE/1.0",
@@ -458,8 +464,7 @@ export class ExperientialLabsProvider implements AIProvider {
     }
 
     // Some reasoning models reject temperature; only send if allowed
-    const isReasoning =
-      meta?.capabilities.reasoning || targetModel.includes("astra");
+    const isReasoning = Boolean(meta?.capabilities.reasoning);
     if (request.temperature !== undefined && !isReasoning) {
       body.temperature = request.temperature;
     }

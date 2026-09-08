@@ -411,7 +411,9 @@ function App() {
   useEffect(() => {
     void window.g1code.getSettings().then((s) => {
       setSettings(s);
-      if (s.model) setSelectedModel(s.model);
+      if (s.model) {
+        setSelectedModel((current) => current || s.model);
+      }
     });
 
     // Auto-initialize active workspace from backend server if available
@@ -677,7 +679,7 @@ function App() {
           ...old,
           {
             type: "error",
-            message: `Model "${activeModelMeta.name}" is unavailable or usage-limited, and no other free models are currently available.`,
+            message: `Model "${currentMeta?.name || modelToUse || "Selected model"}" is unavailable or usage-limited, and no other free models are currently available.`,
           },
         ]);
         return;
