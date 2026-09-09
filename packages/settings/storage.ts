@@ -18,6 +18,16 @@ export type Settings = {
   maxTokens: number;
   apiKeyConfigured: boolean;
   apiKeyMasked?: string;
+  // Agent Behaviour Settings
+  autoExecution: "always" | "ask" | "never";
+  reviewPolicy: "always" | "ask" | "never";
+  autoFixLints: boolean;
+  // Tab / Inline Suggestion Settings
+  suggestionsInEditor: boolean;
+  tabGitignoreAccess: boolean;
+  tabSpeed: "fast" | "normal" | "slow";
+  tabToImport: boolean;
+  tabToJump: boolean;
 };
 
 export function getAppDataDir(customDir?: string): string {
@@ -107,6 +117,14 @@ export async function readSettings(customDir?: string): Promise<Settings> {
     temperature: 0.2,
     maxTokens: 4096,
     apiKeyConfigured: false,
+    autoExecution: "always",
+    reviewPolicy: "always",
+    autoFixLints: true,
+    suggestionsInEditor: true,
+    tabGitignoreAccess: true,
+    tabSpeed: "fast",
+    tabToImport: true,
+    tabToJump: true,
   };
   try {
     const raw = await fs.readFile(settingsPath(dir), "utf8");
@@ -154,6 +172,14 @@ export async function saveSettings(
     model: String(input.model ?? current.model),
     temperature: Number(input.temperature ?? current.temperature),
     maxTokens: Number(input.maxTokens ?? current.maxTokens),
+    autoExecution: (input.autoExecution ?? current.autoExecution ?? "always") as Settings["autoExecution"],
+    reviewPolicy: (input.reviewPolicy ?? current.reviewPolicy ?? "always") as Settings["reviewPolicy"],
+    autoFixLints: Boolean(input.autoFixLints ?? current.autoFixLints ?? true),
+    suggestionsInEditor: Boolean(input.suggestionsInEditor ?? current.suggestionsInEditor ?? true),
+    tabGitignoreAccess: Boolean(input.tabGitignoreAccess ?? current.tabGitignoreAccess ?? true),
+    tabSpeed: (input.tabSpeed ?? current.tabSpeed ?? "fast") as Settings["tabSpeed"],
+    tabToImport: Boolean(input.tabToImport ?? current.tabToImport ?? true),
+    tabToJump: Boolean(input.tabToJump ?? current.tabToJump ?? true),
   };
 
   if (

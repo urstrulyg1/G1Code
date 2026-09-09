@@ -113,6 +113,16 @@ type SettingsType = {
   maxTokens: number;
   apiKeyConfigured: boolean;
   apiKeyMasked?: string;
+  // Agent Behaviour Settings
+  autoExecution: "always" | "ask" | "never";
+  reviewPolicy: "always" | "ask" | "never";
+  autoFixLints: boolean;
+  // Tab / Inline Suggestion Settings
+  suggestionsInEditor: boolean;
+  tabGitignoreAccess: boolean;
+  tabSpeed: "fast" | "normal" | "slow";
+  tabToImport: boolean;
+  tabToJump: boolean;
 };
 type Problem = {
   id: string;
@@ -929,12 +939,15 @@ function App() {
   const loadChangesRef = useRef<() => Promise<void>>(async () => {});
   /** Whether the chat body is scrolled to (near) the bottom; gates auto-scroll. */
   const stickToBottomRef = useRef<boolean>(true);
+  /** Mirror of settings so long-lived SSE listeners always read latest values. */
+  const settingsRef = useRef<SettingsType | null>(null);
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
   useEffect(() => {
     runningRef.current = running;
   }, [running]);
+  // Keep settingsRef in sync is done after `settings` is declared below.
 
   // Experiential Labs Provider & Models (Dynamically loaded directly from ExperientialLabs.ai)
   const [settings, setSettings] = useState<SettingsType>({
@@ -944,7 +957,19 @@ function App() {
     temperature: 0.2,
     maxTokens: 4096,
     apiKeyConfigured: false,
+    autoExecution: "always",
+    reviewPolicy: "always",
+    autoFixLints: true,
+    suggestionsInEditor: true,
+    tabGitignoreAccess: true,
+    tabSpeed: "fast",
+    tabToImport: true,
+    tabToJump: true,
   });
+  // Keep settingsRef in sync so long-lived SSE listeners read the latest policy values.
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
   const [models, setModels] = useState<ModelItem[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -1151,6 +1176,7 @@ function App() {
 
   // Settings & Verification Dialog
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsActiveTab, setSettingsActiveTab] = useState<"Provider" | "Agent" | "Tab">("Provider");
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [verificationResult, setVerificationResult] = useState<string | null>(
     null,
@@ -1279,7 +1305,9 @@ function App() {
   // Load initial settings, workspace, git & problems
   useEffect(() => {
     void window.g1code.getSettings().then((s) => {
-      setSettings(s);
+      const typed = s as SettingsType;
+      settingsRef.current = typed;
+      setSettings(typed);
       if (s.model) {
         setSelectedModel((current) => current || s.model);
       }
@@ -1341,6 +1369,13 @@ function App() {
       }
       if (event.state === "WAITING_FOR_CHANGE_APPROVAL") {
         void loadChangesRef.current();
+        // Auto-approve all changes if reviewPolicy is "always"
+        const curSettings = settingsRef.current;
+        if (curSettings?.reviewPolicy === "always" && sessionIdRef.current && workspaceRef.current) {
+          void window.g1code.approveAllChanges(workspaceRef.current, sessionIdRef.current)
+            .then(() => loadChangesRef.current())
+            .catch(() => {});
+        }
       }
       if (event.type === "approval" && event.result) {
         // A change was applied/rejected — pending list changed
@@ -1366,6 +1401,19 @@ function App() {
         req.sessionId !== sessionIdRef.current
       )
         return;
+
+      const curSettings = settingsRef.current;
+      if (curSettings?.autoExecution === "always") {
+        // Auto-approve — no card shown
+        window.g1code.respondPermission(req.requestId, true);
+        return;
+      }
+      if (curSettings?.autoExecution === "never") {
+        // Auto-deny
+        window.g1code.respondPermission(req.requestId, false);
+        return;
+      }
+      // "ask" — show the permission card as before
       setPermission(req);
     });
 
@@ -6354,107 +6402,251 @@ function App() {
       {/* SETTINGS MODAL */}
       {settingsOpen && (
         <div className="settings-modal" onClick={() => setSettingsOpen(false)}>
-          <div className="settings-dialog" onClick={(e) => e.stopPropagation()}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <h2>AI Provider Settings</h2>
-              <button onClick={() => setSettingsOpen(false)}>
+          <div className="settings-dialog settings-dialog--wide" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="settings-dialog-header">
+              <h2>Settings</h2>
+              <button className="settings-close-btn" onClick={() => setSettingsOpen(false)}>
                 <X size={16} />
               </button>
             </div>
 
-            <div className="settings-field">
-              <label>AI Provider Gateway</label>
-              <div
-                style={{
-                  background: "var(--bg-card)",
-                  color: "var(--text-primary)",
-                  border: "1px solid var(--border-subtle)",
-                  padding: "8px 10px",
-                  borderRadius: 6,
-                  fontSize: 13,
-                }}
-              >
-                Experiential Labs (Free Promotional Models &amp; Coding Gateway)
-              </div>
+            {/* Tab bar */}
+            <div className="settings-tabs">
+              {(["Provider", "Agent", "Tab"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  className={`settings-tab-btn${settingsActiveTab === tab ? " settings-tab-btn--active" : ""}`}
+                  onClick={() => setSettingsActiveTab(tab)}
+                >
+                  {tab}
+                </button>
+              ))}
             </div>
 
-            <div className="settings-field">
-              <label>API Base URL</label>
-              <input
-                value={settings.endpoint}
-                onChange={(e) =>
-                  setSettings({ ...settings, endpoint: e.target.value })
-                }
-                placeholder="https://api.experientiallabs.ai/v1"
-              />
-            </div>
-
-            <div className="settings-field">
-              <label>API Key (Bearer token)</label>
-              <input
-                type="password"
-                placeholder={
-                  apiKeyDraft
-                    ? ""
-                    : settings.apiKeyMasked ||
-                      "Paste xpl_... API Key (or use EXPERIENTIAL_API_KEY env)"
-                }
-                value={apiKeyDraft}
-                onChange={(e) => setApiKeyDraft(e.target.value)}
-              />
-              <small style={{ color: "var(--text-dim)" }}>
-                API keys for Experiential Labs are encrypted securely on disk.
-                Never exposed to renderer.
-              </small>
-            </div>
-
-            {verificationResult && (
-              <div
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 6,
-                  background: "var(--bg-muted)",
-                  fontSize: 12,
-                }}
-              >
-                {verificationResult}
-              </div>
-            )}
-
-            {testModelResult && (
-              <div
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 6,
-                  background: "var(--bg-muted)",
-                  fontSize: 12,
-                }}
-              >
-                {testModelResult}
+            {/* ─── Provider tab ─── */}
+            {settingsActiveTab === "Provider" && (
+              <div className="settings-tab-content">
+                <div className="settings-field">
+                  <label>AI Provider Gateway</label>
+                  <div className="settings-static-value">
+                    Experiential Labs (Free Promotional Models &amp; Coding Gateway)
+                  </div>
+                </div>
+                <div className="settings-field">
+                  <label>API Base URL</label>
+                  <input
+                    value={settings.endpoint}
+                    onChange={(e) =>
+                      setSettings({ ...settings, endpoint: e.target.value })
+                    }
+                    placeholder="https://api.experientiallabs.ai/v1"
+                  />
+                </div>
+                <div className="settings-field">
+                  <label>API Key (Bearer token)</label>
+                  <input
+                    type="password"
+                    placeholder={
+                      apiKeyDraft
+                        ? ""
+                        : settings.apiKeyMasked ||
+                          "Paste xpl_... API Key (or use EXPERIENTIAL_API_KEY env)"
+                    }
+                    value={apiKeyDraft}
+                    onChange={(e) => setApiKeyDraft(e.target.value)}
+                  />
+                  <small style={{ color: "var(--text-dim)" }}>
+                    API keys for Experiential Labs are encrypted securely on disk.
+                    Never exposed to renderer.
+                  </small>
+                </div>
+                {verificationResult && (
+                  <div className="settings-feedback">{verificationResult}</div>
+                )}
+                {testModelResult && (
+                  <div className="settings-feedback">{testModelResult}</div>
+                )}
               </div>
             )}
 
+            {/* ─── Agent tab ─── */}
+            {settingsActiveTab === "Agent" && (
+              <div className="settings-tab-content">
+                <p className="settings-section-desc">
+                  Control how the agent executes tools and applies file changes.
+                </p>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Agent Auto-Fix Lints</span>
+                    <small>Automatically retry with a lint-repair prompt after a failed run</small>
+                  </div>
+                  <label className="settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={settings.autoFixLints}
+                      onChange={(e) =>
+                        setSettings({ ...settings, autoFixLints: e.target.checked })
+                      }
+                    />
+                    <span className="settings-toggle-track" />
+                  </label>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Auto Execution</span>
+                    <small>Whether the agent auto-approves tool permission requests</small>
+                  </div>
+                  <div className="settings-segmented">
+                    {(["always", "ask", "never"] as const).map((v) => (
+                      <button
+                        key={v}
+                        className={`settings-seg-btn${settings.autoExecution === v ? " settings-seg-btn--active" : ""}`}
+                        onClick={() => setSettings({ ...settings, autoExecution: v })}
+                      >
+                        {v === "always" ? "Always Proceed" : v === "ask" ? "Ask" : "Never"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Review Policy</span>
+                    <small>Whether file changes after an agent run are auto-approved</small>
+                  </div>
+                  <div className="settings-segmented">
+                    {(["always", "ask", "never"] as const).map((v) => (
+                      <button
+                        key={v}
+                        className={`settings-seg-btn${settings.reviewPolicy === v ? " settings-seg-btn--active" : ""}`}
+                        onClick={() => setSettings({ ...settings, reviewPolicy: v })}
+                      >
+                        {v === "always" ? "Always Proceed" : v === "ask" ? "Ask" : "Never"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ─── Tab tab ─── */}
+            {settingsActiveTab === "Tab" && (
+              <div className="settings-tab-content">
+                <p className="settings-section-desc">
+                  Configure inline code suggestions and tab-completion behaviour.
+                </p>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Suggestions in Editor</span>
+                    <small>Show inline code suggestions while typing</small>
+                  </div>
+                  <label className="settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={settings.suggestionsInEditor}
+                      onChange={(e) =>
+                        setSettings({ ...settings, suggestionsInEditor: e.target.checked })
+                      }
+                    />
+                    <span className="settings-toggle-track" />
+                  </label>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Gitignore Access</span>
+                    <small>Allow suggestions to reference .gitignore-d paths</small>
+                  </div>
+                  <label className="settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={settings.tabGitignoreAccess}
+                      onChange={(e) =>
+                        setSettings({ ...settings, tabGitignoreAccess: e.target.checked })
+                      }
+                    />
+                    <span className="settings-toggle-track" />
+                  </label>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Suggestion Speed</span>
+                    <small>Debounce delay before triggering inline suggestions</small>
+                  </div>
+                  <div className="settings-segmented">
+                    {(["fast", "normal", "slow"] as const).map((v) => (
+                      <button
+                        key={v}
+                        className={`settings-seg-btn${settings.tabSpeed === v ? " settings-seg-btn--active" : ""}`}
+                        onClick={() => setSettings({ ...settings, tabSpeed: v })}
+                      >
+                        {v.charAt(0).toUpperCase() + v.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Tab to Import</span>
+                    <small>Auto-add import statement when accepting a suggestion</small>
+                  </div>
+                  <label className="settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={settings.tabToImport}
+                      onChange={(e) =>
+                        setSettings({ ...settings, tabToImport: e.target.checked })
+                      }
+                    />
+                    <span className="settings-toggle-track" />
+                  </label>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Tab to Jump</span>
+                    <small>Jump to next tab stop when accepting a suggestion</small>
+                  </div>
+                  <label className="settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={settings.tabToJump}
+                      onChange={(e) =>
+                        setSettings({ ...settings, tabToJump: e.target.checked })
+                      }
+                    />
+                    <span className="settings-toggle-track" />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Footer actions */}
             <div className="settings-dialog-actions">
-              <button
-                className="btn-secondary"
-                onClick={verifyExperientialConnection}
-                disabled={verifying}
-              >
-                {verifying ? "Verifying..." : "Verify Experiential"}
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={testSelectedModel}
-                disabled={testingModel}
-              >
-                {testingModel ? "Testing..." : `Test Model (${selectedModel})`}
-              </button>
+              {settingsActiveTab === "Provider" && (
+                <>
+                  <button
+                    className="btn-secondary"
+                    onClick={verifyExperientialConnection}
+                    disabled={verifying}
+                  >
+                    {verifying ? "Verifying..." : "Verify Experiential"}
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={testSelectedModel}
+                    disabled={testingModel}
+                  >
+                    {testingModel ? "Testing..." : `Test Model (${selectedModel})`}
+                  </button>
+                </>
+              )}
               <button
                 className="btn-primary"
                 onClick={async () => {
@@ -6463,13 +6655,15 @@ function App() {
                     provider: "experiential-labs",
                     ...(apiKeyDraft ? { apiKey: apiKeyDraft } : {}),
                   });
-                  setSettings(updated as SettingsType);
+                  const s = updated as SettingsType;
+                  settingsRef.current = s;
+                  setSettings(s);
                   setApiKeyDraft("");
                   setSettingsOpen(false);
-                  const res = await window.g1code.refreshModels(
-                    settings.provider,
-                  );
-                  if (res.success && res.models) setModels(res.models);
+                  if (settingsActiveTab === "Provider") {
+                    const res = await window.g1code.refreshModels(settings.provider);
+                    if (res.success && res.models) setModels(res.models);
+                  }
                 }}
               >
                 Save Settings
@@ -6478,6 +6672,7 @@ function App() {
           </div>
         </div>
       )}
+
 
       {/* WORKSPACE DIRECTORY MODAL — fallback for browsers without showDirectoryPicker */}
       {workspaceModal && (
