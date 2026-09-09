@@ -29,6 +29,9 @@ import {
   GitBranch,
   GitCommit,
   GitFork,
+  GripVertical,
+  MoveUp,
+  MoveDown,
   HelpCircle,
   Info,
   Key,
@@ -55,6 +58,8 @@ import {
   Copy,
   FileText,
   Square,
+  Sun,
+  Moon,
 } from "lucide-react";
 import "./styles.css";
 
@@ -125,6 +130,7 @@ type GitStatus = {
   modifiedFiles: string[];
   recentCommits: string[];
 };
+type GitSectionId = "changes" | "graph" | "commits";
 type SearchMatch = {
   file: string;
   line: number;
@@ -437,6 +443,26 @@ function getLanguage(filePath: string): string {
 }
 
 function App() {
+  // Theme state (Antigravity Dark / Light)
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    try {
+      const saved = localStorage.getItem("g1code_theme");
+      if (saved === "light" || saved === "dark") return saved;
+    } catch {}
+    return "dark";
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem("g1code_theme", theme);
+    } catch {}
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
   // Navigation & Workspace
   const [workspace, setWorkspace] = useState("No workspace open");
   const [workspaceModal, setWorkspaceModal] = useState(false);
@@ -612,6 +638,163 @@ function App() {
   const [generatingCommit, setGeneratingCommit] = useState(false);
   const [committing, setCommitting] = useState(false);
 
+  // Movable & Resizable Git Sidebar Sections
+  const [gitSectionOrder, setGitSectionOrder] = useState<GitSectionId[]>(() => {
+    try {
+      const saved = localStorage.getItem("g1code_git_section_order");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (
+          Array.isArray(parsed) &&
+          parsed.length === 3 &&
+          parsed.includes("changes") &&
+          parsed.includes("graph") &&
+          parsed.includes("commits")
+        ) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return ["changes", "graph", "commits"];
+  });
+
+  const [gitSectionCollapsed, setGitSectionCollapsed] = useState<
+    Record<GitSectionId, boolean>
+  >(() => {
+    try {
+      const saved = localStorage.getItem("g1code_git_section_collapsed");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { changes: false, graph: false, commits: false };
+  });
+
+  const [gitSectionHeights, setGitSectionHeights] = useState<
+    Record<GitSectionId, number>
+  >(() => {
+    try {
+      const saved = localStorage.getItem("g1code_git_section_heights");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { changes: 180, graph: 140, commits: 160 };
+  });
+
+  const [resizingGitSection, setResizingGitSection] =
+    useState<GitSectionId | null>(null);
+  const [draggedGitSection, setDraggedGitSection] =
+    useState<GitSectionId | null>(null);
+  const [dragOverGitSection, setDragOverGitSection] =
+    useState<GitSectionId | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "g1code_git_section_order",
+        JSON.stringify(gitSectionOrder),
+      );
+    } catch {}
+  }, [gitSectionOrder]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "g1code_git_section_collapsed",
+        JSON.stringify(gitSectionCollapsed),
+      );
+    } catch {}
+  }, [gitSectionCollapsed]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "g1code_git_section_heights",
+        JSON.stringify(gitSectionHeights),
+      );
+    } catch {}
+  }, [gitSectionHeights]);
+
+  const startResizingGitSection = useCallback(
+    (sectionId: GitSectionId, e: React.MouseEvent) => {
+      e.preventDefault();
+      setResizingGitSection(sectionId);
+      const startY = e.clientY;
+      const initialH = gitSectionHeights[sectionId] || 160;
+
+      const onMouseMove = (ev: MouseEvent) => {
+        const delta = ev.clientY - startY;
+        const nextH = Math.max(50, Math.min(650, initialH + delta));
+        setGitSectionHeights((prev) => ({
+          ...prev,
+          [sectionId]: Math.round(nextH),
+        }));
+      };
+
+      const onMouseUp = () => {
+        setResizingGitSection(null);
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [gitSectionHeights],
+  );
+
+  const moveGitSection = (
+    id: GitSectionId,
+    direction: "up" | "down",
+    e: React.MouseEvent,
+  ) => {
+    e.stopPropagation();
+    setGitSectionOrder((prev) => {
+      const idx = prev.indexOf(id);
+      if (idx === -1) return prev;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(idx, 1);
+      next.splice(targetIdx, 0, item);
+      return next;
+    });
+  };
+
+  const toggleGitSectionCollapse = (id: GitSectionId) => {
+    setGitSectionCollapsed((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const handleSectionDragStart = (id: GitSectionId, e: React.DragEvent) => {
+    setDraggedGitSection(id);
+    e.dataTransfer.setData("text/plain", id);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleSectionDragOver = (id: GitSectionId, e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverGitSection !== id) {
+      setDragOverGitSection(id);
+    }
+  };
+
+  const handleSectionDrop = (targetId: GitSectionId, e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverGitSection(null);
+    if (!draggedGitSection || draggedGitSection === targetId) return;
+    setGitSectionOrder((prev) => {
+      const srcIdx = prev.indexOf(draggedGitSection);
+      const dstIdx = prev.indexOf(targetId);
+      if (srcIdx === -1 || dstIdx === -1) return prev;
+      const next = [...prev];
+      const [item] = next.splice(srcIdx, 1);
+      next.splice(dstIdx, 0, item);
+      return next;
+    });
+    setDraggedGitSection(null);
+  };
+
   // Search State
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);
@@ -745,16 +928,26 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
-  const [modelFilterTab, setModelFilterTab] = useState<
-    | "all"
-    | "free"
-    | "coding"
-    | "reasoning"
-    | "fast"
-    | "balanced"
-    | "tools"
-    | "vision"
-  >("free");
+  const [activeModelFilters, setActiveModelFilters] = useState<Set<string>>(
+    () => new Set(["free"]),
+  );
+  const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+
+  const toggleModelFilter = (key: string) => {
+    if (key === "all") {
+      setActiveModelFilters(new Set());
+      return;
+    }
+    setActiveModelFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
 
   // Per-model reasoning selection persistence
   const [modelReasoning, setModelReasoningState] = useState<
@@ -785,6 +978,31 @@ function App() {
     string | null
   >(null);
 
+  // Global keydown handler for Escape & outside click dismissal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setModelPickerOpen(false);
+        setOpenReasoningDropdownModelId(null);
+        setComposerReasoningOpen(false);
+        setActiveModelDetailsPopover(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Lock body scroll when model picker modal is active
+  useEffect(() => {
+    if (modelPickerOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [modelPickerOpen]);
 
   const formatReasoningLevelName = (level: string) => {
     const l = level.toLowerCase().trim();
@@ -824,10 +1042,13 @@ function App() {
       );
       if (!isSupported) return "Not supported";
 
-      const rawLevels =
-        m.reasoningLevels ||
-        m.capabilities?.reasoningLevels ||
-        ["auto", "low", "medium", "high"];
+      const rawLevels = (m.reasoningLevels && m.reasoningLevels.length > 0)
+        ? m.reasoningLevels
+        : (m.capabilities?.reasoningLevels && m.capabilities.reasoningLevels.length > 0)
+          ? m.capabilities.reasoningLevels
+          : [];
+      if (rawLevels.length === 0) return "Not supported";
+
       const levels = rawLevels.map((l) => l.toLowerCase().trim());
       const saved = modelReasoning[m.id]?.toLowerCase().trim();
 
@@ -859,11 +1080,12 @@ function App() {
 
   const getReasoningTooltip = (m: ModelItem, currentLevel: string) => {
     const desc = getReasoningOptionDesc(currentLevel);
-    const rawLevels =
-      m.reasoningLevels ||
-      m.capabilities?.reasoningLevels ||
-      ["low", "medium", "high"];
-    const levels = rawLevels.map(formatReasoningLevelName).join(" · ");
+    const rawLevels = (m.reasoningLevels && m.reasoningLevels.length > 0)
+      ? m.reasoningLevels
+      : (m.capabilities?.reasoningLevels && m.capabilities.reasoningLevels.length > 0)
+        ? m.capabilities.reasoningLevels
+        : [];
+    const levels = rawLevels.length > 0 ? rawLevels.map(formatReasoningLevelName).join(" · ") : "None";
     return `Reasoning effort\n${formatReasoningLevelName(currentLevel)}\n\n${desc} for complex coding, debugging, architecture, and multi-step tasks.\n\nSupported by this model.\nSupported levels: ${levels}`;
   };
 
@@ -1531,12 +1753,20 @@ function App() {
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     try {
+      const selectedModelMeta = models.find((m) => m.id === modelToUse);
+      const reasoningEffort = getEffectiveModelReasoning(selectedModelMeta);
+      const reasoningParam =
+        reasoningEffort && reasoningEffort !== "Not supported"
+          ? reasoningEffort
+          : undefined;
+
       const res = await window.g1code.startAgent({
         workspace,
         prompt: task,
         mode:
           agentMode === "plan" ? "plan" : agentMode === "ask" ? "ask" : "agent",
         model: modelToUse,
+        reasoning: reasoningParam,
         provider: "experiential-labs",
         attachedContext,
       });
@@ -1590,6 +1820,30 @@ function App() {
     if (limit?.isLimitReached) return;
     setSelectedModel(newModel);
     setModelPickerOpen(false);
+
+    // Normalize reasoning value for new model if previously saved value is incompatible
+    const targetMeta = models.find((m) => m.id === newModel);
+    if (targetMeta) {
+      const isReasoning = Boolean(
+        targetMeta.reasoningSupported ?? targetMeta.capabilities?.reasoningSupported,
+      );
+      if (isReasoning) {
+        const rawLevels = (targetMeta.reasoningLevels && targetMeta.reasoningLevels.length > 0)
+          ? targetMeta.reasoningLevels
+          : (targetMeta.capabilities?.reasoningLevels && targetMeta.capabilities.reasoningLevels.length > 0)
+            ? targetMeta.capabilities.reasoningLevels
+            : [];
+        const levels = rawLevels.map((l) => l.toLowerCase().trim());
+        const saved = modelReasoning[newModel]?.toLowerCase().trim();
+        if (saved && !levels.includes(saved) && saved !== "auto") {
+          const fallback =
+            targetMeta.defaultReasoning ||
+            (levels.includes("auto") ? "auto" : levels[0] || "auto");
+          setModelReasoning(newModel, fallback);
+        }
+      }
+    }
+
     const updated = await window.g1code.saveSettings({
       ...settings,
       model: newModel,
@@ -1826,8 +2080,6 @@ function App() {
     textareaRef.current?.focus();
   };
 
-  // Filtered models for Model Picker — driven entirely by dynamically fetched data
-  // A model is "free" only when the API confirms Input = $0/M and Output = $0/M
   const isTrulyFree = (m: ModelItem) =>
     m.pricingType === "free" &&
     m.pricingDetails?.input === 0 &&
@@ -1843,22 +2095,71 @@ function App() {
   ).length;
 
   const filteredModels = models.filter((m) => {
-    const matchSearch =
-      m.name.toLowerCase().includes(modelSearch.toLowerCase()) ||
-      m.id.toLowerCase().includes(modelSearch.toLowerCase());
-    if (!matchSearch) return false;
-    if (modelFilterTab === "free") return isTrulyFree(m);
-    if (modelFilterTab === "tools") return Boolean(m.supportsTools);
-    if (modelFilterTab === "vision")
-      return Boolean(m.supportsVision || m.capabilities?.vision);
-    // Reasoning filter means models with reasoning capability
-    if (modelFilterTab === "reasoning")
-      return Boolean(m.reasoningSupported || m.capabilities?.reasoningSupported);
-    if (modelFilterTab === "coding") return m.recommendedRole === "coding";
-    if (modelFilterTab === "fast") return m.recommendedRole === "fast";
-    if (modelFilterTab === "balanced") return m.recommendedRole === "balanced";
-    return true; // "all"
+    const s = modelSearch.trim().toLowerCase();
+    if (s) {
+      const matchSearch =
+        m.name.toLowerCase().includes(s) ||
+        m.id.toLowerCase().includes(s) ||
+        Boolean(m.provider && m.provider.toLowerCase().includes(s)) ||
+        Boolean(m.description && m.description.toLowerCase().includes(s)) ||
+        Boolean(m.recommendedRole && m.recommendedRole.toLowerCase().includes(s)) ||
+        Boolean(m.contextWindowFormatted && m.contextWindowFormatted.toLowerCase().includes(s)) ||
+        (s === "reasoning" && Boolean(m.reasoningSupported || m.capabilities?.reasoningSupported)) ||
+        (s === "tools" && Boolean(m.supportsTools || m.capabilities?.tools)) ||
+        (s === "vision" && Boolean(m.supportsVision || m.capabilities?.vision)) ||
+        (s === "free" && isTrulyFree(m));
+      if (!matchSearch) return false;
+    }
+
+    if (activeModelFilters.has("free") && !isTrulyFree(m)) return false;
+    if (activeModelFilters.has("tools") && !m.supportsTools) return false;
+    if (activeModelFilters.has("vision") && !(m.supportsVision || m.capabilities?.vision)) return false;
+    if (activeModelFilters.has("reasoning") && !(m.reasoningSupported || m.capabilities?.reasoningSupported)) return false;
+    if (activeModelFilters.has("coding") && m.recommendedRole !== "coding") return false;
+    if (activeModelFilters.has("fast") && m.recommendedRole !== "fast") return false;
+    if (activeModelFilters.has("balanced") && m.recommendedRole !== "balanced") return false;
+
+    return true;
   });
+
+  // Calculate overall change additions and deletions across all modified files
+  const { totalAdditions, totalDeletions } = useMemo(() => {
+    let additions = 0;
+    let deletions = 0;
+    for (const c of changes) {
+      if (c.patch) {
+        const lines = c.patch.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("+") && !line.startsWith("+++")) additions++;
+          else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
+        }
+      } else if (c.originalContent !== undefined && c.proposedContent !== undefined) {
+        const origLen = c.originalContent.split("\n").length;
+        const propLen = c.proposedContent.split("\n").length;
+        if (propLen > origLen) additions += propLen - origLen;
+        else deletions += origLen - propLen;
+      }
+    }
+    return { totalAdditions: additions, totalDeletions: deletions };
+  }, [changes]);
+
+  const undoLastAction = async () => {
+    if (!sessionId || workspace === "No workspace open") return;
+    try {
+      for (const ch of changes) {
+        if (ch.status === "APPLIED") {
+          await window.g1code.change(workspace, sessionId, ch.id, "revert");
+        }
+      }
+      await window.g1code.rejectAllChanges(workspace, sessionId);
+      await loadChanges();
+      await reloadOpenTabs();
+      void loadGitAndProblems(workspace);
+      setActiveDiff(null);
+    } catch (err) {
+      console.error("Failed to undo changes:", err);
+    }
+  };
 
   const activeModelMeta = models.find((m) => m.id === selectedModel) ||
     models[0] || {
@@ -1869,6 +2170,163 @@ function App() {
       contextWindowFormatted: "",
       isPromotional: false,
     };
+
+  const renderGitSection = (id: GitSectionId, index: number) => {
+    const isCollapsed = Boolean(gitSectionCollapsed[id]);
+    const isDragging = draggedGitSection === id;
+    const isDragOver = dragOverGitSection === id;
+    const height = gitSectionHeights[id] || 160;
+
+    let title = "";
+    let countBadge = "";
+    let content: React.ReactNode = null;
+
+    if (id === "changes") {
+      title = "Changes";
+      countBadge = String(gitStatus.modifiedFiles?.length || 0);
+      content = (
+        <div className="git-section-inner">
+          {gitStatus.modifiedFiles?.length > 0 ? (
+            gitStatus.modifiedFiles.map((file) => (
+              <div
+                className="git-file-row"
+                key={file}
+                onClick={() => void openFile(file)}
+              >
+                <div className="git-file-name">
+                  <FileCode size={13} />
+                  <span>{file}</span>
+                </div>
+                <span className="git-badge-m">M</span>
+              </div>
+            ))
+          ) : (
+            <div className="git-empty-hint">
+              Working tree clean. No modified files.
+            </div>
+          )}
+        </div>
+      );
+    } else if (id === "graph") {
+      title = "Graph";
+      content = (
+        <div className="git-section-inner" style={{ padding: "8px 12px" }}>
+          <pre className="git-tree-ascii">
+            {`${gitStatus.branch || "main"}
+│
+├── feature/agent-workspace
+├── style/experiential-ui
+└── Initial commit`}
+          </pre>
+        </div>
+      );
+    } else if (id === "commits") {
+      title = "Recent Commits";
+      countBadge = String(gitStatus.recentCommits?.length || 0);
+      content = (
+        <div className="git-section-inner" style={{ padding: "8px 12px" }}>
+          {gitStatus.recentCommits?.length > 0 ? (
+            gitStatus.recentCommits.slice(0, 10).map((c, i) => (
+              <div key={i} className="git-commit-row">
+                <code>{c.slice(0, 7)}</code>
+                <span>{c.slice(8)}</span>
+              </div>
+            ))
+          ) : (
+            <div className="git-empty-hint">No recent commits.</div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={id}
+        className={`git-accordion-section ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""}`}
+        onDragOver={(e) => handleSectionDragOver(id, e)}
+        onDrop={(e) => handleSectionDrop(id, e)}
+      >
+        <div
+          className="git-accordion-header"
+          onClick={() => toggleGitSectionCollapse(id)}
+          title="Click to collapse/expand. Drag handle to reorder."
+        >
+          <div className="git-accordion-title-group">
+            <span className="git-accordion-chevron">
+              {isCollapsed ? (
+                <ChevronRight size={13} />
+              ) : (
+                <ChevronDown size={13} />
+              )}
+            </span>
+            <span className="git-accordion-title">{title}</span>
+            {countBadge && (
+              <span className="git-accordion-count">({countBadge})</span>
+            )}
+          </div>
+
+          <div
+            className="git-accordion-actions"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="git-accordion-btn"
+              onClick={(e) => moveGitSection(id, "up", e)}
+              disabled={index === 0}
+              title="Move Section Up"
+              aria-label={`Move ${title} up`}
+            >
+              <MoveUp size={11} />
+            </button>
+            <button
+              className="git-accordion-btn"
+              onClick={(e) => moveGitSection(id, "down", e)}
+              disabled={index === gitSectionOrder.length - 1}
+              title="Move Section Down"
+              aria-label={`Move ${title} down`}
+            >
+              <MoveDown size={11} />
+            </button>
+            <div
+              className="git-accordion-drag-handle"
+              draggable
+              onDragStart={(e) => handleSectionDragStart(id, e)}
+              onDragEnd={() => {
+                setDraggedGitSection(null);
+                setDragOverGitSection(null);
+              }}
+              title="Drag to reorder section"
+            >
+              <GripVertical size={12} />
+            </div>
+          </div>
+        </div>
+
+        {!isCollapsed && (
+          <>
+            <div
+              className="git-accordion-body"
+              style={{ height: `${height}px` }}
+            >
+              {content}
+            </div>
+
+            <div
+              className={`git-section-resizer ${resizingGitSection === id ? "resizing" : ""}`}
+              onMouseDown={(e) => startResizingGitSection(id, e)}
+              onDoubleClick={() =>
+                setGitSectionHeights((prev) => ({
+                  ...prev,
+                  [id]: id === "changes" ? 180 : id === "graph" ? 140 : 160,
+                }))
+              }
+              title="Drag to resize section height (Double-click to reset)"
+            />
+          </>
+        )}
+      </div>
+    );
+  };
 
   const renderModelCard = (m: (typeof models)[0], index: number) => {
     const limit = usageLimits[m.id];
@@ -1899,10 +2357,11 @@ function App() {
             ? "model-rank-badge rank-3"
             : "model-rank-badge";
 
-    const rankLabel = rankNumber === 1 ? "★ #1" : `#${rankNumber}`;
+    const rankLabel = `#${rankNumber}`;
 
     const isGenericDesc =
       !m.description ||
+      m.description === "Experiential Labs AI Model" ||
       m.description.includes(
         "Free ($0 input / $0 output) model on Experiential Labs gateway",
       );
@@ -1910,11 +2369,12 @@ function App() {
     const isReasoningSupported = Boolean(
       m.reasoningSupported ?? m.capabilities?.reasoningSupported,
     );
-    const reasoningLevels = (
-      m.reasoningLevels ||
-      m.capabilities?.reasoningLevels ||
-      ["auto", "low", "medium", "high"]
-    ).map((s) => s.toLowerCase().trim());
+    const rawLevels = (m.reasoningLevels && m.reasoningLevels.length > 0)
+      ? m.reasoningLevels
+      : (m.capabilities?.reasoningLevels && m.capabilities.reasoningLevels.length > 0)
+        ? m.capabilities.reasoningLevels
+        : [];
+    const reasoningLevels = rawLevels.map((s) => s.toLowerCase().trim());
     const currentReasoning = getEffectiveModelReasoning(m);
     const defaultEffort = (
       m.defaultReasoning ||
@@ -1989,22 +2449,20 @@ function App() {
           </div>
         )}
 
+        {/* Capability row strictly ordered: Context | Tools | Streaming | Reasoning */}
         <div className="model-caps-row">
           <span className="model-cap-tag">
             {m.contextWindowFormatted || "128K"} Context
           </span>
-          {m.supportsTools && (
-            <span className="model-cap-tag cap-accent">Tools ✓</span>
-          )}
-          {m.supportsStreaming !== false && (
-            <span className="model-cap-tag">Streaming ✓</span>
-          )}
-          {m.supportsVision && (
-            <span className="model-cap-tag cap-accent">Vision ✓</span>
-          )}
+          <span className={`model-cap-tag ${m.supportsTools ? "cap-accent" : ""}`}>
+            Tools {m.supportsTools ? "✓" : "—"}
+          </span>
+          <span className="model-cap-tag">
+            Streaming {m.supportsStreaming !== false ? "✓" : "—"}
+          </span>
 
-          {/* REASONING SELECTOR ON MODEL CARD */}
-          {isReasoningSupported ? (
+          {/* REASONING SELECTOR ON MODEL CARD - Beside Streaming */}
+          {isReasoningSupported && reasoningLevels.length > 0 ? (
             <div
               className="model-reasoning-wrapper"
               onClick={(e) => e.stopPropagation()}
@@ -2019,7 +2477,7 @@ function App() {
                   );
                 }}
                 title={getReasoningTooltip(m, currentReasoning)}
-                aria-label={`Reasoning effort for ${m.name}, currently ${formatReasoningLevelName(currentReasoning)}`}
+                aria-label={`Reasoning selector for ${m.name}, currently ${formatReasoningLevelName(currentReasoning)}`}
                 aria-haspopup="listbox"
                 aria-expanded={openReasoningDropdownModelId === m.id}
               >
@@ -2107,8 +2565,12 @@ function App() {
               className="model-cap-tag model-cap-unsupported"
               title="Reasoning is not supported by this model"
             >
-              Reasoning: Not supported
+              Reasoning: None
             </span>
+          )}
+
+          {m.supportsVision && (
+            <span className="model-cap-tag cap-accent">Vision ✓</span>
           )}
 
           {/* Model Technical Details Info Popover Trigger */}
@@ -2267,6 +2729,14 @@ function App() {
           </div>
           <button
             className="topbar-btn"
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme"}
+            aria-label="Toggle Theme"
+          >
+            {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+          <button
+            className="topbar-btn"
             onClick={() => setSettingsOpen(true)}
             title="Settings"
           >
@@ -2396,65 +2866,9 @@ function App() {
                   </div>
                 </div>
 
-                <div className="git-changes-header">
-                  <span>Changes ({gitStatus.modifiedFiles?.length || 0})</span>
-                </div>
-
-                <div className="sidebar-content">
-                  {gitStatus.modifiedFiles?.length > 0 ? (
-                    gitStatus.modifiedFiles.map((file) => (
-                      <div
-                        className="git-file-row"
-                        key={file}
-                        onClick={() => void openFile(file)}
-                      >
-                        <div className="git-file-name">
-                          <FileCode size={13} />
-                          <span>{file}</span>
-                        </div>
-                        <span className="git-badge-m">M</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div
-                      style={{
-                        padding: "10px 14px",
-                        fontSize: 12,
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      Working tree clean. No modified files.
-                    </div>
-                  )}
-
-                  {/* Git Graph Visualizer */}
-                  <div className="git-graph-section">
-                    <div className="git-graph-title">Graph</div>
-                    <pre className="git-tree-ascii">
-                      {`${gitStatus.branch || "main"}
-   │
-   ├── feature/agent-workspace
-   ├── style/experiential-ui
-   └── Initial commit`}
-                    </pre>
-                  </div>
-
-                  {gitStatus.recentCommits?.length > 0 && (
-                    <div style={{ padding: "10px 14px" }}>
-                      <div className="git-graph-title">Recent Commits</div>
-                      {gitStatus.recentCommits.slice(0, 5).map((c, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            fontSize: 11,
-                            color: "var(--text-secondary)",
-                            marginBottom: 4,
-                          }}
-                        >
-                          <code>{c.slice(0, 7)}</code> {c.slice(8)}
-                        </div>
-                      ))}
-                    </div>
+                <div className="git-sections-container">
+                  {gitSectionOrder.map((id, index) =>
+                    renderGitSection(id, index),
                   )}
                 </div>
               </div>
@@ -2749,7 +3163,7 @@ function App() {
             {activeDiff ? (
               <DiffEditor
                 height="100%"
-                theme="vs-dark"
+                theme={theme === "dark" ? "vs-dark" : "vs"}
                 language={getLanguage(activeDiff.path)}
                 original={activeDiff.originalContent || ""}
                 modified={activeDiff.proposedContent || activeDiff.patch}
@@ -2763,7 +3177,7 @@ function App() {
             ) : activeTab ? (
               <Editor
                 height="100%"
-                theme="vs-dark"
+                theme={theme === "dark" ? "vs-dark" : "vs"}
                 path={activeTab.path}
                 language={getLanguage(activeTab.path)}
                 value={activeTab.content}
@@ -4009,7 +4423,7 @@ function App() {
                                           )}
                                         </span>
                                         <span className="command-prompt-symbol">
-                                          ▶
+                                          $
                                         </span>
                                         <code className="command-code-text">
                                           {cmd.command || "command"}
@@ -4724,33 +5138,56 @@ function App() {
 
               {/* Change Review Bar — only when there are changes */}
               {changes.length > 0 && (
-                <div className="chat-changes-bar">
+                <div className="changes-review-banner">
                   <div
-                    className="chat-changes-info"
+                    className="changes-review-stats"
                     onClick={() => {
                       if (changes.length > 0) setActiveDiff(changes[0]);
                       else void loadChanges();
                     }}
-                    title="Review changes"
+                    title="Review file changes"
                   >
-                    <FileText size={13} />
-                    <span>
-                      {changes.length} {changes.length === 1 ? "File" : "Files"} With Changes
+                    <FileText size={14} className="changes-stat-icon" />
+                    <span className="changes-count-text">
+                      {changes.length} {changes.length === 1 ? "file" : "files"} changed
                     </span>
+                    {totalAdditions > 0 && (
+                      <span className="diff-stat-add">+{totalAdditions}</span>
+                    )}
+                    {totalDeletions > 0 && (
+                      <span className="diff-stat-del">-{totalDeletions}</span>
+                    )}
                   </div>
-                  <div className="chat-changes-actions">
+                  <div className="changes-review-actions">
                     <button
-                      className="chat-changes-btn chat-changes-btn--reject-text"
-                      onClick={() => void rejectAllChanges()}
+                      className="changes-btn changes-btn-review"
+                      onClick={() => {
+                        if (changes.length > 0) setActiveDiff(changes[0]);
+                      }}
+                      title="Review changes in diff editor"
                     >
-                      Reject all
+                      Review Diff
                     </button>
                     <button
-                      className="chat-changes-btn chat-changes-btn--accept-pill"
+                      className="changes-btn changes-btn-accept"
                       onClick={() => void approveAllChanges()}
+                      title="Accept and apply all changes"
                     >
-                      Accept all
-                      <ChevronDown size={11} />
+                      <Check size={11} /> Accept
+                    </button>
+                    <button
+                      className="changes-btn changes-btn-reject"
+                      onClick={() => void rejectAllChanges()}
+                      title="Reject all pending changes"
+                    >
+                      <X size={11} /> Reject
+                    </button>
+                    <button
+                      className="changes-btn changes-btn-undo"
+                      onClick={() => void undoLastAction()}
+                      title="Undo all changes"
+                    >
+                      <RotateCcw size={11} /> Undo
                     </button>
                   </div>
                 </div>
@@ -5065,7 +5502,7 @@ function App() {
                           aria-expanded={composerReasoningOpen}
                         >
                           <span className="composer-reasoning-val">
-                            {formatReasoningLevelName(
+                            Reasoning: {formatReasoningLevelName(
                               getEffectiveModelReasoning(activeModelMeta),
                             )}
                           </span>
@@ -5127,50 +5564,59 @@ function App() {
                               );
                             })()}
                           </div>
-                          {(
-                            activeModelMeta.reasoningLevels ||
-                            activeModelMeta.capabilities
-                              ?.reasoningLevels ||
-                            ["auto", "low", "medium", "high"]
-                          ).map((lvl) => {
-                            const currentLvl =
-                              getEffectiveModelReasoning(activeModelMeta);
-                            const isSelected =
-                              currentLvl === lvl.toLowerCase().trim();
-                            return (
-                              <div
-                                key={lvl}
-                                className={`model-reasoning-option ${isSelected ? "selected" : ""}`}
-                                role="option"
-                                aria-selected={isSelected}
-                                onClick={() => {
-                                  setModelReasoning(
-                                    activeModelMeta.id,
-                                    lvl.toLowerCase().trim(),
-                                  );
-                                  setComposerReasoningOpen(false);
-                                }}
-                              >
-                                <div className="reasoning-opt-left">
-                                  <div className="reasoning-opt-name">
-                                    {formatReasoningLevelName(lvl)}
+                          {(() => {
+                            const rawLevels = (activeModelMeta.reasoningLevels && activeModelMeta.reasoningLevels.length > 0)
+                              ? activeModelMeta.reasoningLevels
+                              : (activeModelMeta.capabilities?.reasoningLevels && activeModelMeta.capabilities.reasoningLevels.length > 0)
+                                ? activeModelMeta.capabilities.reasoningLevels
+                                : [];
+                            return rawLevels.map((lvl) => {
+                              const currentLvl =
+                                getEffectiveModelReasoning(activeModelMeta);
+                              const isSelected =
+                                currentLvl === lvl.toLowerCase().trim();
+                              return (
+                                <div
+                                  key={lvl}
+                                  className={`model-reasoning-option ${isSelected ? "selected" : ""}`}
+                                  role="option"
+                                  aria-selected={isSelected}
+                                  onClick={() => {
+                                    setModelReasoning(
+                                      activeModelMeta.id,
+                                      lvl.toLowerCase().trim(),
+                                    );
+                                    setComposerReasoningOpen(false);
+                                  }}
+                                >
+                                  <div className="reasoning-opt-left">
+                                    <div className="reasoning-opt-name">
+                                      {formatReasoningLevelName(lvl)}
+                                    </div>
+                                    <div className="reasoning-opt-desc">
+                                      {getReasoningOptionDesc(lvl)}
+                                    </div>
                                   </div>
-                                  <div className="reasoning-opt-desc">
-                                    {getReasoningOptionDesc(lvl)}
-                                  </div>
+                                  {isSelected && (
+                                    <Check
+                                      size={12}
+                                      className="reasoning-opt-check"
+                                    />
+                                  )}
                                 </div>
-                                {isSelected && (
-                                  <Check
-                                    size={12}
-                                    className="reasoning-opt-check"
-                                  />
-                                )}
-                              </div>
-                            );
-                          })}
+                              );
+                            });
+                          })()}
                         </div>
                       )}
                     </div>
+
+                    <span
+                      className="composer-tools-indicator"
+                      title={activeModelMeta.supportsTools ? "Agent tools enabled" : "No tool support"}
+                    >
+                      Tools {activeModelMeta.supportsTools ? "✓" : "—"}
+                    </span>
                   </div>
 
                   <div className="composer-toolbar-right">
@@ -5283,10 +5729,9 @@ function App() {
           >
             <div className="model-picker-header">
               <div className="model-picker-title">
-                <h3>Experiential Labs — Free Models</h3>
+                <h3>Model Catalog</h3>
                 <span>
-                  High-Capability Coding Models · Free Promotional Tier ·
-                  Usage-Limited
+                  AI Models · Verified Capabilities · Live Provider Catalog
                 </span>
               </div>
               <button onClick={() => setModelPickerOpen(false)}>
@@ -5297,40 +5742,48 @@ function App() {
             <div className="model-free-notice">
               <div className="live-pulse-dot" />
               <div className="live-tier-text">
-                <strong>Live Free Tier:</strong> Confirmed $0/M Input · $0/M
-                Output · Refreshes every 30s
+                <strong>Live Catalog:</strong> {models.length} Models Loaded · {freeCount} Free Tier Available · Verified Live
               </div>
-              <span className="live-badge">100% Free</span>
+              <span className="live-badge">{freeCount} Free Tier</span>
             </div>
 
             <div className="model-search-box">
               <Search size={14} color="var(--text-muted)" />
               <input
-                placeholder="Search models, agents & capabilities..."
+                placeholder="Search models, providers, agents & capabilities..."
                 value={modelSearch}
                 onChange={(e) => setModelSearch(e.target.value)}
                 autoFocus
               />
+              {modelSearch && (
+                <button
+                  type="button"
+                  className="model-search-clear"
+                  onClick={() => setModelSearch("")}
+                  title="Clear search"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    padding: 2,
+                  }}
+                >
+                  <X size={13} />
+                </button>
+              )}
             </div>
 
             <div className="model-filter-tabs">
               {[
+                { key: "all", label: `All (${models.length})`, count: models.length },
                 { key: "free", label: `Free (${freeCount})`, count: freeCount },
-                {
-                  key: "all",
-                  label: `All (${models.length})`,
-                  count: models.length,
-                },
                 {
                   key: "reasoning",
                   label: `Reasoning (${reasoningCount})`,
                   count: reasoningCount,
-                },
-                {
-                  key: "coding",
-                  label: "Coding",
-                  count: models.filter((m) => m.recommendedRole === "coding")
-                    .length,
                 },
                 { key: "tools", label: `Tools (${toolCount})`, count: toolCount },
                 ...(visionCount > 0
@@ -5342,6 +5795,12 @@ function App() {
                       },
                     ]
                   : []),
+                {
+                  key: "coding",
+                  label: "Coding",
+                  count: models.filter((m) => m.recommendedRole === "coding")
+                    .length,
+                },
                 {
                   key: "fast",
                   label: "Fast",
@@ -5356,28 +5815,40 @@ function App() {
                 },
               ]
                 .filter((tab) => tab.key === "all" || (tab.count ?? 1) > 0)
-                .map((tab) => (
-                  <button
-                    key={tab.key}
-                    className={`model-filter-btn ${modelFilterTab === tab.key ? "active" : ""}`}
-                    onClick={() => setModelFilterTab(tab.key as any)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+                .map((tab) => {
+                  const isActive =
+                    tab.key === "all"
+                      ? activeModelFilters.size === 0
+                      : activeModelFilters.has(tab.key);
+                  return (
+                    <button
+                      key={tab.key}
+                      className={`model-filter-btn ${isActive ? "active" : ""}`}
+                      onClick={() => toggleModelFilter(tab.key)}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
             </div>
 
             <div className="model-list-scroll">
               {filteredModels.length === 0 ? (
-                <div
-                  style={{
-                    padding: "24px 16px",
-                    fontSize: 13,
-                    color: "var(--text-muted)",
-                    textAlign: "center",
-                  }}
-                >
-                  No models match your filter.
+                <div className="model-picker-empty-state">
+                  <div className="empty-icon">🔍</div>
+                  <div className="empty-title">No models match your filters</div>
+                  <div className="empty-desc">
+                    Try adjusting your search query or toggling active capability filters.
+                  </div>
+                  <button
+                    className="empty-clear-btn"
+                    onClick={() => {
+                      setModelSearch("");
+                      setActiveModelFilters(new Set());
+                    }}
+                  >
+                    Clear Search & Filters
+                  </button>
                 </div>
               ) : (
                 <>
@@ -5388,11 +5859,11 @@ function App() {
                         color="var(--accent-primary, #6366f1)"
                       />
                       <span>
-                        AVAILABLE FREE MODELS ({filteredModels.length})
+                        AVAILABLE MODELS ({filteredModels.length})
                       </span>
                     </div>
                     <span className="model-cat-right">
-                      SORTED BY PERFORMANCE & PROMOTIONS
+                      VERIFIED LIVE PROVIDER CATALOG
                     </span>
                   </div>
                   {filteredModels.map((m, index) => renderModelCard(m, index))}
@@ -5403,24 +5874,31 @@ function App() {
             <div className="model-picker-footer">
               <button
                 className="btn-secondary"
+                disabled={refreshingCatalog}
                 onClick={async () => {
-                  const res = await window.g1code.refreshModels(
-                    settings.provider,
-                  );
-                  if (res.success && res.models) {
-                    setModels(res.models);
-                    setSelectedModel((curr) => {
-                      if (
-                        curr &&
-                        res.models.some((m: ModelItem) => m.id === curr)
-                      )
-                        return curr;
-                      return res.models[0]?.id || "";
-                    });
+                  setRefreshingCatalog(true);
+                  try {
+                    const res = await window.g1code.refreshModels(
+                      settings.provider,
+                    );
+                    if (res?.success && res.models) {
+                      setModels(res.models);
+                      setSelectedModel((curr) => {
+                        if (
+                          curr &&
+                          res.models.some((m: ModelItem) => m.id === curr)
+                        )
+                          return curr;
+                        return res.models[0]?.id || "";
+                      });
+                    }
+                  } finally {
+                    setRefreshingCatalog(false);
                   }
                 }}
               >
-                <RefreshCw size={12} /> Refresh Catalog
+                <RefreshCw size={12} className={refreshingCatalog ? "spin" : ""} />{" "}
+                {refreshingCatalog ? "Refreshing..." : "Refresh Catalog"}
               </button>
               <button
                 className="btn-primary"
