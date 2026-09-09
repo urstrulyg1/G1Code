@@ -23,6 +23,11 @@ export type AIModel = {
   };
   recommendedRole?: string;
   apiRank?: number;
+  reasoningSupported?: boolean;
+  reasoningLevels?: string[];
+  defaultReasoning?: string;
+  reasoningLabel?: string;
+  capabilities?: Record<string, unknown>;
 };
 export type ToolDefinition = {
   name: string;
@@ -50,6 +55,7 @@ export type ChatRequest = {
   tools?: ToolDefinition[];
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: string;
   signal?: AbortSignal;
 };
 export type ChatResponse = {

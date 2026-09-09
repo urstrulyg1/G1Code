@@ -789,3 +789,210 @@ test("Experiential Labs Provider: Correctly promotes free models dynamically fro
     ExperientialLabsProvider.clearCatalogCache();
   }
 });
+
+test("Experiential Labs Provider: Dynamic reasoning capabilities and level parsing", () => {
+  // Model with full reasoning effort suite (Claude Fable 5.1 / Opus 5 style)
+  const fable = parseModelMetadata({
+    id: "claude-fable-5.1",
+    name: "Claude Fable 5.1",
+    capabilities: {
+      supports_reasoning: true,
+      supported_reasoning_efforts: ["low", "medium", "high", "xhigh", "max"],
+      reasoning_default_effort: "high",
+    },
+  });
+
+  assert.equal(fable.reasoningSupported, true);
+  assert.equal(fable.capabilities.reasoningSupported, true);
+  assert.equal(fable.capabilities.reasoning, true);
+  assert.deepEqual(fable.capabilities.reasoningLevels, [
+    "auto",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ]);
+  assert.equal(fable.capabilities.defaultReasoning, "high");
+
+  // Model with limited reasoning levels (Gemini 3.7 Flash style)
+  const gemini = parseModelMetadata({
+    id: "gemini-3.7-flash",
+    name: "Gemini 3.7 Flash",
+    capabilities: {
+      supports_reasoning: true,
+      supported_reasoning_efforts: ["low", "medium", "high"],
+      reasoning_default_effort: "medium",
+    },
+  });
+  assert.equal(gemini.reasoningSupported, true);
+  assert.deepEqual(gemini.capabilities.reasoningLevels, [
+    "auto",
+    "low",
+    "medium",
+    "high",
+  ]);
+  assert.equal(gemini.capabilities.defaultReasoning, "medium");
+
+  // Model without reasoning (Claude 3 Haiku style)
+  const haiku = parseModelMetadata({
+    id: "claude-3-haiku",
+    name: "Claude 3 Haiku",
+    capabilities: {
+      supports_reasoning: false,
+    },
+  });
+  assert.equal(haiku.reasoningSupported, false);
+  assert.equal(haiku.capabilities.reasoningSupported, false);
+  assert.deepEqual(haiku.capabilities.reasoningLevels, []);
+});
+
+test("Experiential Labs Provider: Ground-truth ranking prioritizes model preferred_rank over catch-all promo", async () => {
+  const originalFetch = globalThis.fetch;
+  ExperientialLabsProvider.clearCatalogCache();
+
+  try {
+    globalThis.fetch = async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/api/models")) {
+        return new Response(
+          JSON.stringify({
+            promotions: [
+              {
+                label: "All models: free daily allowance",
+                display_order: 100,
+                slugs: ["aion-2.0", "aion-3.0", "claude-fable-5.1"],
+                free: true,
+                percent_off: 100,
+              },
+            ],
+            models: [
+              {
+                model: {
+                  id: "1",
+                  slug: "aion-2.0",
+                  display_name: "Aion 2.0",
+                  preferred_rank: null,
+                },
+                providers: [
+                  {
+                    status: "active",
+                    input_micro_usd_per_million: 0,
+                    output_micro_usd_per_million: 0,
+                  },
+                ],
+              },
+              {
+                model: {
+                  id: "2",
+                  slug: "claude-fable-5.1",
+                  display_name: "Claude Fable 5.1",
+                  preferred_rank: 0, // Ground truth #1
+                },
+                providers: [
+                  {
+                    status: "active",
+                    input_micro_usd_per_million: 0,
+                    output_micro_usd_per_million: 0,
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (urlStr.includes("/v1/models")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "aion-2.0", name: "Aion 2.0" },
+              { id: "claude-fable-5.1", name: "Claude Fable 5.1" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      return new Response("{}", { status: 200 });
+    };
+
+    const provider = new ExperientialLabsProvider(
+      "https://api.experientiallabs.ai/v1",
+      "xpl_test",
+    );
+    const free = await provider.getFreeModels();
+
+    // Claude Fable 5.1 has preferred_rank: 0, so it must be ranked ahead of Aion 2.0 (rank 100+)
+    assert.ok(free.length >= 2);
+    assert.equal(free[0].id, "claude-fable-5.1");
+    assert.equal(free[0].apiRank, 0);
+    assert.equal(free[1].id, "aion-2.0");
+    assert.ok((free[1].apiRank ?? 0) > 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    ExperientialLabsProvider.clearCatalogCache();
+  }
+});
+
+test("Experiential Labs Provider: buildRequestBody capability-aware reasoning parameter handling", () => {
+  const provider = new ExperientialLabsProvider(
+    "https://api.experientiallabs.ai/v1",
+    "xpl_test",
+  );
+
+  // Register a reasoning model and a non-reasoning model in globalModelCatalog
+  const reasoningModel = parseModelMetadata({
+    id: "test-reasoning-model",
+    name: "Test Reasoning Model",
+    capabilities: {
+      supports_reasoning: true,
+      supported_reasoning_efforts: ["low", "medium", "high", "xhigh", "max"],
+      reasoning_default_effort: "high",
+    },
+  });
+
+  const nonReasoningModel = parseModelMetadata({
+    id: "test-standard-model",
+    name: "Test Standard Model",
+    capabilities: {
+      supports_reasoning: false,
+    },
+  });
+
+  globalModelCatalog.updateCatalog([reasoningModel, nonReasoningModel]);
+
+  // 1. When reasoning is supported and explicit effort (e.g. "high") is chosen
+  const bodyHigh = (provider as any).buildRequestBody({
+    model: "test-reasoning-model",
+    messages: [{ role: "user", content: "hello" }],
+    reasoningEffort: "high",
+  });
+  assert.equal(bodyHigh.reasoning_effort, "high");
+
+  // 2. When reasoning is "auto", omit reasoning_effort to let provider adapt
+  const bodyAuto = (provider as any).buildRequestBody({
+    model: "test-reasoning-model",
+    messages: [{ role: "user", content: "hello" }],
+    reasoningEffort: "auto",
+  });
+  assert.equal(bodyAuto.reasoning_effort, undefined);
+
+  // 3. When model does not support reasoning, NEVER send reasoning_effort
+  const bodyNonReasoning = (provider as any).buildRequestBody({
+    model: "test-standard-model",
+    messages: [{ role: "user", content: "hello" }],
+    reasoningEffort: "high",
+  });
+  assert.equal(bodyNonReasoning.reasoning_effort, undefined);
+
+  // 4. When an unsupported reasoning level is passed, NEVER send it to provider
+  const bodyUnsupported = (provider as any).buildRequestBody({
+    model: "test-reasoning-model",
+    messages: [{ role: "user", content: "hello" }],
+    reasoningEffort: "unsupported-level-xyz",
+  });
+  assert.equal(bodyUnsupported.reasoning_effort, undefined);
+});
+

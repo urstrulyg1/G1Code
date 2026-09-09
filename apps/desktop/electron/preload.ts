@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld("g1code", {
     prompt: string;
     mode: "ask" | "plan" | "agent";
     model?: string;
+    reasoning?: string;
     provider?: string;
     attachedContext?: string[];
   }) => ipcRenderer.invoke("agent:start", input),

@@ -193,16 +193,29 @@ export class ExperientialLabsProvider implements AIProvider {
 
         const promoMap = new Map<
           string,
-          { display_order: number; free: boolean }
+          { display_order: number; free: boolean; isSpotlight?: boolean }
         >();
         for (const promo of json.promotions || []) {
           if (promo.free === true || promo.percent_off === 100) {
+            const isSpotlight =
+              (promo.slugs || []).length <= 5 &&
+              typeof promo.display_order === "number" &&
+              promo.display_order < 50;
             for (const s of promo.slugs || []) {
               if (s) {
-                promoMap.set(String(s).toLowerCase(), {
-                  display_order: promo.display_order ?? 0,
-                  free: true,
-                });
+                const key = String(s).toLowerCase();
+                const existing = promoMap.get(key);
+                if (
+                  !existing ||
+                  isSpotlight ||
+                  existing.display_order > (promo.display_order ?? 100)
+                ) {
+                  promoMap.set(key, {
+                    display_order: promo.display_order ?? 100,
+                    free: true,
+                    isSpotlight,
+                  });
+                }
               }
             }
           }
@@ -234,12 +247,16 @@ export class ExperientialLabsProvider implements AIProvider {
 
           const isZeroCost = inputMicro === 0 && outputMicro === 0;
 
-          const apiRank =
-            promo && typeof promo.display_order === "number"
-              ? promo.display_order
-              : typeof mod.preferred_rank === "number"
-                ? mod.preferred_rank
-                : index + 10;
+          // Ground-truth ranking: prioritize model's official preferred_rank,
+          // followed by dedicated spotlight promotions, falling back to indexed tier
+          let apiRank = index + 100;
+          if (typeof mod.preferred_rank === "number") {
+            apiRank = mod.preferred_rank;
+          } else if (promo?.isSpotlight && typeof promo.display_order === "number") {
+            apiRank = promo.display_order;
+          }
+
+          const providerCaps = (bestProvider?.capabilities || {}) as Record<string, unknown>;
 
           metadataMap.set(slug, {
             ...mod,
@@ -247,6 +264,14 @@ export class ExperientialLabsProvider implements AIProvider {
             input_micro: inputMicro,
             output_micro: outputMicro,
             providers: item.providers,
+            capabilities: {
+              ...providerCaps,
+              supports_vision: Boolean(
+                providerCaps.supports_vision ||
+                  (Array.isArray(mod.input_modalities) &&
+                    mod.input_modalities.includes("image")),
+              ),
+            },
             api_rank: apiRank,
             is_promotional: Boolean(promo && promo.free),
           });
@@ -367,6 +392,12 @@ export class ExperientialLabsProvider implements AIProvider {
               ? item.max_output_tokens
               : typeof enriched?.max_output_tokens === "number"
                 ? (enriched.max_output_tokens as number)
+                : undefined,
+          input_modalities:
+            Array.isArray(item.input_modalities)
+              ? (item.input_modalities as string[])
+              : Array.isArray(enriched?.input_modalities)
+                ? (enriched.input_modalities as string[])
                 : undefined,
           capabilities:
             typeof item.capabilities === "object" && item.capabilities
@@ -548,10 +579,28 @@ export class ExperientialLabsProvider implements AIProvider {
       }));
     }
 
-    // Some reasoning models reject temperature; only send if allowed
-    const isReasoning = Boolean(meta?.capabilities.reasoning);
+    // Capability-aware reasoning parameter handling
+    // NEVER send an unsupported reasoning value to the model/provider
+    const isReasoning = Boolean(
+      meta?.capabilities?.reasoningSupported ?? meta?.capabilities?.reasoning,
+    );
     if (request.temperature !== undefined && !isReasoning) {
       body.temperature = request.temperature;
+    }
+
+    if (isReasoning && request.reasoningEffort) {
+      const effort = request.reasoningEffort.toLowerCase().trim();
+      const levels = (meta?.capabilities?.reasoningLevels || []).map((l) =>
+        l.toLowerCase().trim(),
+      );
+      // Auto or default indicates provider default; only send explicit supported levels
+      if (
+        effort !== "auto" &&
+        effort !== "default" &&
+        (levels.length === 0 || levels.includes(effort))
+      ) {
+        body.reasoning_effort = effort;
+      }
     }
 
     if (request.maxTokens !== undefined) {

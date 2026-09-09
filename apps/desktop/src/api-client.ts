@@ -204,6 +204,7 @@ if (typeof window !== "undefined" && !window.g1code) {
       prompt: string;
       mode: "ask" | "plan" | "agent";
       model?: string;
+      reasoning?: string;
       provider?: string;
       attachedContext?: string[];
     }) {

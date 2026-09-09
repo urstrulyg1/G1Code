@@ -891,6 +891,8 @@ const server = http.createServer(async (req, res) => {
         prompt: string;
         mode: "ask" | "plan" | "agent";
         model?: string;
+        reasoning?: string;
+        reasoningEffort?: string;
         attachedContext?: string[];
       }>(req);
 
@@ -917,6 +919,29 @@ const server = http.createServer(async (req, res) => {
         globalModelCatalog.getFreeModels()[0]?.id ||
         globalModelCatalog.getModels()[0]?.id ||
         "";
+
+      // Resolve requested reasoning safely against selected model capabilities
+      const rawReasoning = (body.reasoningEffort || body.reasoning || "").trim().toLowerCase();
+      const modelMeta = globalModelCatalog.findModel(selectedModel);
+      let activeReasoning: string | undefined = undefined;
+
+      if (modelMeta?.capabilities?.reasoningSupported && rawReasoning) {
+        const levels = (modelMeta.capabilities.reasoningLevels || []).map((l) =>
+          l.toLowerCase().trim(),
+        );
+        if (
+          levels.includes(rawReasoning) ||
+          rawReasoning === "auto" ||
+          rawReasoning === "default"
+        ) {
+          activeReasoning = rawReasoning;
+        } else {
+          // Resolve to model default if requested value is incompatible
+          activeReasoning =
+            modelMeta.capabilities.defaultReasoning ||
+            (levels.includes("auto") ? "auto" : levels[0]);
+        }
+      }
 
       // Enforce usage limits for Experiential Labs free models & auto-failover
       let { allowed, limitInfo } =
@@ -1118,6 +1143,7 @@ const server = http.createServer(async (req, res) => {
             model: reqChat.model || selectedModel,
             temperature: settings.temperature,
             maxTokens: settings.maxTokens,
+            reasoningEffort: reqChat.reasoningEffort || activeReasoning,
           }),
         supportsTools: (m: string) =>
           provider.supportsTools ? provider.supportsTools(m) : true,

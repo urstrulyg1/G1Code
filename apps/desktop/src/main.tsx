@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Bot,
+  Brain,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -29,6 +30,7 @@ import {
   GitCommit,
   GitFork,
   HelpCircle,
+  Info,
   Key,
   Layers,
   ListChecks,
@@ -38,6 +40,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   Settings as SettingsIcon,
@@ -134,6 +137,25 @@ type ModelItem = {
   supportsTools?: boolean;
   supportsStreaming?: boolean;
   supportsVision?: boolean;
+  reasoningSupported?: boolean;
+  reasoningLevels?: string[];
+  defaultReasoning?: string;
+  reasoningLabel?: string;
+  capabilities?: {
+    tools?: boolean;
+    streaming?: boolean;
+    vision?: boolean;
+    reasoning?: boolean;
+    reasoningSupported?: boolean;
+    reasoningLevels?: string[];
+    defaultReasoning?: string;
+    reasoningLabel?: string;
+    structuredOutput?: boolean;
+    parallelTools?: boolean;
+    maxOutputTokens?: number;
+    contextWindow?: number;
+    [key: string]: unknown;
+  };
   isPromotional?: boolean;
   pricingType?: string;
   pricingFormatted?: string;
@@ -722,8 +744,125 @@ function App() {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [modelFilterTab, setModelFilterTab] = useState<
-    "all" | "free" | "coding" | "reasoning" | "fast" | "balanced" | "tools"
+    | "all"
+    | "free"
+    | "coding"
+    | "reasoning"
+    | "fast"
+    | "balanced"
+    | "tools"
+    | "vision"
   >("free");
+
+  // Per-model reasoning selection persistence
+  const [modelReasoning, setModelReasoningState] = useState<
+    Record<string, string>
+  >(() => {
+    try {
+      const saved = localStorage.getItem("g1code_model_reasoning_v1");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const setModelReasoning = (modelId: string, level: string) => {
+    setModelReasoningState((prev) => {
+      const next = { ...prev, [modelId]: level.toLowerCase().trim() };
+      try {
+        localStorage.setItem("g1code_model_reasoning_v1", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const [openReasoningDropdownModelId, setOpenReasoningDropdownModelId] =
+    useState<string | null>(null);
+  const [composerReasoningOpen, setComposerReasoningOpen] = useState(false);
+  const [activeModelDetailsPopover, setActiveModelDetailsPopover] = useState<
+    string | null
+  >(null);
+
+  const formatReasoningLevelName = (level: string) => {
+    const l = level.toLowerCase().trim();
+    if (l === "auto") return "Auto";
+    if (l === "xhigh") return "XHigh";
+    if (l === "default") return "Default";
+    return l.charAt(0).toUpperCase() + l.slice(1);
+  };
+
+  const getReasoningOptionDesc = (level: string) => {
+    const l = level.toLowerCase().trim();
+    switch (l) {
+      case "auto":
+        return "Adaptive reasoning";
+      case "default":
+        return "Model default reasoning";
+      case "low":
+        return "Fast reasoning";
+      case "medium":
+        return "Balanced reasoning";
+      case "high":
+        return "Deep reasoning";
+      case "xhigh":
+        return "Very deep reasoning";
+      case "max":
+        return "Maximum available reasoning";
+      default:
+        return "Model reasoning effort";
+    }
+  };
+
+  const getEffectiveModelReasoning = useCallback(
+    (m?: ModelItem): string => {
+      if (!m) return "Not supported";
+      const isSupported = Boolean(
+        m.reasoningSupported ?? m.capabilities?.reasoningSupported,
+      );
+      if (!isSupported) return "Not supported";
+
+      const rawLevels =
+        m.reasoningLevels ||
+        m.capabilities?.reasoningLevels ||
+        ["auto", "low", "medium", "high"];
+      const levels = rawLevels.map((l) => l.toLowerCase().trim());
+      const saved = modelReasoning[m.id]?.toLowerCase().trim();
+
+      if (
+        saved &&
+        (levels.includes(saved) || (saved === "auto" && levels.includes("auto")))
+      ) {
+        return saved;
+      }
+
+      const defaultEffort = (
+        m.defaultReasoning ||
+        m.capabilities?.defaultReasoning ||
+        ""
+      )
+        .toLowerCase()
+        .trim();
+
+      if (defaultEffort && levels.includes(defaultEffort)) {
+        return defaultEffort;
+      }
+      if (levels.includes("auto")) return "auto";
+      if (levels.includes("default")) return "default";
+      if (levels.includes("medium")) return "medium";
+      return levels[0] || "auto";
+    },
+    [modelReasoning],
+  );
+
+  const getReasoningTooltip = (m: ModelItem, currentLevel: string) => {
+    const desc = getReasoningOptionDesc(currentLevel);
+    const rawLevels =
+      m.reasoningLevels ||
+      m.capabilities?.reasoningLevels ||
+      ["low", "medium", "high"];
+    const levels = rawLevels.map(formatReasoningLevelName).join(" · ");
+    return `Reasoning effort\n${formatReasoningLevelName(currentLevel)}\n\n${desc} for complex coding, debugging, architecture, and multi-step tasks.\n\nSupported by this model.\nSupported levels: ${levels}`;
+  };
 
   // Usage limits tracking for Experiential Labs free models
   const [usageLimits, setUsageLimits] = useState<
@@ -1672,6 +1811,12 @@ function App() {
 
   const freeCount = models.filter(isTrulyFree).length;
   const toolCount = models.filter((m) => m.supportsTools).length;
+  const reasoningCount = models.filter(
+    (m) => m.reasoningSupported || m.capabilities?.reasoningSupported,
+  ).length;
+  const visionCount = models.filter(
+    (m) => m.supportsVision || m.capabilities?.vision,
+  ).length;
 
   const filteredModels = models.filter((m) => {
     const matchSearch =
@@ -1679,10 +1824,12 @@ function App() {
       m.id.toLowerCase().includes(modelSearch.toLowerCase());
     if (!matchSearch) return false;
     if (modelFilterTab === "free") return isTrulyFree(m);
-    if (modelFilterTab === "tools") return m.supportsTools;
-    // Use the recommendedRole assigned dynamically from the API, not hardcoded id fragments
+    if (modelFilterTab === "tools") return Boolean(m.supportsTools);
+    if (modelFilterTab === "vision")
+      return Boolean(m.supportsVision || m.capabilities?.vision);
+    // Reasoning filter means models with reasoning capability
     if (modelFilterTab === "reasoning")
-      return m.recommendedRole === "reasoning";
+      return Boolean(m.reasoningSupported || m.capabilities?.reasoningSupported);
     if (modelFilterTab === "coding") return m.recommendedRole === "coding";
     if (modelFilterTab === "fast") return m.recommendedRole === "fast";
     if (modelFilterTab === "balanced") return m.recommendedRole === "balanced";
@@ -1735,6 +1882,27 @@ function App() {
       m.description.includes(
         "Free ($0 input / $0 output) model on Experiential Labs gateway",
       );
+
+    const isReasoningSupported = Boolean(
+      m.reasoningSupported ?? m.capabilities?.reasoningSupported,
+    );
+    const reasoningLevels = (
+      m.reasoningLevels ||
+      m.capabilities?.reasoningLevels ||
+      ["auto", "low", "medium", "high"]
+    ).map((s) => s.toLowerCase().trim());
+    const currentReasoning = getEffectiveModelReasoning(m);
+    const defaultEffort = (
+      m.defaultReasoning ||
+      m.capabilities?.defaultReasoning ||
+      (reasoningLevels.includes("auto")
+        ? "auto"
+        : reasoningLevels.includes("medium")
+          ? "medium"
+          : reasoningLevels[0] || "medium")
+    )
+      .toLowerCase()
+      .trim();
 
     return (
       <div
@@ -1810,8 +1978,206 @@ function App() {
           {m.supportsVision && (
             <span className="model-cap-tag cap-accent">Vision ✓</span>
           )}
+
+          {/* REASONING SELECTOR ON MODEL CARD */}
+          {isReasoningSupported ? (
+            <div
+              className="model-reasoning-wrapper"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className={`model-reasoning-btn ${openReasoningDropdownModelId === m.id ? "open" : ""}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenReasoningDropdownModelId(
+                    openReasoningDropdownModelId === m.id ? null : m.id,
+                  );
+                }}
+                title={getReasoningTooltip(m, currentReasoning)}
+                aria-label={`Reasoning effort for ${m.name}, currently ${formatReasoningLevelName(currentReasoning)}`}
+                aria-haspopup="listbox"
+                aria-expanded={openReasoningDropdownModelId === m.id}
+              >
+                <span className="reasoning-brain-icon">🧠</span>
+                <span className="reasoning-label">Reasoning:</span>
+                <span className="reasoning-value-pill">
+                  {formatReasoningLevelName(currentReasoning)}
+                </span>
+                <ChevronDown size={10} className="reasoning-chevron" />
+              </button>
+
+              {openReasoningDropdownModelId === m.id && (
+                <div
+                  className="model-reasoning-dropdown"
+                  role="listbox"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setOpenReasoningDropdownModelId(null);
+                    }
+                  }}
+                >
+                  <div className="model-reasoning-dropdown-header">
+                    <span>Reasoning Effort</span>
+                    {currentReasoning !== defaultEffort && (
+                      <button
+                        type="button"
+                        className="model-reasoning-reset-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setModelReasoning(m.id, defaultEffort);
+                          setOpenReasoningDropdownModelId(null);
+                        }}
+                        title="Reset to model default"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  {reasoningLevels.map((lvl) => {
+                    const isSelected = currentReasoning === lvl.toLowerCase();
+                    return (
+                      <div
+                        key={lvl}
+                        className={`model-reasoning-option ${isSelected ? "selected" : ""}`}
+                        role="option"
+                        aria-selected={isSelected}
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setModelReasoning(m.id, lvl.toLowerCase());
+                          setOpenReasoningDropdownModelId(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setModelReasoning(m.id, lvl.toLowerCase());
+                            setOpenReasoningDropdownModelId(null);
+                          }
+                        }}
+                      >
+                        <div className="reasoning-opt-left">
+                          <div className="reasoning-opt-name">
+                            {formatReasoningLevelName(lvl)}
+                            {lvl.toLowerCase() === defaultEffort && (
+                              <span className="reasoning-default-tag">Default</span>
+                            )}
+                          </div>
+                          <div className="reasoning-opt-desc">
+                            {getReasoningOptionDesc(lvl)}
+                          </div>
+                        </div>
+                        {isSelected && (
+                          <Check size={12} className="reasoning-opt-check" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span
+              className="model-cap-tag model-cap-unsupported"
+              title="Reasoning is not supported by this model"
+            >
+              Reasoning: Not supported
+            </span>
+          )}
+
+          {/* Model Technical Details Info Popover Trigger */}
+          <button
+            type="button"
+            className={`model-info-btn ${activeModelDetailsPopover === m.id ? "active" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setActiveModelDetailsPopover(
+                activeModelDetailsPopover === m.id ? null : m.id,
+              );
+            }}
+            title="Model specifications & technical capabilities"
+            aria-label={`Model details for ${m.name}`}
+          >
+            <Info size={11} />
+          </button>
+
           <span className="model-host-label">Experiential Cloud</span>
         </div>
+
+        {/* Secondary Model Technical Details Popover */}
+        {activeModelDetailsPopover === m.id && (
+          <div
+            className="model-details-popover"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="model-details-header">
+              <span className="model-details-title">
+                Model Details · {m.name}
+              </span>
+              <button
+                type="button"
+                className="model-details-close"
+                onClick={() => setActiveModelDetailsPopover(null)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <div className="model-details-grid">
+              <div className="model-detail-cell">
+                <span className="detail-label">Model</span>
+                <span className="detail-val">{m.name}</span>
+              </div>
+              <div className="model-detail-cell">
+                <span className="detail-label">Context</span>
+                <span className="detail-val">
+                  {m.contextWindowFormatted || "128K"}
+                </span>
+              </div>
+              <div className="model-detail-cell">
+                <span className="detail-label">Tools</span>
+                <span className="detail-val">
+                  {m.supportsTools ? "Supported ✓" : "Not supported"}
+                </span>
+              </div>
+              <div className="model-detail-cell">
+                <span className="detail-label">Streaming</span>
+                <span className="detail-val">
+                  {m.supportsStreaming !== false
+                    ? "Supported ✓"
+                    : "Not supported"}
+                </span>
+              </div>
+              <div className="model-detail-cell">
+                <span className="detail-label">Reasoning</span>
+                <span className="detail-val">
+                  {isReasoningSupported ? "Supported ✓" : "Not supported"}
+                </span>
+              </div>
+              {isReasoningSupported && (
+                <div className="model-detail-cell model-detail-cell--full">
+                  <span className="detail-label">Reasoning levels</span>
+                  <span className="detail-val">
+                    {reasoningLevels.map(formatReasoningLevelName).join(" · ")}
+                  </span>
+                </div>
+              )}
+              <div className="model-detail-cell">
+                <span className="detail-label">Provider</span>
+                <span className="detail-val">Experiential Cloud</span>
+              </div>
+              <div className="model-detail-cell">
+                <span className="detail-label">Availability</span>
+                <span className="detail-val">
+                  {isTrulyFree(m)
+                    ? "Free promotional tier"
+                    : m.pricingFormatted || "Credits"}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -4662,6 +5028,132 @@ function App() {
                       </span>
                     </div>
 
+                    {/* Quick Reasoning Trigger in Chat Composer */}
+                    {Boolean(
+                      activeModelMeta.reasoningSupported ??
+                        activeModelMeta.capabilities?.reasoningSupported,
+                    ) && (
+                      <div
+                        className="composer-reasoning-wrapper"
+                        style={{ position: "relative" }}
+                      >
+                        <button
+                          type="button"
+                          className={`composer-reasoning-btn ${composerReasoningOpen ? "active" : ""}`}
+                          onClick={() =>
+                            setComposerReasoningOpen(!composerReasoningOpen)
+                          }
+                          title={getReasoningTooltip(
+                            activeModelMeta,
+                            getEffectiveModelReasoning(activeModelMeta),
+                          )}
+                          aria-label={`Reasoning effort for ${activeModelMeta.name}, currently ${formatReasoningLevelName(getEffectiveModelReasoning(activeModelMeta))}`}
+                          aria-haspopup="listbox"
+                          aria-expanded={composerReasoningOpen}
+                        >
+                          <span className="composer-brain-icon">🧠</span>
+                          <span className="composer-reasoning-label">
+                            Reasoning:{" "}
+                            <strong>
+                              {formatReasoningLevelName(
+                                getEffectiveModelReasoning(activeModelMeta),
+                              )}
+                            </strong>
+                          </span>
+                          <ChevronDown size={10} />
+                        </button>
+
+                        {composerReasoningOpen && (
+                          <div
+                            className="model-reasoning-dropdown composer-reasoning-popover"
+                            role="listbox"
+                          >
+                            <div className="model-reasoning-dropdown-header">
+                              <span>Reasoning Effort</span>
+                              {(() => {
+                                const currentLvl =
+                                  getEffectiveModelReasoning(activeModelMeta);
+                                const rawLevels =
+                                  activeModelMeta.reasoningLevels ||
+                                  activeModelMeta.capabilities
+                                    ?.reasoningLevels ||
+                                  ["auto", "low", "medium", "high"];
+                                const defaultEffort = (
+                                  activeModelMeta.defaultReasoning ||
+                                  activeModelMeta.capabilities
+                                    ?.defaultReasoning ||
+                                  (rawLevels.includes("auto")
+                                    ? "auto"
+                                    : rawLevels[0] || "medium")
+                                )
+                                  .toLowerCase()
+                                  .trim();
+                                return (
+                                  currentLvl !== defaultEffort && (
+                                    <button
+                                      type="button"
+                                      className="model-reasoning-reset-btn"
+                                      onClick={() => {
+                                        setModelReasoning(
+                                          activeModelMeta.id,
+                                          defaultEffort,
+                                        );
+                                        setComposerReasoningOpen(false);
+                                      }}
+                                      title="Reset to model default"
+                                    >
+                                      Reset
+                                    </button>
+                                  )
+                                );
+                              })()}
+                            </div>
+                            {(
+                              activeModelMeta.reasoningLevels ||
+                              activeModelMeta.capabilities
+                                ?.reasoningLevels ||
+                              ["auto", "low", "medium", "high"]
+                            ).map((lvl) => {
+                              const currentLvl =
+                                getEffectiveModelReasoning(activeModelMeta);
+                              const isSelected =
+                                currentLvl === lvl.toLowerCase().trim();
+                              return (
+                                <div
+                                  key={lvl}
+                                  className={`model-reasoning-option ${isSelected ? "selected" : ""}`}
+                                  role="option"
+                                  aria-selected={isSelected}
+                                  onClick={() => {
+                                    setModelReasoning(
+                                      activeModelMeta.id,
+                                      lvl.toLowerCase().trim(),
+                                    );
+                                    setComposerReasoningOpen(false);
+                                  }}
+                                >
+                                  <div className="reasoning-opt-left">
+                                    <div className="reasoning-opt-name">
+                                      {formatReasoningLevelName(lvl)}
+                                    </div>
+                                    <div className="reasoning-opt-desc">
+                                      {getReasoningOptionDesc(lvl)}
+                                    </div>
+                                  </div>
+                                  {isSelected && (
+                                    <Check
+                                      size={12}
+                                      className="reasoning-opt-check"
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Submit Button */}
                     <button
                       className="btn-send-agent"
@@ -4789,22 +5281,56 @@ function App() {
 
             <div className="model-filter-tabs">
               {[
-                { key: "free", label: `Free (${freeCount})` },
-                { key: "all", label: `All (${models.length})` },
-                { key: "coding", label: "Coding" },
-                { key: "reasoning", label: "Reasoning" },
-                { key: "fast", label: "Fast" },
-                { key: "balanced", label: "Balanced" },
-                { key: "tools", label: `Tools (${toolCount})` },
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  className={`model-filter-btn ${modelFilterTab === tab.key ? "active" : ""}`}
-                  onClick={() => setModelFilterTab(tab.key as any)}
-                >
-                  {tab.label}
-                </button>
-              ))}
+                { key: "free", label: `Free (${freeCount})`, count: freeCount },
+                {
+                  key: "all",
+                  label: `All (${models.length})`,
+                  count: models.length,
+                },
+                {
+                  key: "reasoning",
+                  label: `Reasoning (${reasoningCount})`,
+                  count: reasoningCount,
+                },
+                {
+                  key: "coding",
+                  label: "Coding",
+                  count: models.filter((m) => m.recommendedRole === "coding")
+                    .length,
+                },
+                { key: "tools", label: `Tools (${toolCount})`, count: toolCount },
+                ...(visionCount > 0
+                  ? [
+                      {
+                        key: "vision",
+                        label: `Vision (${visionCount})`,
+                        count: visionCount,
+                      },
+                    ]
+                  : []),
+                {
+                  key: "fast",
+                  label: "Fast",
+                  count: models.filter((m) => m.recommendedRole === "fast")
+                    .length,
+                },
+                {
+                  key: "balanced",
+                  label: "Balanced",
+                  count: models.filter((m) => m.recommendedRole === "balanced")
+                    .length,
+                },
+              ]
+                .filter((tab) => tab.key === "all" || (tab.count ?? 1) > 0)
+                .map((tab) => (
+                  <button
+                    key={tab.key}
+                    className={`model-filter-btn ${modelFilterTab === tab.key ? "active" : ""}`}
+                    onClick={() => setModelFilterTab(tab.key as any)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
             </div>
 
             <div className="model-list-scroll">

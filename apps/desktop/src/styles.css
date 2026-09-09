@@ -2496,6 +2496,352 @@ button {
   border-color: rgba(99, 102, 241, 0.2);
 }
 
+.model-cap-unsupported {
+  background: rgba(255, 255, 255, 0.02) !important;
+  color: var(--text-dim) !important;
+  border-color: rgba(255, 255, 255, 0.04) !important;
+  opacity: 0.7;
+}
+
+/* ── Interactive Reasoning Selector on Model Card ────────────────────── */
+.model-reasoning-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.model-reasoning-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.09);
+  border: 1px solid rgba(99, 102, 241, 0.32);
+  color: #c7d2fe;
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.model-reasoning-btn:hover {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.55);
+  color: #ffffff;
+  transform: translateY(-0.5px);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+}
+
+.model-reasoning-btn.open {
+  background: rgba(99, 102, 241, 0.24);
+  border-color: rgba(99, 102, 241, 0.7);
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.4);
+}
+
+.reasoning-brain-icon {
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.reasoning-label {
+  color: #a5b4fc;
+  font-weight: 500;
+}
+
+.reasoning-value-pill {
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.reasoning-chevron {
+  color: #a5b4fc;
+  transition: transform 0.15s ease;
+}
+
+.model-reasoning-btn.open .reasoning-chevron {
+  transform: rotate(180deg);
+}
+
+/* ── Reasoning Dropdown Menu ────────────────────────────────────────── */
+.model-reasoning-dropdown {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 120;
+  min-width: 220px;
+  max-width: 280px;
+  background: #11141d;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: 8px;
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: scaleUp 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(12px);
+}
+
+.model-reasoning-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  margin-bottom: 2px;
+}
+
+.model-reasoning-reset-btn {
+  background: transparent;
+  border: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: #818cf8;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.12s ease;
+}
+
+.model-reasoning-reset-btn:hover {
+  background: rgba(99, 102, 241, 0.15);
+  color: #c7d2fe;
+}
+
+.model-reasoning-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  border: 1px solid transparent;
+}
+
+.model-reasoning-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.model-reasoning-option.selected {
+  background: rgba(99, 102, 241, 0.16);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.reasoning-opt-left {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5px;
+  min-width: 0;
+}
+
+.reasoning-opt-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reasoning-default-tag {
+  font-size: 8.5px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.reasoning-opt-desc {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.25;
+}
+
+.reasoning-opt-check {
+  color: #818cf8;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.4));
+}
+
+/* ── Technical Details Info Button ──────────────────────────────────── */
+.model-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.model-info-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.model-info-btn.active {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #a5b4fc;
+}
+
+/* ── Model Technical Details Popover ────────────────────────────────── */
+.model-details-popover {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: rgba(14, 17, 24, 0.95);
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: scaleUp 0.15s ease;
+}
+
+.model-details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 6px;
+}
+
+.model-details-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #c7d2fe;
+  letter-spacing: 0.2px;
+}
+
+.model-details-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 3px;
+}
+
+.model-details-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.model-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 12px;
+}
+
+.model-detail-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.model-detail-cell--full {
+  grid-column: span 2;
+}
+
+.model-detail-cell .detail-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-dim);
+}
+
+.model-detail-cell .detail-val {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.model-detail-cell .detail-val.mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: #a5b4fc;
+}
+
+/* ── Active Chat Composer Reasoning Trigger ─────────────────────────── */
+.composer-reasoning-wrapper {
+  display: inline-flex;
+  align-items: center;
+}
+
+.composer-reasoning-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  color: #c7d2fe;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.composer-reasoning-btn:hover {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #ffffff;
+}
+
+.composer-reasoning-btn.active {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.65);
+  color: #ffffff;
+}
+
+.composer-brain-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.composer-reasoning-label strong {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.composer-reasoning-popover {
+  top: auto;
+  bottom: calc(100% + 6px);
+  right: 0;
+  left: auto;
+}
+
 .model-host-label {
   margin-left: auto;
   font-size: 10px;

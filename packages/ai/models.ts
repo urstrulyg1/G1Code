@@ -5,6 +5,12 @@ export type ModelCapability = {
   streaming: boolean;
   vision: boolean;
   reasoning: boolean;
+  reasoningSupported: boolean;
+  reasoningLevels?: string[];
+  defaultReasoning?: string;
+  reasoningLabel?: string;
+  structuredOutput?: boolean;
+  parallelTools?: boolean;
   maxOutputTokens?: number;
   contextWindow: number;
 };
@@ -52,12 +58,23 @@ export function parseModelMetadata(
     max_tokens?: number;
     max_output_tokens?: number;
     apiRank?: number;
+    input_modalities?: string[];
     capabilities?: {
       tools?: boolean;
       function_calling?: boolean;
       streaming?: boolean;
       vision?: boolean;
       reasoning?: boolean;
+      supports_tools?: boolean;
+      supports_streaming?: boolean;
+      supports_vision?: boolean;
+      supports_reasoning?: boolean;
+      supported_reasoning_efforts?: string[];
+      reasoning_default_effort?: string;
+      supports_structured_output?: boolean;
+      supports_parallel_tool_calls?: boolean;
+      reasoning_label?: string;
+      [key: string]: unknown;
     };
     pricing?: {
       free?: boolean;
@@ -73,25 +90,80 @@ export function parseModelMetadata(
   defaultProvider: "experiential-labs" = "experiential-labs",
 ): ModelMetadata {
   const id = raw.id;
+  const rawCaps = (raw.capabilities || {}) as Record<string, any>;
 
   const contextWindow =
     raw.context_window ?? (id.includes("1m") ? 1_000_000 : 128_000);
   const supportsTools =
-    raw.capabilities?.tools ??
-    raw.capabilities?.function_calling ??
+    rawCaps.tools ??
+    rawCaps.function_calling ??
+    rawCaps.supports_tools ??
     (!id.includes("embedding") && !id.includes("moderation"));
-  const supportsStreaming = raw.capabilities?.streaming ?? true;
+  const supportsStreaming =
+    rawCaps.streaming ?? rawCaps.supports_streaming ?? true;
   const supportsVision =
-    raw.capabilities?.vision ??
-    (id.includes("vision") ||
-      id.includes("image") ||
-      id.includes("multimodal"));
-  const reasoning =
-    raw.capabilities?.reasoning ??
-    (id.includes("reasoning") ||
-      id.includes("think") ||
-      id.includes("r1") ||
-      id.includes("agent"));
+    rawCaps.vision ??
+    rawCaps.supports_vision ??
+    Boolean(
+      raw.input_modalities?.includes("image") ||
+        id.includes("vision") ||
+        id.includes("image") ||
+        id.includes("multimodal"),
+    );
+
+  // Dynamic reasoning detection & effort levels
+  const explicitEfforts: string[] = Array.isArray(
+    rawCaps.supported_reasoning_efforts,
+  )
+    ? rawCaps.supported_reasoning_efforts
+        .map((s: unknown) => String(s).toLowerCase().trim())
+        .filter((s: string) => s.length > 0 && s !== "none")
+    : [];
+
+  const reasoningSupported = Boolean(
+    rawCaps.supports_reasoning === true ||
+      rawCaps.reasoning === true ||
+      explicitEfforts.length > 0 ||
+      (id.includes("reasoning") ||
+        id.includes("think") ||
+        id.includes("r1") ||
+        id.includes("agent")),
+  );
+
+  let reasoningLevels: string[] = [];
+  if (reasoningSupported) {
+    if (explicitEfforts.length > 0) {
+      reasoningLevels = [...explicitEfforts];
+      // If Auto is not explicitly present, include Auto as first option for adaptive reasoning
+      if (!reasoningLevels.includes("auto") && !reasoningLevels.includes("default")) {
+        reasoningLevels.unshift("auto");
+      }
+    } else {
+      reasoningLevels = ["auto", "low", "medium", "high"];
+    }
+  }
+
+  const defaultReasoning =
+    (typeof rawCaps.reasoning_default_effort === "string" &&
+    rawCaps.reasoning_default_effort
+      ? rawCaps.reasoning_default_effort.toLowerCase()
+      : undefined) ||
+    (reasoningLevels.includes("auto")
+      ? "auto"
+      : reasoningLevels.includes("medium")
+        ? "medium"
+        : reasoningLevels[0] || "medium");
+
+  const structuredOutput = Boolean(
+    rawCaps.structured_output ??
+      rawCaps.supports_structured_output ??
+      false,
+  );
+  const parallelTools = Boolean(
+    rawCaps.parallel_tools ??
+      rawCaps.supports_parallel_tool_calls ??
+      false,
+  );
 
   const displayName = raw.display_name ?? raw.name ?? id;
 
@@ -116,7 +188,7 @@ export function parseModelMetadata(
   if (lower.includes("code") || lower.includes("coder")) {
     recommendedRole = "coding";
   } else if (
-    reasoning ||
+    reasoningSupported ||
     lower.includes("r1") ||
     lower.includes("ultra") ||
     lower.includes("think")
@@ -145,6 +217,10 @@ export function parseModelMetadata(
     supportsTools,
     supportsStreaming,
     supportsVision,
+    reasoningSupported,
+    reasoningLevels,
+    defaultReasoning,
+    reasoningLabel: rawCaps.reasoning_label || "Reasoning",
     isPromotional: isFreeZeroCost,
     pricingType: isFreeZeroCost ? "free" : "credits",
     pricingFormatted,
@@ -160,7 +236,13 @@ export function parseModelMetadata(
       tools: supportsTools,
       streaming: supportsStreaming,
       vision: supportsVision,
-      reasoning,
+      reasoning: reasoningSupported,
+      reasoningSupported,
+      reasoningLevels,
+      defaultReasoning,
+      reasoningLabel: rawCaps.reasoning_label || "Reasoning",
+      structuredOutput,
+      parallelTools,
       maxOutputTokens: raw.max_output_tokens ?? raw.max_tokens ?? 4096,
       contextWindow,
     },

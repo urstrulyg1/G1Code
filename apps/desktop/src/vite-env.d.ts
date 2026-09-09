@@ -56,6 +56,11 @@ interface Window {
         supportsTools?: boolean;
         supportsStreaming?: boolean;
         supportsVision?: boolean;
+        reasoningSupported?: boolean;
+        reasoningLevels?: string[];
+        defaultReasoning?: string;
+        reasoningLabel?: string;
+        capabilities?: Record<string, any>;
         isPromotional?: boolean;
         pricingType?: string;
         pricingFormatted?: string;
@@ -78,6 +83,11 @@ interface Window {
         supportsTools?: boolean;
         supportsStreaming?: boolean;
         supportsVision?: boolean;
+        reasoningSupported?: boolean;
+        reasoningLevels?: string[];
+        defaultReasoning?: string;
+        reasoningLabel?: string;
+        capabilities?: Record<string, any>;
         isPromotional?: boolean;
         pricingType?: string;
         pricingFormatted?: string;
@@ -119,6 +129,7 @@ interface Window {
       prompt: string;
       mode: "ask" | "plan" | "agent";
       model?: string;
+      reasoning?: string;
       provider?: string;
       attachedContext?: string[];
     }): Promise<{ sessionId: string; model?: string }>;
