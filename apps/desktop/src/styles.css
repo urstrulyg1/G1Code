@@ -1734,6 +1734,10 @@ button {
   gap: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
   transition: border-color 0.15s;
+  position: relative;
+  container-type: inline-size;
+  container-name: composer;
+  min-width: 0;
 }
 
 .composer-box:focus-within {
@@ -1794,20 +1798,27 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-top: 4px;
+  gap: 8px;
+  padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .composer-toolbar-left {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .composer-toolbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+  flex-shrink: 1;
 }
 
 .composer-icon-btn {
@@ -1817,6 +1828,10 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .composer-icon-btn:hover {
@@ -1825,7 +1840,7 @@ button {
 }
 
 .mode-selector-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
@@ -1833,8 +1848,11 @@ button {
   color: var(--text-secondary);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border-subtle);
-  padding: 4px 8px;
+  padding: 0 8px;
+  height: 28px;
+  box-sizing: border-box;
   border-radius: 6px;
+  flex-shrink: 0;
 }
 
 .mode-selector-btn:hover {
@@ -1847,15 +1865,19 @@ button {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  justify-content: center;
   text-align: right;
   background: rgba(99, 102, 241, 0.1);
   border: 1px solid rgba(99, 102, 241, 0.25);
   border-radius: 6px;
-  padding: 3px 10px;
+  padding: 2px 8px;
+  height: 32px;
+  box-sizing: border-box;
   cursor: pointer;
-  transition: all 0.15s;
-  flex: 1;
+  transition: all 0.15s ease;
   min-width: 0;
+  max-width: 240px;
+  flex: 0 1 auto;
   overflow: hidden;
 }
 
@@ -1865,7 +1887,7 @@ button {
 }
 
 .model-selector-provider {
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1873,7 +1895,8 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  width: 100%;
+  max-width: 100%;
+  line-height: 1.15;
 }
 
 .model-selector-name {
@@ -1882,11 +1905,24 @@ button {
   color: #fff;
   display: flex;
   align-items: center;
-  gap: 3px;
-  white-space: nowrap;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.model-selector-name-text {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.model-selector-chevron {
+  flex-shrink: 0;
+  color: #a5b4fc;
+  opacity: 0.85;
 }
 
 /* Mini promo badge inside the model selector button */
@@ -1915,6 +1951,7 @@ button {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s;
+  flex-shrink: 0;
 }
 
 .btn-send-agent:hover {
@@ -2795,13 +2832,17 @@ button {
 .composer-reasoning-wrapper {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
+  position: relative;
 }
 
 .composer-reasoning-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px;
+  height: 32px;
+  padding: 0 8px;
+  box-sizing: border-box;
   border-radius: 6px;
   background: rgba(99, 102, 241, 0.1);
   border: 1px solid rgba(99, 102, 241, 0.28);
@@ -2811,6 +2852,8 @@ button {
   cursor: pointer;
   transition: all 0.15s ease;
   white-space: nowrap;
+  user-select: none;
+  flex-shrink: 0;
 }
 
 .composer-reasoning-btn:hover {
@@ -2828,11 +2871,31 @@ button {
 .composer-brain-icon {
   font-size: 11px;
   line-height: 1;
+  flex-shrink: 0;
 }
 
-.composer-reasoning-label strong {
+.composer-reasoning-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.composer-reasoning-label strong,
+.composer-reasoning-val {
   color: #ffffff;
   font-weight: 700;
+}
+
+.composer-reasoning-chevron {
+  flex-shrink: 0;
+  color: #a5b4fc;
+  opacity: 0.85;
+  transition: transform 0.15s ease;
+}
+
+.composer-reasoning-btn.active .composer-reasoning-chevron {
+  transform: rotate(180deg);
 }
 
 .composer-reasoning-popover {
@@ -2840,6 +2903,86 @@ button {
   bottom: calc(100% + 6px);
   right: 0;
   left: auto;
+  max-width: min(280px, 90vw);
+}
+
+/* ── Responsive Composer Toolbar: Container Queries & Fallbacks ─────── */
+@container composer (max-width: 550px) {
+  .composer-reasoning-prefix {
+    display: none;
+  }
+  .composer-toolbar-right {
+    gap: 6px;
+  }
+  .model-selector-btn {
+    max-width: 180px;
+  }
+}
+
+@container composer (max-width: 440px) {
+  .composer-toolbar {
+    row-gap: 8px;
+  }
+  .composer-toolbar-left {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .composer-toolbar-right {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
+  }
+  .model-selector-btn {
+    max-width: none;
+    flex: 1 1 auto;
+    align-items: flex-start;
+    text-align: left;
+    padding: 2px 8px;
+  }
+  .model-selector-name {
+    justify-content: flex-start;
+  }
+}
+
+@container composer (max-width: 320px) {
+  .model-selector-provider {
+    display: none;
+  }
+  .composer-reasoning-btn {
+    padding: 0 6px;
+    gap: 3px;
+  }
+}
+
+/* Fallback Media Queries for window resizes */
+@media (max-width: 580px) {
+  .composer-reasoning-prefix {
+    display: none;
+  }
+}
+
+@media (max-width: 440px) {
+  .composer-toolbar {
+    row-gap: 8px;
+  }
+  .composer-toolbar-left {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .composer-toolbar-right {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
+  }
+  .model-selector-btn {
+    max-width: none;
+    flex: 1 1 auto;
+    align-items: flex-start;
+    text-align: left;
+  }
+  .model-selector-name {
+    justify-content: flex-start;
+  }
 }
 
 .model-host-label {

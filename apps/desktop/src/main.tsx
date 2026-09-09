@@ -5001,13 +5001,15 @@ function App() {
                     <div
                       className="model-selector-btn"
                       onClick={() => setModelPickerOpen(true)}
-                      title="Select AI Model"
+                      title={`Select AI Model: ${activeModelMeta.name}`}
                     >
                       <span className="model-selector-provider">
                         Experiential Labs
                       </span>
                       <span className="model-selector-name">
-                        {activeModelMeta.name}
+                        <span className="model-selector-name-text">
+                          {activeModelMeta.name}
+                        </span>
                         {usageLimits[selectedModel]?.isLimitReached ? (
                           <span
                             className="model-limit-badge"
@@ -5024,7 +5026,7 @@ function App() {
                             Free · $0/M
                           </span>
                         ) : null}
-                        <ChevronDown size={10} />
+                        <ChevronDown size={10} className="model-selector-chevron" />
                       </span>
                     </div>
 
@@ -5053,14 +5055,16 @@ function App() {
                         >
                           <span className="composer-brain-icon">🧠</span>
                           <span className="composer-reasoning-label">
-                            Reasoning:{" "}
-                            <strong>
+                            <span className="composer-reasoning-prefix">
+                              Reasoning:{" "}
+                            </span>
+                            <strong className="composer-reasoning-val">
                               {formatReasoningLevelName(
                                 getEffectiveModelReasoning(activeModelMeta),
                               )}
                             </strong>
                           </span>
-                          <ChevronDown size={10} />
+                          <ChevronDown size={10} className="composer-reasoning-chevron" />
                         </button>
 
                         {composerReasoningOpen && (
