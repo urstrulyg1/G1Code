@@ -921,7 +921,9 @@ const server = http.createServer(async (req, res) => {
         "";
 
       // Resolve requested reasoning safely against selected model capabilities
-      const rawReasoning = (body.reasoningEffort || body.reasoning || "").trim().toLowerCase();
+      const rawReasoning = (body.reasoningEffort || body.reasoning || "")
+        .trim()
+        .toLowerCase();
       const modelMeta = globalModelCatalog.findModel(selectedModel);
       let activeReasoning: string | undefined = undefined;
 
@@ -1360,7 +1362,9 @@ const server = http.createServer(async (req, res) => {
       const limitParam = url.searchParams.get("limit");
       const limit = limitParam ? parseInt(limitParam, 10) : 5000;
       const logArgs =
-        limit > 0 ? ["log", "-n", String(limit), "--oneline"] : ["log", "--oneline"];
+        limit > 0
+          ? ["log", "-n", String(limit), "--oneline"]
+          : ["log", "--oneline"];
       const graphArgs =
         limit > 0
           ? ["log", "--graph", "--oneline", "-n", String(limit)]
@@ -1368,21 +1372,18 @@ const server = http.createServer(async (req, res) => {
 
       try {
         const [logRes, graphRes, branchRes] = await Promise.all([
-          execFileAsync(
-            "git",
-            logArgs,
-            { cwd: workspace, maxBuffer: 20 * 1024 * 1024 },
-          ).catch(() => ({ stdout: "" })),
-          execFileAsync(
-            "git",
-            graphArgs,
-            { cwd: workspace, maxBuffer: 20 * 1024 * 1024 },
-          ).catch(() => ({ stdout: "" })),
-          execFileAsync(
-            "git",
-            ["branch", "-a", "--format=%(refname:short)"],
-            { cwd: workspace, maxBuffer: 5 * 1024 * 1024 },
-          ).catch(() => ({ stdout: "" })),
+          execFileAsync("git", logArgs, {
+            cwd: workspace,
+            maxBuffer: 20 * 1024 * 1024,
+          }).catch(() => ({ stdout: "" })),
+          execFileAsync("git", graphArgs, {
+            cwd: workspace,
+            maxBuffer: 20 * 1024 * 1024,
+          }).catch(() => ({ stdout: "" })),
+          execFileAsync("git", ["branch", "-a", "--format=%(refname:short)"], {
+            cwd: workspace,
+            maxBuffer: 5 * 1024 * 1024,
+          }).catch(() => ({ stdout: "" })),
         ]);
         logOutput = logRes.stdout;
         graphOutput = graphRes.stdout;
@@ -1396,9 +1397,9 @@ const server = http.createServer(async (req, res) => {
 
       const isRepo = Boolean(
         baseline &&
-          baseline.branch &&
-          baseline.branch.trim().length > 0 &&
-          baseline.branch !== "unknown",
+        baseline.branch &&
+        baseline.branch.trim().length > 0 &&
+        baseline.branch !== "unknown",
       );
 
       // Build Antigravity-style branch tree from real repository data
@@ -1416,10 +1417,7 @@ const server = http.createServer(async (req, res) => {
               )
               .filter(
                 (b) =>
-                  b &&
-                  b !== current &&
-                  !b.includes("HEAD") &&
-                  b !== "origin",
+                  b && b !== current && !b.includes("HEAD") && b !== "origin",
               ),
           ),
         );
@@ -1454,7 +1452,9 @@ const server = http.createServer(async (req, res) => {
         status: baseline?.status ?? "",
         diff: baseline?.diff ?? "",
         modifiedFiles: baseline?.modifiedFiles ?? [],
-        recentCommits: logOutput ? logOutput.trim().split("\n").filter(Boolean) : [],
+        recentCommits: logOutput
+          ? logOutput.trim().split("\n").filter(Boolean)
+          : [],
         graph: graphOutput ? graphOutput.trim() : "",
         branches: branchList,
         antigravityTree,

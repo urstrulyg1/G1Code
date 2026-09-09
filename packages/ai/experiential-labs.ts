@@ -169,7 +169,7 @@ export class ExperientialLabsProvider implements AIProvider {
       // Fetch public catalog without requiring auth key
       const catalogUrl = "https://api.experientiallabs.ai/api/models";
       const ctrl = new AbortController();
-      const timeoutId = setTimeout(() => ctrl.abort(), 4000);
+      const timeoutId = setTimeout(() => ctrl.abort(), 15000);
       const res = await fetch(catalogUrl, {
         signal: signal || ctrl.signal,
         headers: { Accept: "application/json" },
@@ -179,7 +179,9 @@ export class ExperientialLabsProvider implements AIProvider {
       if (res.ok) {
         const json = (await res.json()) as {
           models?: Array<{
-            model?: Record<string, unknown>;
+            model?: Record<string, unknown> & {
+              supported_params?: Record<string, boolean>;
+            };
             providers?: Array<Record<string, unknown>>;
           }>;
           promotions?: Array<{
@@ -252,11 +254,48 @@ export class ExperientialLabsProvider implements AIProvider {
           let apiRank = index + 100;
           if (typeof mod.preferred_rank === "number") {
             apiRank = mod.preferred_rank;
-          } else if (promo?.isSpotlight && typeof promo.display_order === "number") {
+          } else if (
+            promo?.isSpotlight &&
+            typeof promo.display_order === "number"
+          ) {
             apiRank = promo.display_order;
           }
 
-          const providerCaps = (bestProvider?.capabilities || {}) as Record<string, unknown>;
+          const providerCaps = (bestProvider?.capabilities || {}) as Record<
+            string,
+            unknown
+          >;
+
+          // Determine capabilities dynamically from model supported_params and active providers
+          const supportsTools = Boolean(
+            mod.supported_params?.tools ??
+            providerCaps.supports_tools ??
+            providerCaps.tools ??
+            activeProviders.some(
+              (p: any) =>
+                p.capabilities?.supports_tools === true ||
+                p.capabilities?.tools === true,
+            ),
+          );
+
+          const supportsVision = Boolean(
+            providerCaps.supports_vision ||
+            activeProviders.some(
+              (p: any) => p.capabilities?.supports_vision === true,
+            ) ||
+            (Array.isArray(mod.input_modalities) &&
+              mod.input_modalities.includes("image")),
+          );
+
+          const supportsReasoning = Boolean(
+            mod.supported_params?.reasoning ??
+            providerCaps.supports_reasoning ??
+            activeProviders.some(
+              (p: any) =>
+                p.capabilities?.supports_reasoning === true ||
+                p.capabilities?.reasoning === true,
+            ),
+          );
 
           metadataMap.set(slug, {
             ...mod,
@@ -266,11 +305,12 @@ export class ExperientialLabsProvider implements AIProvider {
             providers: item.providers,
             capabilities: {
               ...providerCaps,
-              supports_vision: Boolean(
-                providerCaps.supports_vision ||
-                  (Array.isArray(mod.input_modalities) &&
-                    mod.input_modalities.includes("image")),
-              ),
+              supports_tools: supportsTools,
+              tools: supportsTools,
+              supports_vision: supportsVision,
+              vision: supportsVision,
+              supports_reasoning: supportsReasoning,
+              reasoning: supportsReasoning,
             },
             api_rank: apiRank,
             is_promotional: Boolean(promo && promo.free),
@@ -393,12 +433,11 @@ export class ExperientialLabsProvider implements AIProvider {
               : typeof enriched?.max_output_tokens === "number"
                 ? (enriched.max_output_tokens as number)
                 : undefined,
-          input_modalities:
-            Array.isArray(item.input_modalities)
-              ? (item.input_modalities as string[])
-              : Array.isArray(enriched?.input_modalities)
-                ? (enriched.input_modalities as string[])
-                : undefined,
+          input_modalities: Array.isArray(item.input_modalities)
+            ? (item.input_modalities as string[])
+            : Array.isArray(enriched?.input_modalities)
+              ? (enriched.input_modalities as string[])
+              : undefined,
           capabilities:
             typeof item.capabilities === "object" && item.capabilities
               ? (item.capabilities as any)

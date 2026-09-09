@@ -28,12 +28,7 @@ export type ModelMetadata = AIModel & {
     output?: number;
   };
   recommendedRole?:
-    | "coding"
-    | "reasoning"
-    | "fast"
-    | "balanced"
-    | "review"
-    | "agent";
+    "coding" | "reasoning" | "fast" | "balanced" | "review" | "agent";
   apiRank?: number;
 };
 
@@ -65,12 +60,7 @@ export function parseModelMetadata(
     apiRank?: number;
     input_modalities?: string[];
     recommendedRole?:
-      | "coding"
-      | "reasoning"
-      | "fast"
-      | "balanced"
-      | "review"
-      | "agent";
+      "coding" | "reasoning" | "fast" | "balanced" | "review" | "agent";
     recommended_role?: string;
     performance_category?: string;
     capabilities?: {
@@ -113,22 +103,20 @@ export function parseModelMetadata(
 
   const supportsTools = Boolean(
     rawCaps.tools ??
-      rawCaps.function_calling ??
-      rawCaps.supports_tools ??
-      false,
+    rawCaps.function_calling ??
+    rawCaps.supports_tools ??
+    false,
   );
 
   const supportsStreaming = Boolean(
-    rawCaps.streaming ??
-      rawCaps.supports_streaming ??
-      false,
+    rawCaps.streaming ?? rawCaps.supports_streaming ?? false,
   );
 
   const supportsVision = Boolean(
     rawCaps.vision ??
-      rawCaps.supports_vision ??
-      (Array.isArray(raw.input_modalities) &&
-        raw.input_modalities.includes("image")),
+    rawCaps.supports_vision ??
+    (Array.isArray(raw.input_modalities) &&
+      raw.input_modalities.includes("image")),
   );
 
   // Dynamic reasoning detection & effort levels strictly from provider metadata
@@ -142,14 +130,17 @@ export function parseModelMetadata(
 
   const reasoningSupported = Boolean(
     rawCaps.supports_reasoning === true ||
-      rawCaps.reasoning === true ||
-      explicitEfforts.length > 0,
+    rawCaps.reasoning === true ||
+    explicitEfforts.length > 0,
   );
 
   let reasoningLevels: string[] = [];
   if (reasoningSupported && explicitEfforts.length > 0) {
     reasoningLevels = [...explicitEfforts];
-    if (!reasoningLevels.includes("auto") && !reasoningLevels.includes("default")) {
+    if (
+      !reasoningLevels.includes("auto") &&
+      !reasoningLevels.includes("default")
+    ) {
       reasoningLevels.unshift("auto");
     }
   }
@@ -166,14 +157,10 @@ export function parseModelMetadata(
       : undefined);
 
   const structuredOutput = Boolean(
-    rawCaps.structured_output ??
-      rawCaps.supports_structured_output ??
-      false,
+    rawCaps.structured_output ?? rawCaps.supports_structured_output ?? false,
   );
   const parallelTools = Boolean(
-    rawCaps.parallel_tools ??
-      rawCaps.supports_parallel_tool_calls ??
-      false,
+    rawCaps.parallel_tools ?? rawCaps.supports_parallel_tool_calls ?? false,
   );
 
   const displayName = raw.display_name ?? raw.name ?? id;
@@ -381,7 +368,8 @@ export class ModelCatalog {
 
   supportsTools(id: string): boolean {
     const meta = this.findModel(id);
-    return meta ? (meta.supportsTools ?? true) : true;
+    if (!meta) return true;
+    return Boolean(meta.supportsTools ?? meta.capabilities?.tools ?? true);
   }
 
   supportsVision(id: string): boolean {

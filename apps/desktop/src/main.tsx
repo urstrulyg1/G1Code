@@ -405,7 +405,11 @@ function mergeAgentEvent(old: Event[], event: Event): Event[] {
     return [...old, event];
   }
 
-  if (event.type === "command" && event.action === "chunk" && event.toolCallId) {
+  if (
+    event.type === "command" &&
+    event.action === "chunk" &&
+    event.toolCallId
+  ) {
     const idx = old.findIndex(
       (e) =>
         (e.type === "command" || e.type === "tool") &&
@@ -432,7 +436,11 @@ function mergeAgentEvent(old: Event[], event: Event): Event[] {
     });
     if (idx !== -1) {
       const copy = [...old];
-      copy[idx] = { ...copy[idx], result: event.result, message: event.message };
+      copy[idx] = {
+        ...copy[idx],
+        result: event.result,
+        message: event.message,
+      };
       return copy;
     }
   }
@@ -1100,11 +1108,13 @@ function App() {
       );
       if (!isSupported) return "Not supported";
 
-      const rawLevels = (m.reasoningLevels && m.reasoningLevels.length > 0)
-        ? m.reasoningLevels
-        : (m.capabilities?.reasoningLevels && m.capabilities.reasoningLevels.length > 0)
-          ? m.capabilities.reasoningLevels
-          : [];
+      const rawLevels =
+        m.reasoningLevels && m.reasoningLevels.length > 0
+          ? m.reasoningLevels
+          : m.capabilities?.reasoningLevels &&
+              m.capabilities.reasoningLevels.length > 0
+            ? m.capabilities.reasoningLevels
+            : [];
       if (rawLevels.length === 0) return "Not supported";
 
       const levels = rawLevels.map((l) => l.toLowerCase().trim());
@@ -1112,7 +1122,8 @@ function App() {
 
       if (
         saved &&
-        (levels.includes(saved) || (saved === "auto" && levels.includes("auto")))
+        (levels.includes(saved) ||
+          (saved === "auto" && levels.includes("auto")))
       ) {
         return saved;
       }
@@ -1138,12 +1149,17 @@ function App() {
 
   const getReasoningTooltip = (m: ModelItem, currentLevel: string) => {
     const desc = getReasoningOptionDesc(currentLevel);
-    const rawLevels = (m.reasoningLevels && m.reasoningLevels.length > 0)
-      ? m.reasoningLevels
-      : (m.capabilities?.reasoningLevels && m.capabilities.reasoningLevels.length > 0)
-        ? m.capabilities.reasoningLevels
-        : [];
-    const levels = rawLevels.length > 0 ? rawLevels.map(formatReasoningLevelName).join(" · ") : "None";
+    const rawLevels =
+      m.reasoningLevels && m.reasoningLevels.length > 0
+        ? m.reasoningLevels
+        : m.capabilities?.reasoningLevels &&
+            m.capabilities.reasoningLevels.length > 0
+          ? m.capabilities.reasoningLevels
+          : [];
+    const levels =
+      rawLevels.length > 0
+        ? rawLevels.map(formatReasoningLevelName).join(" · ")
+        : "None";
     return `Reasoning effort\n${formatReasoningLevelName(currentLevel)}\n\n${desc} for complex coding, debugging, architecture, and multi-step tasks.\n\nSupported by this model.\nSupported levels: ${levels}`;
   };
 
@@ -1176,7 +1192,9 @@ function App() {
 
   // Settings & Verification Dialog
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsActiveTab, setSettingsActiveTab] = useState<"Provider" | "Agent" | "Tab">("Provider");
+  const [settingsActiveTab, setSettingsActiveTab] = useState<
+    "Provider" | "Agent" | "Tab"
+  >("Provider");
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [verificationResult, setVerificationResult] = useState<string | null>(
     null,
@@ -1191,7 +1209,11 @@ function App() {
 
   // Close dropdown popovers when clicking outside
   useEffect(() => {
-    if (!composerReasoningOpen && !openReasoningDropdownModelId && !modeMenuOpen)
+    if (
+      !composerReasoningOpen &&
+      !openReasoningDropdownModelId &&
+      !modeMenuOpen
+    )
       return;
     const handleOutsideClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
@@ -1371,8 +1393,13 @@ function App() {
         void loadChangesRef.current();
         // Auto-approve all changes if reviewPolicy is "always"
         const curSettings = settingsRef.current;
-        if (curSettings?.reviewPolicy === "always" && sessionIdRef.current && workspaceRef.current) {
-          void window.g1code.approveAllChanges(workspaceRef.current, sessionIdRef.current)
+        if (
+          curSettings?.reviewPolicy === "always" &&
+          sessionIdRef.current &&
+          workspaceRef.current
+        ) {
+          void window.g1code
+            .approveAllChanges(workspaceRef.current, sessionIdRef.current)
             .then(() => loadChangesRef.current())
             .catch(() => {});
         }
@@ -1461,7 +1488,9 @@ function App() {
             if (leaves.length > 0) {
               const lines = [current, " │"];
               leaves.forEach((l, idx) => {
-                lines.push(` ${idx === leaves.length - 1 ? "└──" : "├──"} ${l}`);
+                lines.push(
+                  ` ${idx === leaves.length - 1 ? "└──" : "├──"} ${l}`,
+                );
               });
               gitData.antigravityTree = lines.join("\n");
             } else {
@@ -1949,14 +1978,17 @@ function App() {
     const targetMeta = models.find((m) => m.id === newModel);
     if (targetMeta) {
       const isReasoning = Boolean(
-        targetMeta.reasoningSupported ?? targetMeta.capabilities?.reasoningSupported,
+        targetMeta.reasoningSupported ??
+        targetMeta.capabilities?.reasoningSupported,
       );
       if (isReasoning) {
-        const rawLevels = (targetMeta.reasoningLevels && targetMeta.reasoningLevels.length > 0)
-          ? targetMeta.reasoningLevels
-          : (targetMeta.capabilities?.reasoningLevels && targetMeta.capabilities.reasoningLevels.length > 0)
-            ? targetMeta.capabilities.reasoningLevels
-            : [];
+        const rawLevels =
+          targetMeta.reasoningLevels && targetMeta.reasoningLevels.length > 0
+            ? targetMeta.reasoningLevels
+            : targetMeta.capabilities?.reasoningLevels &&
+                targetMeta.capabilities.reasoningLevels.length > 0
+              ? targetMeta.capabilities.reasoningLevels
+              : [];
         const levels = rawLevels.map((l) => l.toLowerCase().trim());
         const saved = modelReasoning[newModel]?.toLowerCase().trim();
         if (saved && !levels.includes(saved) && saved !== "auto") {
@@ -2108,13 +2140,18 @@ function App() {
       .slice(0, 6)
       .map((e) => ({ id: e.name, label: e.name, kind: e.kind as string }));
     const extras = [
-      { id: "Problems", label: `Problems (${problems.length})`, kind: "virtual" },
+      {
+        id: "Problems",
+        label: `Problems (${problems.length})`,
+        kind: "virtual",
+      },
       { id: "GitChanges", label: "Git Changes", kind: "virtual" },
     ].filter((x) => x.id.toLowerCase().includes(contextFilter.toLowerCase()));
     return [...files, ...extras];
   }, [entries, contextFilter, problems.length]);
   const slashItems = useMemo(
-    () => SLASH_ACTIONS.filter((a) => a.cmd.includes(actionFilter.toLowerCase())),
+    () =>
+      SLASH_ACTIONS.filter((a) => a.cmd.includes(actionFilter.toLowerCase())),
     [SLASH_ACTIONS, actionFilter],
   );
   const [autocompleteIndex, setAutocompleteIndex] = useState(0);
@@ -2147,7 +2184,8 @@ function App() {
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        if (showContextPicker) insertContextMention(contextItems[autocompleteIndex].id);
+        if (showContextPicker)
+          insertContextMention(contextItems[autocompleteIndex].id);
         else insertSlashAction(slashItems[autocompleteIndex].cmd);
         return;
       }
@@ -2209,14 +2247,23 @@ function App() {
     m.pricingDetails?.input === 0 &&
     m.pricingDetails?.output === 0;
 
+  const hasToolSupport = (m: ModelItem) =>
+    Boolean(m.supportsTools ?? m.capabilities?.tools ?? false);
+
+  const hasReasoningSupport = (m: ModelItem) =>
+    Boolean(
+      m.reasoningSupported ||
+      m.capabilities?.reasoningSupported ||
+      m.capabilities?.reasoning,
+    );
+
+  const hasVisionSupport = (m: ModelItem) =>
+    Boolean(m.supportsVision || m.capabilities?.vision);
+
   const freeCount = models.filter(isTrulyFree).length;
-  const toolCount = models.filter((m) => m.supportsTools).length;
-  const reasoningCount = models.filter(
-    (m) => m.reasoningSupported || m.capabilities?.reasoningSupported,
-  ).length;
-  const visionCount = models.filter(
-    (m) => m.supportsVision || m.capabilities?.vision,
-  ).length;
+  const toolCount = models.filter(hasToolSupport).length;
+  const reasoningCount = models.filter(hasReasoningSupport).length;
+  const visionCount = models.filter(hasVisionSupport).length;
 
   const filteredModels = models.filter((m) => {
     const s = modelSearch.trim().toLowerCase();
@@ -2226,22 +2273,31 @@ function App() {
         m.id.toLowerCase().includes(s) ||
         Boolean(m.provider && m.provider.toLowerCase().includes(s)) ||
         Boolean(m.description && m.description.toLowerCase().includes(s)) ||
-        Boolean(m.recommendedRole && m.recommendedRole.toLowerCase().includes(s)) ||
-        Boolean(m.contextWindowFormatted && m.contextWindowFormatted.toLowerCase().includes(s)) ||
-        (s === "reasoning" && Boolean(m.reasoningSupported || m.capabilities?.reasoningSupported)) ||
-        (s === "tools" && Boolean(m.supportsTools || m.capabilities?.tools)) ||
-        (s === "vision" && Boolean(m.supportsVision || m.capabilities?.vision)) ||
+        Boolean(
+          m.recommendedRole && m.recommendedRole.toLowerCase().includes(s),
+        ) ||
+        Boolean(
+          m.contextWindowFormatted &&
+          m.contextWindowFormatted.toLowerCase().includes(s),
+        ) ||
+        (s === "reasoning" && hasReasoningSupport(m)) ||
+        (s === "tools" && hasToolSupport(m)) ||
+        (s === "vision" && hasVisionSupport(m)) ||
         (s === "free" && isTrulyFree(m));
       if (!matchSearch) return false;
     }
 
     if (activeModelFilters.has("free") && !isTrulyFree(m)) return false;
-    if (activeModelFilters.has("tools") && !m.supportsTools) return false;
-    if (activeModelFilters.has("vision") && !(m.supportsVision || m.capabilities?.vision)) return false;
-    if (activeModelFilters.has("reasoning") && !(m.reasoningSupported || m.capabilities?.reasoningSupported)) return false;
-    if (activeModelFilters.has("coding") && m.recommendedRole !== "coding") return false;
-    if (activeModelFilters.has("fast") && m.recommendedRole !== "fast") return false;
-    if (activeModelFilters.has("balanced") && m.recommendedRole !== "balanced") return false;
+    if (activeModelFilters.has("tools") && !hasToolSupport(m)) return false;
+    if (activeModelFilters.has("vision") && !hasVisionSupport(m)) return false;
+    if (activeModelFilters.has("reasoning") && !hasReasoningSupport(m))
+      return false;
+    if (activeModelFilters.has("coding") && m.recommendedRole !== "coding")
+      return false;
+    if (activeModelFilters.has("fast") && m.recommendedRole !== "fast")
+      return false;
+    if (activeModelFilters.has("balanced") && m.recommendedRole !== "balanced")
+      return false;
 
     return true;
   });
@@ -2257,7 +2313,10 @@ function App() {
           if (line.startsWith("+") && !line.startsWith("+++")) additions++;
           else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
         }
-      } else if (c.originalContent !== undefined && c.proposedContent !== undefined) {
+      } else if (
+        c.originalContent !== undefined &&
+        c.proposedContent !== undefined
+      ) {
         const origLen = c.originalContent.split("\n").length;
         const propLen = c.proposedContent.split("\n").length;
         if (propLen > origLen) additions += propLen - origLen;
@@ -2536,10 +2595,7 @@ function App() {
                                 {copiedCommitHash === parsed.hash ? (
                                   <Check size={9} color="#10b981" />
                                 ) : (
-                                  <Copy
-                                    size={9}
-                                    className="hash-copy-icon"
-                                  />
+                                  <Copy size={9} className="hash-copy-icon" />
                                 )}
                               </button>
                               {parsed.type ? (
@@ -2604,10 +2660,7 @@ function App() {
                               {copiedCommitHash === parsed.hash ? (
                                 <Check size={9} color="#10b981" />
                               ) : (
-                                <Copy
-                                  size={9}
-                                  className="hash-copy-icon"
-                                />
+                                <Copy size={9} className="hash-copy-icon" />
                               )}
                             </button>
                             {isFirst ? (
@@ -2655,9 +2708,8 @@ function App() {
                       }}
                       title="Load next 100 commits"
                     >
-                      Load More (
-                      {Math.min(visibleCommitCount, commits.length)} of{" "}
-                      {commits.length})
+                      Load More ({Math.min(visibleCommitCount, commits.length)}{" "}
+                      of {commits.length})
                     </button>
                     <button
                       type="button"
@@ -2842,11 +2894,13 @@ function App() {
     const isReasoningSupported = Boolean(
       m.reasoningSupported ?? m.capabilities?.reasoningSupported,
     );
-    const rawLevels = (m.reasoningLevels && m.reasoningLevels.length > 0)
-      ? m.reasoningLevels
-      : (m.capabilities?.reasoningLevels && m.capabilities.reasoningLevels.length > 0)
-        ? m.capabilities.reasoningLevels
-        : [];
+    const rawLevels =
+      m.reasoningLevels && m.reasoningLevels.length > 0
+        ? m.reasoningLevels
+        : m.capabilities?.reasoningLevels &&
+            m.capabilities.reasoningLevels.length > 0
+          ? m.capabilities.reasoningLevels
+          : [];
     const reasoningLevels = rawLevels.map((s) => s.toLowerCase().trim());
     const currentReasoning = getEffectiveModelReasoning(m);
     const defaultEffort = (
@@ -2930,8 +2984,10 @@ function App() {
               ? `${m.contextWindowFormatted} Context`
               : "Context unavailable"}
           </span>
-          <span className={`model-cap-tag ${m.supportsTools ? "cap-accent" : ""}`}>
-            Tools {m.supportsTools ? "✓" : "—"}
+          <span
+            className={`model-cap-tag ${hasToolSupport(m) ? "cap-accent" : ""}`}
+          >
+            Tools {hasToolSupport(m) ? "✓" : "—"}
           </span>
           <span className="model-cap-tag">
             Streaming {m.supportsStreaming ? "✓" : "—"}
@@ -3020,7 +3076,9 @@ function App() {
                           <div className="reasoning-opt-name">
                             {formatReasoningLevelName(lvl)}
                             {lvl.toLowerCase() === defaultEffort && (
-                              <span className="reasoning-default-tag">Default</span>
+                              <span className="reasoning-default-tag">
+                                Default
+                              </span>
                             )}
                           </div>
                           <div className="reasoning-opt-desc">
@@ -3100,15 +3158,13 @@ function App() {
               <div className="model-detail-cell">
                 <span className="detail-label">Tools</span>
                 <span className="detail-val">
-                  {m.supportsTools ? "Supported ✓" : "Not supported"}
+                  {hasToolSupport(m) ? "Supported ✓" : "Not supported"}
                 </span>
               </div>
               <div className="model-detail-cell">
                 <span className="detail-label">Streaming</span>
                 <span className="detail-val">
-                  {m.supportsStreaming
-                    ? "Supported ✓"
-                    : "Not supported"}
+                  {m.supportsStreaming ? "Supported ✓" : "Not supported"}
                 </span>
               </div>
               <div className="model-detail-cell">
@@ -3210,7 +3266,11 @@ function App() {
           <button
             className="topbar-btn"
             onClick={toggleTheme}
-            title={theme === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme"}
+            title={
+              theme === "dark"
+                ? "Switch to Light Theme"
+                : "Switch to Dark Theme"
+            }
             aria-label="Toggle Theme"
           >
             {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
@@ -3746,7 +3806,11 @@ function App() {
                   className={`drawer-tab ${bottomTab === "git" ? "active" : ""}`}
                   onClick={() => setBottomTab("git")}
                 >
-                  <GitBranch size={12} /> GIT ({gitStatus.isRepo && gitStatus.branch ? gitStatus.branch : "Unavailable"})
+                  <GitBranch size={12} /> GIT (
+                  {gitStatus.isRepo && gitStatus.branch
+                    ? gitStatus.branch
+                    : "Unavailable"}
+                  )
                 </button>
               </div>
 
@@ -3835,17 +3899,23 @@ function App() {
                       <>
                         <div>
                           Branch: <b>{gitStatus.branch}</b> | HEAD:{" "}
-                          <code>{gitStatus.head ? gitStatus.head.slice(0, 8) : "—"}</code>
+                          <code>
+                            {gitStatus.head ? gitStatus.head.slice(0, 8) : "—"}
+                          </code>
                         </div>
                         <pre
-                          style={{ marginTop: 8, color: "var(--text-secondary)" }}
+                          style={{
+                            marginTop: 8,
+                            color: "var(--text-secondary)",
+                          }}
                         >
                           {gitStatus.status || "Working directory clean."}
                         </pre>
                       </>
                     ) : (
                       <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                        Git repository unavailable. Initialize or clone a Git repository in this workspace to track changes.
+                        Git repository unavailable. Initialize or clone a Git
+                        repository in this workspace to track changes.
                       </div>
                     )}
                   </div>
@@ -3931,7 +4001,8 @@ function App() {
                 <button
                   className="agent-icon-btn"
                   onClick={() => {
-                    if (running && sessionId) window.g1code.stopAgent(sessionId);
+                    if (running && sessionId)
+                      window.g1code.stopAgent(sessionId);
                     setRunning(false);
                     pendingSessionRef.current = false;
                     setSessionId("");
@@ -5637,7 +5708,8 @@ function App() {
                   >
                     <FileText size={14} className="changes-stat-icon" />
                     <span className="changes-count-text">
-                      {changes.length} {changes.length === 1 ? "file" : "files"} changed
+                      {changes.length} {changes.length === 1 ? "file" : "files"}{" "}
+                      changed
                     </span>
                     {totalAdditions > 0 && (
                       <span className="diff-stat-add">+{totalAdditions}</span>
@@ -5745,7 +5817,9 @@ function App() {
                     }}
                   >
                     ADD CONTEXT (@)
-                    <span className="autocomplete-hint">↑↓ navigate · Enter select</span>
+                    <span className="autocomplete-hint">
+                      ↑↓ navigate · Enter select
+                    </span>
                   </div>
                   {contextItems.length === 0 && (
                     <div className="autocomplete-empty">No matches</div>
@@ -5759,7 +5833,10 @@ function App() {
                     >
                       <div className="autocomplete-label">
                         {item.id === "Problems" ? (
-                          <AlertTriangle size={13} color="var(--accent-warning)" />
+                          <AlertTriangle
+                            size={13}
+                            color="var(--accent-warning)"
+                          />
                         ) : item.id === "GitChanges" ? (
                           <GitBranch size={13} color="var(--accent-agent)" />
                         ) : item.kind === "directory" ? (
@@ -5789,7 +5866,9 @@ function App() {
                     }}
                   >
                     AGENT ACTIONS (/)
-                    <span className="autocomplete-hint">↑↓ navigate · Enter select</span>
+                    <span className="autocomplete-hint">
+                      ↑↓ navigate · Enter select
+                    </span>
                   </div>
                   {slashItems.length === 0 && (
                     <div className="autocomplete-empty">No matching action</div>
@@ -5946,7 +6025,10 @@ function App() {
                     </div>
 
                     {/* Unified Model + Reasoning Pill (Simple & Clean Antigravity IDE UI) */}
-                    <div className="composer-model-pill" style={{ position: "relative" }}>
+                    <div
+                      className="composer-model-pill"
+                      style={{ position: "relative" }}
+                    >
                       <button
                         type="button"
                         className="composer-model-btn"
@@ -5957,10 +6039,14 @@ function App() {
                           {activeModelMeta.name}
                         </span>
                         {usageLimits[selectedModel]?.isLimitReached ? (
-                          <span className="model-limit-badge mini" title="Usage limit reached">
+                          <span
+                            className="model-limit-badge mini"
+                            title="Usage limit reached"
+                          >
                             LIMIT
                           </span>
-                        ) : (activeModelMeta.isPromotional || isTrulyFree(activeModelMeta)) ? (
+                        ) : activeModelMeta.isPromotional ||
+                          isTrulyFree(activeModelMeta) ? (
                           <span
                             className="composer-model-free-symbol"
                             title="Verified free tier model ($0 input / $0 output)"
@@ -5972,7 +6058,7 @@ function App() {
 
                       {Boolean(
                         activeModelMeta.reasoningSupported ??
-                          activeModelMeta.capabilities?.reasoningSupported,
+                        activeModelMeta.capabilities?.reasoningSupported,
                       ) ? (
                         <button
                           type="button"
@@ -5994,7 +6080,10 @@ function App() {
                               getEffectiveModelReasoning(activeModelMeta),
                             )}
                           </span>
-                          <ChevronUp size={10} className="composer-reasoning-chevron" />
+                          <ChevronUp
+                            size={10}
+                            className="composer-reasoning-chevron"
+                          />
                         </button>
                       ) : (
                         <button
@@ -6019,9 +6108,13 @@ function App() {
                                 getEffectiveModelReasoning(activeModelMeta);
                               const rawLevels =
                                 activeModelMeta.reasoningLevels ||
-                                activeModelMeta.capabilities
-                                  ?.reasoningLevels ||
-                                ["auto", "low", "medium", "high"];
+                                  activeModelMeta.capabilities
+                                    ?.reasoningLevels || [
+                                    "auto",
+                                    "low",
+                                    "medium",
+                                    "high",
+                                  ];
                               const defaultEffort = (
                                 activeModelMeta.defaultReasoning ||
                                 activeModelMeta.capabilities
@@ -6053,11 +6146,16 @@ function App() {
                             })()}
                           </div>
                           {(() => {
-                            const rawLevels = (activeModelMeta.reasoningLevels && activeModelMeta.reasoningLevels.length > 0)
-                              ? activeModelMeta.reasoningLevels
-                              : (activeModelMeta.capabilities?.reasoningLevels && activeModelMeta.capabilities.reasoningLevels.length > 0)
-                                ? activeModelMeta.capabilities.reasoningLevels
-                                : [];
+                            const rawLevels =
+                              activeModelMeta.reasoningLevels &&
+                              activeModelMeta.reasoningLevels.length > 0
+                                ? activeModelMeta.reasoningLevels
+                                : activeModelMeta.capabilities
+                                      ?.reasoningLevels &&
+                                    activeModelMeta.capabilities.reasoningLevels
+                                      .length > 0
+                                  ? activeModelMeta.capabilities.reasoningLevels
+                                  : [];
                             return rawLevels.map((lvl) => {
                               const currentLvl =
                                 getEffectiveModelReasoning(activeModelMeta);
@@ -6122,7 +6220,9 @@ function App() {
                         onClick={() => void startAgent()}
                         disabled={
                           !agentPrompt.trim() ||
-                          (Boolean(usageLimits[selectedModel]?.isLimitReached) &&
+                          (Boolean(
+                            usageLimits[selectedModel]?.isLimitReached,
+                          ) &&
                             !models.some(
                               (m) =>
                                 m.pricingType === "free" &&
@@ -6161,7 +6261,11 @@ function App() {
         <div className="statusbar-left">
           <div className="statusbar-item">
             <GitBranch size={12} />
-            <span>{gitStatus.isRepo && gitStatus.branch ? gitStatus.branch : "No Git Repo"}</span>
+            <span>
+              {gitStatus.isRepo && gitStatus.branch
+                ? gitStatus.branch
+                : "No Git Repo"}
+            </span>
           </div>
           <div className="statusbar-item">
             <Check size={12} color="var(--accent-agent)" />
@@ -6229,7 +6333,9 @@ function App() {
             <div className="model-free-notice">
               <div className="live-pulse-dot" />
               <div className="live-tier-text">
-                <strong>Live Catalog:</strong> {models.length} Models Loaded · {freeCount} Free Tier Available · Last updated {formatTimeAgo(catalogLastUpdated)}
+                <strong>Live Catalog:</strong> {models.length} Models Loaded ·{" "}
+                {freeCount} Free Tier Available · Last updated{" "}
+                {formatTimeAgo(catalogLastUpdated)}
               </div>
               <span className="live-badge">{freeCount} Free Tier</span>
             </div>
@@ -6265,14 +6371,22 @@ function App() {
 
             <div className="model-filter-tabs">
               {[
-                { key: "all", label: `All (${models.length})`, count: models.length },
+                {
+                  key: "all",
+                  label: `All (${models.length})`,
+                  count: models.length,
+                },
                 { key: "free", label: `Free (${freeCount})`, count: freeCount },
                 {
                   key: "reasoning",
                   label: `Reasoning (${reasoningCount})`,
                   count: reasoningCount,
                 },
-                { key: "tools", label: `Tools (${toolCount})`, count: toolCount },
+                {
+                  key: "tools",
+                  label: `Tools (${toolCount})`,
+                  count: toolCount,
+                },
                 ...(visionCount > 0
                   ? [
                       {
@@ -6323,9 +6437,12 @@ function App() {
               {filteredModels.length === 0 ? (
                 <div className="model-picker-empty-state">
                   <div className="empty-icon">🔍</div>
-                  <div className="empty-title">No models match your filters</div>
+                  <div className="empty-title">
+                    No models match your filters
+                  </div>
                   <div className="empty-desc">
-                    Try adjusting your search query or toggling active capability filters.
+                    Try adjusting your search query or toggling active
+                    capability filters.
                   </div>
                   <button
                     className="empty-clear-btn"
@@ -6345,9 +6462,7 @@ function App() {
                         size={11}
                         color="var(--accent-primary, #6366f1)"
                       />
-                      <span>
-                        AVAILABLE MODELS ({filteredModels.length})
-                      </span>
+                      <span>AVAILABLE MODELS ({filteredModels.length})</span>
                     </div>
                     <span className="model-cat-right">
                       VERIFIED LIVE PROVIDER CATALOG
@@ -6385,7 +6500,10 @@ function App() {
                   }
                 }}
               >
-                <RefreshCw size={12} className={refreshingCatalog ? "spin" : ""} />{" "}
+                <RefreshCw
+                  size={12}
+                  className={refreshingCatalog ? "spin" : ""}
+                />{" "}
                 {refreshingCatalog ? "Refreshing..." : "Refresh Catalog"}
               </button>
               <button
@@ -6402,11 +6520,17 @@ function App() {
       {/* SETTINGS MODAL */}
       {settingsOpen && (
         <div className="settings-modal" onClick={() => setSettingsOpen(false)}>
-          <div className="settings-dialog settings-dialog--wide" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="settings-dialog settings-dialog--wide"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Header */}
             <div className="settings-dialog-header">
               <h2>Settings</h2>
-              <button className="settings-close-btn" onClick={() => setSettingsOpen(false)}>
+              <button
+                className="settings-close-btn"
+                onClick={() => setSettingsOpen(false)}
+              >
                 <X size={16} />
               </button>
             </div>
@@ -6430,7 +6554,8 @@ function App() {
                 <div className="settings-field">
                   <label>AI Provider Gateway</label>
                   <div className="settings-static-value">
-                    Experiential Labs (Free Promotional Models &amp; Coding Gateway)
+                    Experiential Labs (Free Promotional Models &amp; Coding
+                    Gateway)
                   </div>
                 </div>
                 <div className="settings-field">
@@ -6457,8 +6582,8 @@ function App() {
                     onChange={(e) => setApiKeyDraft(e.target.value)}
                   />
                   <small style={{ color: "var(--text-dim)" }}>
-                    API keys for Experiential Labs are encrypted securely on disk.
-                    Never exposed to renderer.
+                    API keys for Experiential Labs are encrypted securely on
+                    disk. Never exposed to renderer.
                   </small>
                 </div>
                 {verificationResult && (
@@ -6480,14 +6605,20 @@ function App() {
                 <div className="settings-row">
                   <div className="settings-row-label">
                     <span>Agent Auto-Fix Lints</span>
-                    <small>Automatically retry with a lint-repair prompt after a failed run</small>
+                    <small>
+                      Automatically retry with a lint-repair prompt after a
+                      failed run
+                    </small>
                   </div>
                   <label className="settings-toggle">
                     <input
                       type="checkbox"
                       checked={settings.autoFixLints}
                       onChange={(e) =>
-                        setSettings({ ...settings, autoFixLints: e.target.checked })
+                        setSettings({
+                          ...settings,
+                          autoFixLints: e.target.checked,
+                        })
                       }
                     />
                     <span className="settings-toggle-track" />
@@ -6497,16 +6628,24 @@ function App() {
                 <div className="settings-row">
                   <div className="settings-row-label">
                     <span>Auto Execution</span>
-                    <small>Whether the agent auto-approves tool permission requests</small>
+                    <small>
+                      Whether the agent auto-approves tool permission requests
+                    </small>
                   </div>
                   <div className="settings-segmented">
                     {(["always", "ask", "never"] as const).map((v) => (
                       <button
                         key={v}
                         className={`settings-seg-btn${settings.autoExecution === v ? " settings-seg-btn--active" : ""}`}
-                        onClick={() => setSettings({ ...settings, autoExecution: v })}
+                        onClick={() =>
+                          setSettings({ ...settings, autoExecution: v })
+                        }
                       >
-                        {v === "always" ? "Always Proceed" : v === "ask" ? "Ask" : "Never"}
+                        {v === "always"
+                          ? "Always Proceed"
+                          : v === "ask"
+                            ? "Ask"
+                            : "Never"}
                       </button>
                     ))}
                   </div>
@@ -6515,16 +6654,24 @@ function App() {
                 <div className="settings-row">
                   <div className="settings-row-label">
                     <span>Review Policy</span>
-                    <small>Whether file changes after an agent run are auto-approved</small>
+                    <small>
+                      Whether file changes after an agent run are auto-approved
+                    </small>
                   </div>
                   <div className="settings-segmented">
                     {(["always", "ask", "never"] as const).map((v) => (
                       <button
                         key={v}
                         className={`settings-seg-btn${settings.reviewPolicy === v ? " settings-seg-btn--active" : ""}`}
-                        onClick={() => setSettings({ ...settings, reviewPolicy: v })}
+                        onClick={() =>
+                          setSettings({ ...settings, reviewPolicy: v })
+                        }
                       >
-                        {v === "always" ? "Always Proceed" : v === "ask" ? "Ask" : "Never"}
+                        {v === "always"
+                          ? "Always Proceed"
+                          : v === "ask"
+                            ? "Ask"
+                            : "Never"}
                       </button>
                     ))}
                   </div>
@@ -6536,7 +6683,8 @@ function App() {
             {settingsActiveTab === "Tab" && (
               <div className="settings-tab-content">
                 <p className="settings-section-desc">
-                  Configure inline code suggestions and tab-completion behaviour.
+                  Configure inline code suggestions and tab-completion
+                  behaviour.
                 </p>
 
                 <div className="settings-row">
@@ -6549,7 +6697,10 @@ function App() {
                       type="checkbox"
                       checked={settings.suggestionsInEditor}
                       onChange={(e) =>
-                        setSettings({ ...settings, suggestionsInEditor: e.target.checked })
+                        setSettings({
+                          ...settings,
+                          suggestionsInEditor: e.target.checked,
+                        })
                       }
                     />
                     <span className="settings-toggle-track" />
@@ -6559,14 +6710,19 @@ function App() {
                 <div className="settings-row">
                   <div className="settings-row-label">
                     <span>Gitignore Access</span>
-                    <small>Allow suggestions to reference .gitignore-d paths</small>
+                    <small>
+                      Allow suggestions to reference .gitignore-d paths
+                    </small>
                   </div>
                   <label className="settings-toggle">
                     <input
                       type="checkbox"
                       checked={settings.tabGitignoreAccess}
                       onChange={(e) =>
-                        setSettings({ ...settings, tabGitignoreAccess: e.target.checked })
+                        setSettings({
+                          ...settings,
+                          tabGitignoreAccess: e.target.checked,
+                        })
                       }
                     />
                     <span className="settings-toggle-track" />
@@ -6576,14 +6732,18 @@ function App() {
                 <div className="settings-row">
                   <div className="settings-row-label">
                     <span>Suggestion Speed</span>
-                    <small>Debounce delay before triggering inline suggestions</small>
+                    <small>
+                      Debounce delay before triggering inline suggestions
+                    </small>
                   </div>
                   <div className="settings-segmented">
                     {(["fast", "normal", "slow"] as const).map((v) => (
                       <button
                         key={v}
                         className={`settings-seg-btn${settings.tabSpeed === v ? " settings-seg-btn--active" : ""}`}
-                        onClick={() => setSettings({ ...settings, tabSpeed: v })}
+                        onClick={() =>
+                          setSettings({ ...settings, tabSpeed: v })
+                        }
                       >
                         {v.charAt(0).toUpperCase() + v.slice(1)}
                       </button>
@@ -6594,14 +6754,19 @@ function App() {
                 <div className="settings-row">
                   <div className="settings-row-label">
                     <span>Tab to Import</span>
-                    <small>Auto-add import statement when accepting a suggestion</small>
+                    <small>
+                      Auto-add import statement when accepting a suggestion
+                    </small>
                   </div>
                   <label className="settings-toggle">
                     <input
                       type="checkbox"
                       checked={settings.tabToImport}
                       onChange={(e) =>
-                        setSettings({ ...settings, tabToImport: e.target.checked })
+                        setSettings({
+                          ...settings,
+                          tabToImport: e.target.checked,
+                        })
                       }
                     />
                     <span className="settings-toggle-track" />
@@ -6611,14 +6776,19 @@ function App() {
                 <div className="settings-row">
                   <div className="settings-row-label">
                     <span>Tab to Jump</span>
-                    <small>Jump to next tab stop when accepting a suggestion</small>
+                    <small>
+                      Jump to next tab stop when accepting a suggestion
+                    </small>
                   </div>
                   <label className="settings-toggle">
                     <input
                       type="checkbox"
                       checked={settings.tabToJump}
                       onChange={(e) =>
-                        setSettings({ ...settings, tabToJump: e.target.checked })
+                        setSettings({
+                          ...settings,
+                          tabToJump: e.target.checked,
+                        })
                       }
                     />
                     <span className="settings-toggle-track" />
@@ -6643,7 +6813,9 @@ function App() {
                     onClick={testSelectedModel}
                     disabled={testingModel}
                   >
-                    {testingModel ? "Testing..." : `Test Model (${selectedModel})`}
+                    {testingModel
+                      ? "Testing..."
+                      : `Test Model (${selectedModel})`}
                   </button>
                 </>
               )}
@@ -6661,7 +6833,9 @@ function App() {
                   setApiKeyDraft("");
                   setSettingsOpen(false);
                   if (settingsActiveTab === "Provider") {
-                    const res = await window.g1code.refreshModels(settings.provider);
+                    const res = await window.g1code.refreshModels(
+                      settings.provider,
+                    );
                     if (res.success && res.models) setModels(res.models);
                   }
                 }}
@@ -6672,7 +6846,6 @@ function App() {
           </div>
         </div>
       )}
-
 
       {/* WORKSPACE DIRECTORY MODAL — fallback for browsers without showDirectoryPicker */}
       {workspaceModal && (

@@ -337,9 +337,7 @@ function registerApiBridgeHandlers() {
     api("/api/agent/permission", {
       method: "POST",
       body: JSON.stringify(input),
-    }).catch((err) =>
-      console.error("[IPC] permission:response failed:", err),
-    );
+    }).catch((err) => console.error("[IPC] permission:response failed:", err));
   });
 
   // Git / search / diagnostics

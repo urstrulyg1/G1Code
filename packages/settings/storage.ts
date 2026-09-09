@@ -172,12 +172,22 @@ export async function saveSettings(
     model: String(input.model ?? current.model),
     temperature: Number(input.temperature ?? current.temperature),
     maxTokens: Number(input.maxTokens ?? current.maxTokens),
-    autoExecution: (input.autoExecution ?? current.autoExecution ?? "always") as Settings["autoExecution"],
-    reviewPolicy: (input.reviewPolicy ?? current.reviewPolicy ?? "always") as Settings["reviewPolicy"],
+    autoExecution: (input.autoExecution ??
+      current.autoExecution ??
+      "always") as Settings["autoExecution"],
+    reviewPolicy: (input.reviewPolicy ??
+      current.reviewPolicy ??
+      "always") as Settings["reviewPolicy"],
     autoFixLints: Boolean(input.autoFixLints ?? current.autoFixLints ?? true),
-    suggestionsInEditor: Boolean(input.suggestionsInEditor ?? current.suggestionsInEditor ?? true),
-    tabGitignoreAccess: Boolean(input.tabGitignoreAccess ?? current.tabGitignoreAccess ?? true),
-    tabSpeed: (input.tabSpeed ?? current.tabSpeed ?? "fast") as Settings["tabSpeed"],
+    suggestionsInEditor: Boolean(
+      input.suggestionsInEditor ?? current.suggestionsInEditor ?? true,
+    ),
+    tabGitignoreAccess: Boolean(
+      input.tabGitignoreAccess ?? current.tabGitignoreAccess ?? true,
+    ),
+    tabSpeed: (input.tabSpeed ??
+      current.tabSpeed ??
+      "fast") as Settings["tabSpeed"],
     tabToImport: Boolean(input.tabToImport ?? current.tabToImport ?? true),
     tabToJump: Boolean(input.tabToJump ?? current.tabToJump ?? true),
   };

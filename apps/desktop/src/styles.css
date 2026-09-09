@@ -50,8 +50,10 @@
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
-  --shadow-modal: 0 32px 80px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.06);
-  --shadow-popover: 0 16px 48px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-modal:
+    0 32px 80px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-popover:
+    0 16px 48px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.08);
 
   --font-mono:
     "DM Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -98,8 +100,10 @@
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07);
   --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.09);
-  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.08);
-  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  --shadow-modal:
+    0 24px 60px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  --shadow-popover:
+    0 12px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 
 * {
@@ -537,7 +541,9 @@ button {
   border-bottom: 1px solid var(--border-subtle);
   position: relative;
   background: var(--bg-primary);
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .git-accordion-section.dragging {
@@ -564,7 +570,9 @@ button {
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--text-secondary);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .git-accordion-header:hover {
@@ -634,7 +642,9 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .git-accordion-btn:hover:not(:disabled) {
@@ -808,22 +818,32 @@ button {
 
 /* Antigravity Visual Graph - Premium IDE Experience */
 .antigravity-graph-card {
-  background: linear-gradient(180deg, rgba(20, 25, 38, 0.95) 0%, rgba(14, 18, 28, 0.98) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(20, 25, 38, 0.95) 0%,
+    rgba(14, 18, 28, 0.98) 100%
+  );
   border: 1px solid rgba(56, 189, 248, 0.22);
   border-radius: 9px;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   display: flex;
   flex-direction: column;
   height: 100%;
   flex: 1;
   min-height: 0;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .antigravity-graph-card:hover {
   border-color: rgba(56, 189, 248, 0.38);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4), 0 0 12px rgba(56, 189, 248, 0.1);
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.4),
+    0 0 12px rgba(56, 189, 248, 0.1);
 }
 
 .antigravity-graph-header-bar {
@@ -951,7 +971,11 @@ button {
 .antigravity-rail-line-bottom {
   width: 2px;
   flex: 1;
-  background: linear-gradient(180deg, rgba(56, 189, 248, 0.4) 0%, rgba(99, 102, 241, 0.3) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(56, 189, 248, 0.4) 0%,
+    rgba(99, 102, 241, 0.3) 100%
+  );
 }
 
 .antigravity-rail-line-top.hidden,
@@ -965,7 +989,9 @@ button {
   border-radius: 50%;
   flex-shrink: 0;
   position: relative;
-  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  transition:
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.2s ease;
   z-index: 1;
 }
 
@@ -1111,7 +1137,9 @@ button {
   transition: opacity 0.15s ease;
 }
 
-.antigravity-graph-node-row:hover .antigravity-commit-hash-chip .hash-copy-icon {
+.antigravity-graph-node-row:hover
+  .antigravity-commit-hash-chip
+  .hash-copy-icon {
   opacity: 0.8;
 }
 
@@ -1215,7 +1243,8 @@ button {
 }
 
 .git-tree-ascii {
-  font-family: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
+  font-family:
+    "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
   font-size: 11.5px;
   line-height: 1.68;
   color: #38bdf8;
@@ -2679,8 +2708,12 @@ button {
   color: #ffffff;
 }
 
-[data-theme="light"] .composer-reasoning-inline-btn:hover .composer-reasoning-val,
-[data-theme="light"] .composer-reasoning-inline-btn.active .composer-reasoning-val {
+[data-theme="light"]
+  .composer-reasoning-inline-btn:hover
+  .composer-reasoning-val,
+[data-theme="light"]
+  .composer-reasoning-inline-btn.active
+  .composer-reasoning-val {
   color: #09090b;
 }
 
@@ -2720,7 +2753,10 @@ button {
   flex-shrink: 0;
   line-height: 1;
   opacity: 0.9;
-  transition: opacity 0.15s, transform 0.15s, color 0.15s;
+  transition:
+    opacity 0.15s,
+    transform 0.15s,
+    color 0.15s;
 }
 
 .composer-model-btn:hover .composer-model-free-symbol {
@@ -4222,7 +4258,9 @@ button {
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .settings-tab-btn:hover {
@@ -4333,7 +4371,9 @@ button {
   background: var(--bg-muted);
   border: 1px solid var(--border-medium);
   border-radius: 999px;
-  transition: background 0.2s, border-color 0.2s;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
   position: relative;
   flex-shrink: 0;
 }
@@ -4347,7 +4387,9 @@ button {
   height: 14px;
   background: var(--text-dim);
   border-radius: 50%;
-  transition: transform 0.2s, background 0.2s;
+  transition:
+    transform 0.2s,
+    background 0.2s;
 }
 
 .settings-toggle input:checked + .settings-toggle-track {
@@ -4378,7 +4420,9 @@ button {
   border: none;
   border-right: 1px solid var(--border-medium);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
   white-space: nowrap;
 }
 
@@ -4643,11 +4687,7 @@ button {
 }
 /* User bubble — right-aligned indigo */
 .chat-bubble--user {
-  background: linear-gradient(
-    160deg,
-    var(--accent-primary) 0%,
-    #4752c4 100%
-  );
+  background: linear-gradient(160deg, var(--accent-primary) 0%, #4752c4 100%);
   color: #fff;
   font-size: 13.5px;
   font-weight: 500;
