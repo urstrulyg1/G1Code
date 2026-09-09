@@ -158,6 +158,8 @@ interface Window {
       modifiedFiles: string[];
       recentCommits: string[];
       graph?: string;
+      branches?: string[];
+      antigravityTree?: string;
     }>;
     getProblems(workspace: string): Promise<{
       problems: Array<{

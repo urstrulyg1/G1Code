@@ -1356,25 +1356,97 @@ const server = http.createServer(async (req, res) => {
       const baseline = await captureGitBaseline(workspace).catch(() => null);
       let logOutput = "";
       let graphOutput = "";
+      let branchList: string[] = [];
+      const limitParam = url.searchParams.get("limit");
+      const limit = limitParam ? parseInt(limitParam, 10) : 5000;
+      const logArgs =
+        limit > 0 ? ["log", "-n", String(limit), "--oneline"] : ["log", "--oneline"];
+      const graphArgs =
+        limit > 0
+          ? ["log", "--graph", "--oneline", "-n", String(limit)]
+          : ["log", "--graph", "--oneline"];
+
       try {
-        const [logRes, graphRes] = await Promise.all([
+        const [logRes, graphRes, branchRes] = await Promise.all([
           execFileAsync(
             "git",
-            ["log", "-n", "10", "--oneline"],
-            { cwd: workspace },
+            logArgs,
+            { cwd: workspace, maxBuffer: 20 * 1024 * 1024 },
           ).catch(() => ({ stdout: "" })),
           execFileAsync(
             "git",
-            ["log", "--graph", "--oneline", "-n", "10"],
-            { cwd: workspace },
+            graphArgs,
+            { cwd: workspace, maxBuffer: 20 * 1024 * 1024 },
+          ).catch(() => ({ stdout: "" })),
+          execFileAsync(
+            "git",
+            ["branch", "-a", "--format=%(refname:short)"],
+            { cwd: workspace, maxBuffer: 5 * 1024 * 1024 },
           ).catch(() => ({ stdout: "" })),
         ]);
         logOutput = logRes.stdout;
         graphOutput = graphRes.stdout;
+        branchList = branchRes.stdout
+          .split("\n")
+          .map((b) => b.trim())
+          .filter((b) => b && !b.includes("HEAD") && b !== "origin");
       } catch {
         // Not a git repo or no commits
       }
-      const isRepo = Boolean(baseline && baseline.branch && baseline.branch.trim().length > 0 && baseline.branch !== "unknown");
+
+      const isRepo = Boolean(
+        baseline &&
+          baseline.branch &&
+          baseline.branch.trim().length > 0 &&
+          baseline.branch !== "unknown",
+      );
+
+      // Build Antigravity-style branch tree from real repository data
+      let antigravityTree = "";
+      if (isRepo) {
+        const current = baseline!.branch || "main";
+        const cleanBranches = Array.from(
+          new Set(
+            branchList
+              .map((b) =>
+                b
+                  .replace(/^remotes\/origin\//, "")
+                  .replace(/^origin\//, "")
+                  .trim(),
+              )
+              .filter(
+                (b) =>
+                  b &&
+                  b !== current &&
+                  !b.includes("HEAD") &&
+                  b !== "origin",
+              ),
+          ),
+        );
+
+        const leaves: string[] = [...cleanBranches];
+        if (logOutput) {
+          const commits = logOutput.trim().split("\n").filter(Boolean);
+          for (const c of commits) {
+            const short = c.length > 34 ? c.slice(0, 32) + "..." : c;
+            if (!leaves.includes(short)) {
+              leaves.push(short);
+            }
+          }
+        }
+
+        if (leaves.length > 0) {
+          const lines = [current, " │"];
+          leaves.forEach((leaf, idx) => {
+            const isLast = idx === leaves.length - 1;
+            lines.push(` ${isLast ? "└──" : "├──"} ${leaf}`);
+          });
+          antigravityTree = lines.join("\n");
+        } else {
+          antigravityTree = current;
+        }
+      }
+
       return sendJson(res, 200, {
         isRepo,
         branch: isRepo ? baseline!.branch : "",
@@ -1384,6 +1456,8 @@ const server = http.createServer(async (req, res) => {
         modifiedFiles: baseline?.modifiedFiles ?? [],
         recentCommits: logOutput ? logOutput.trim().split("\n").filter(Boolean) : [],
         graph: graphOutput ? graphOutput.trim() : "",
+        branches: branchList,
+        antigravityTree,
       });
     }
 

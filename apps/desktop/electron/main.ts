@@ -357,7 +357,7 @@ function registerApiBridgeHandlers() {
   );
   ipcMain.handle("git:status", async (_e, ws) =>
     api(
-      `/api/git/status?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}`,
+      `/api/git/status?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}&limit=5000`,
     ),
   );
   ipcMain.handle("problems:get", async (_e, ws) =>

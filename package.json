@@ -7,8 +7,8 @@
   "scripts": {
     "postinstall": "tsx scripts/ensure-electron.ts",
     "preflight:electron": "tsx scripts/preflight-electron.ts",
-    "dev": "concurrently -k -n \"backend,frontend\" -c \"cyan,magenta\" \"tsx server.ts\" \"vite --config apps/desktop/vite.config.ts\"",
-    "dev:ui": "concurrently -k -n \"backend,frontend\" -c \"cyan,magenta\" \"tsx server.ts\" \"vite --config apps/desktop/vite.config.ts\"",
+    "dev": "concurrently -k -n \"backend,frontend\" -c \"cyan,magenta\" \"tsx watch server.ts\" \"vite --config apps/desktop/vite.config.ts\"",
+    "dev:ui": "concurrently -k -n \"backend,frontend\" -c \"cyan,magenta\" \"tsx watch server.ts\" \"vite --config apps/desktop/vite.config.ts\"",
     "server": "tsx server.ts",
     "ui": "bash start-ui.sh",
     "start": "bash start-ui.sh",

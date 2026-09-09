@@ -131,6 +131,8 @@ type GitStatus = {
   modifiedFiles: string[];
   recentCommits: string[];
   graph?: string;
+  branches?: string[];
+  antigravityTree?: string;
 };
 type GitSectionId = "changes" | "graph" | "commits";
 type SearchMatch = {
@@ -483,7 +485,7 @@ function App() {
   // Draggable Tile Layout Dimensions (Antigravity Style)
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = localStorage.getItem("g1code_sidebar_width");
-    return saved ? Math.max(160, Math.min(600, Number(saved))) : 270;
+    return saved ? Math.max(260, Math.min(600, Number(saved))) : 280;
   });
   const [agentWidth, setAgentWidth] = useState(() => {
     const saved = localStorage.getItem("g1code_agent_width");
@@ -532,7 +534,7 @@ function App() {
       const onMouseMove = (ev: MouseEvent) => {
         const delta = ev.clientX - startX;
         const nextW = Math.max(
-          160,
+          260,
           Math.min(window.innerWidth * 0.45, startW + delta),
         );
         setSidebarWidth(Math.round(nextW));
@@ -637,10 +639,25 @@ function App() {
     modifiedFiles: [],
     recentCommits: [],
     graph: "",
+    branches: [],
+    antigravityTree: "",
   });
   const [commitMessage, setCommitMessage] = useState("");
   const [generatingCommit, setGeneratingCommit] = useState(false);
   const [committing, setCommitting] = useState(false);
+  const [graphMode, setGraphMode] = useState<"tree" | "commits">("tree");
+  const [copiedCommitHash, setCopiedCommitHash] = useState<string | null>(null);
+  const [visibleCommitCount, setVisibleCommitCount] = useState<number>(100);
+
+  const copyCommitHash = (hash: string) => {
+    try {
+      void navigator.clipboard.writeText(hash);
+      setCopiedCommitHash(hash);
+      setTimeout(() => setCopiedCommitHash(null), 1400);
+    } catch {
+      // ignore
+    }
+  };
 
   // Movable & Resizable Git Sidebar Sections
   const [gitSectionOrder, setGitSectionOrder] = useState<GitSectionId[]>(() => {
@@ -1362,7 +1379,49 @@ function App() {
     try {
       if (window.g1code.getGitStatus) {
         const gitData = await window.g1code.getGitStatus(wsPath);
-        setGitStatus(gitData);
+        if (gitData) {
+          if (!gitData.antigravityTree && gitData.branch) {
+            const current = gitData.branch;
+            const otherBranches = Array.from(
+              new Set(
+                (gitData.branches || [])
+                  .map((b) =>
+                    b
+                      .replace(/^remotes\/origin\//, "")
+                      .replace(/^origin\//, "")
+                      .trim(),
+                  )
+                  .filter(
+                    (b) =>
+                      b &&
+                      b !== current &&
+                      !b.includes("HEAD") &&
+                      b !== "origin",
+                  ),
+              ),
+            ).slice(0, 2);
+            const commits = Array.isArray(gitData.recentCommits)
+              ? gitData.recentCommits
+              : [];
+            const leaves: string[] = [...otherBranches];
+            for (const c of commits) {
+              const short = c.length > 34 ? c.slice(0, 32) + "..." : c;
+              if (!leaves.includes(short)) {
+                leaves.push(short);
+              }
+            }
+            if (leaves.length > 0) {
+              const lines = [current, " │"];
+              leaves.forEach((l, idx) => {
+                lines.push(` ${idx === leaves.length - 1 ? "└──" : "├──"} ${l}`);
+              });
+              gitData.antigravityTree = lines.join("\n");
+            } else {
+              gitData.antigravityTree = current;
+            }
+          }
+          setGitStatus(gitData);
+        }
       }
       if (window.g1code.getProblems) {
         const probData = await window.g1code.getProblems(wsPath);
@@ -2226,18 +2285,347 @@ function App() {
       );
     } else if (id === "graph") {
       title = "Graph";
+      const currentBranch = gitStatus.branch || "main";
+      const commits = gitStatus.recentCommits || [];
+      const cleanBranches = Array.from(
+        new Set(
+          (gitStatus.branches || [])
+            .map((b) =>
+              b
+                .replace(/^remotes\/origin\//, "")
+                .replace(/^origin\//, "")
+                .trim(),
+            )
+            .filter(
+              (b) =>
+                b &&
+                b !== currentBranch &&
+                !b.includes("HEAD") &&
+                b !== "origin",
+            ),
+        ),
+      ).slice(0, 3);
+
+      const parseCommitItem = (line: string) => {
+        const clean = line.replace(/^[*|/\\_ \t-]+/, "").trim();
+        const hashMatch = clean.match(/^([a-f0-9]{7,40})\s+(.*)$/i);
+        const hash = hashMatch ? hashMatch[1] : clean.slice(0, 7);
+        const rawMsg = hashMatch ? hashMatch[2] : clean.slice(8).trim();
+        const convMatch = rawMsg.match(
+          /^(feat|fix|refactor|style|test|docs|chore|perf|build|ci)(?:\(([^)]+)\))?:\s*(.*)$/i,
+        );
+        return {
+          hash,
+          rawMsg,
+          type: convMatch ? convMatch[1].toLowerCase() : null,
+          scope: convMatch ? convMatch[2] : null,
+          subject: convMatch ? convMatch[3] : rawMsg,
+        };
+      };
+
+      const displayedCommits = commits.slice(0, visibleCommitCount);
+
       content = (
-        <div className="git-section-inner" style={{ padding: "8px 12px" }}>
+        <div
+          className="git-section-inner"
+          style={{
+            padding: "6px 10px",
+            height: "100%",
+            boxSizing: "border-box",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           {gitStatus.isRepo === false && !gitStatus.branch ? (
             <div className="git-empty-hint">Git repository unavailable.</div>
-          ) : gitStatus.graph ? (
-            <pre className="git-tree-ascii">{gitStatus.graph}</pre>
-          ) : gitStatus.recentCommits?.length > 0 ? (
-            <pre className="git-tree-ascii">
-              {gitStatus.recentCommits.map((c) => `* ${c}`).join("\n")}
-            </pre>
+          ) : !gitStatus.branch && commits.length === 0 ? (
+            <div className="git-empty-hint">No branch or commits detected.</div>
           ) : (
-            <div className="git-empty-hint">No commits on current branch.</div>
+            <div className="antigravity-graph-card">
+              <div className="antigravity-graph-header-bar">
+                <div className="antigravity-graph-modes">
+                  <button
+                    type="button"
+                    className={`antigravity-graph-mode-btn ${graphMode === "tree" ? "active" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setGraphMode("tree");
+                    }}
+                    title="Visual Branch Tree"
+                  >
+                    <GitBranch size={10} />
+                    <span>Tree</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`antigravity-graph-mode-btn ${graphMode === "commits" ? "active" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setGraphMode("commits");
+                    }}
+                    title="Commit DAG Timeline"
+                  >
+                    <GitFork size={10} />
+                    <span>DAG</span>
+                  </button>
+                </div>
+                <div
+                  className="antigravity-graph-stats-chip"
+                  title={`${commits.length} total commits in repository`}
+                >
+                  <GitCommit size={10} color="#38bdf8" />
+                  <span>
+                    {visibleCommitCount < commits.length
+                      ? `${Math.min(visibleCommitCount, commits.length)} / ${commits.length} commits`
+                      : `${commits.length} commits`}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                className="antigravity-graph-tree-body"
+                onScroll={(e) => {
+                  const target = e.currentTarget;
+                  if (
+                    target.scrollTop + target.clientHeight >=
+                    target.scrollHeight - 80
+                  ) {
+                    if (visibleCommitCount < commits.length) {
+                      setVisibleCommitCount((prev) =>
+                        Math.min(prev + 50, commits.length),
+                      );
+                    }
+                  }
+                }}
+              >
+                {graphMode === "tree" ? (
+                  <>
+                    {/* Active Branch Root (HEAD) */}
+                    <div className="antigravity-graph-node-row">
+                      <div className="antigravity-rail-col">
+                        <div className="antigravity-rail-line-top hidden" />
+                        <div className="antigravity-node-dot head">
+                          <span className="antigravity-node-pulse" />
+                        </div>
+                        <div
+                          className={`antigravity-rail-line-bottom ${cleanBranches.length === 0 && displayedCommits.length === 0 ? "hidden" : ""}`}
+                        />
+                      </div>
+                      <div className="antigravity-node-content">
+                        <div className="antigravity-head-pill">
+                          <GitBranch size={11} />
+                          <span>{currentBranch}</span>
+                          <span className="antigravity-head-badge">HEAD</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Other Branches in Repository */}
+                    {cleanBranches.map((b, idx) => {
+                      const isLastItem =
+                        displayedCommits.length === 0 &&
+                        idx === cleanBranches.length - 1;
+                      return (
+                        <div
+                          className="antigravity-graph-node-row"
+                          key={`branch-${b}`}
+                        >
+                          <div className="antigravity-rail-col">
+                            <div className="antigravity-rail-line-top" />
+                            <div className="antigravity-node-dot branch" />
+                            <div
+                              className={`antigravity-rail-line-bottom ${isLastItem ? "hidden" : ""}`}
+                            />
+                          </div>
+                          <div className="antigravity-node-content">
+                            <div className="antigravity-branch-pill">
+                              <GitBranch size={10} />
+                              <span
+                                className="antigravity-branch-name"
+                                title={b}
+                              >
+                                {b}
+                              </span>
+                              <span className="antigravity-branch-tag">
+                                remote
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* All Commits connected to branch */}
+                    {displayedCommits.map((rawCommit, idx) => {
+                      const isLast =
+                        idx === displayedCommits.length - 1 &&
+                        visibleCommitCount >= commits.length;
+                      const parsed = parseCommitItem(rawCommit);
+                      return (
+                        <div
+                          className="antigravity-graph-node-row"
+                          key={`commit-${parsed.hash}-${idx}`}
+                        >
+                          <div className="antigravity-rail-col">
+                            <div className="antigravity-rail-line-top" />
+                            <div className="antigravity-node-dot commit" />
+                            <div
+                              className={`antigravity-rail-line-bottom ${isLast ? "hidden" : ""}`}
+                            />
+                          </div>
+                          <div className="antigravity-node-content">
+                            <div className="antigravity-commit-row-inner">
+                              <button
+                                type="button"
+                                className="antigravity-commit-hash-chip"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  copyCommitHash(parsed.hash);
+                                }}
+                                title="Click to copy commit hash"
+                              >
+                                <span>{parsed.hash}</span>
+                                {copiedCommitHash === parsed.hash ? (
+                                  <Check size={9} color="#10b981" />
+                                ) : (
+                                  <Copy
+                                    size={9}
+                                    className="hash-copy-icon"
+                                  />
+                                )}
+                              </button>
+                              {parsed.type ? (
+                                <span
+                                  className={`antigravity-type-pill tag-${parsed.type}`}
+                                >
+                                  {parsed.type}
+                                </span>
+                              ) : null}
+                              <span
+                                className="antigravity-commit-subject"
+                                title={parsed.rawMsg}
+                              >
+                                {parsed.subject}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : (
+                  /* Commit DAG Timeline View - All Commits */
+                  displayedCommits.map((rawCommit, idx) => {
+                    const isFirst = idx === 0;
+                    const isLast =
+                      idx === displayedCommits.length - 1 &&
+                      visibleCommitCount >= commits.length;
+                    const parsed = parseCommitItem(rawCommit);
+                    return (
+                      <div
+                        className="antigravity-graph-node-row"
+                        key={`dag-${parsed.hash}-${idx}`}
+                      >
+                        <div className="antigravity-rail-col">
+                          <div
+                            className={`antigravity-rail-line-top ${isFirst ? "hidden" : ""}`}
+                          />
+                          <div
+                            className={`antigravity-node-dot ${isFirst ? "head" : "commit"}`}
+                          >
+                            {isFirst ? (
+                              <span className="antigravity-node-pulse" />
+                            ) : null}
+                          </div>
+                          <div
+                            className={`antigravity-rail-line-bottom ${isLast ? "hidden" : ""}`}
+                          />
+                        </div>
+                        <div className="antigravity-node-content">
+                          <div className="antigravity-commit-row-inner">
+                            <button
+                              type="button"
+                              className="antigravity-commit-hash-chip"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyCommitHash(parsed.hash);
+                              }}
+                              title="Click to copy commit hash"
+                            >
+                              <span>{parsed.hash}</span>
+                              {copiedCommitHash === parsed.hash ? (
+                                <Check size={9} color="#10b981" />
+                              ) : (
+                                <Copy
+                                  size={9}
+                                  className="hash-copy-icon"
+                                />
+                              )}
+                            </button>
+                            {isFirst ? (
+                              <span
+                                className="antigravity-head-badge"
+                                style={{
+                                  fontSize: "8.5px",
+                                  padding: "1px 4px",
+                                }}
+                              >
+                                HEAD
+                              </span>
+                            ) : null}
+                            {parsed.type ? (
+                              <span
+                                className={`antigravity-type-pill tag-${parsed.type}`}
+                              >
+                                {parsed.type}
+                              </span>
+                            ) : null}
+                            <span
+                              className="antigravity-commit-subject"
+                              title={parsed.rawMsg}
+                            >
+                              {parsed.subject}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+
+                {/* Pagination Controls for Large Histories (e.g. 2000+ commits) */}
+                {visibleCommitCount < commits.length && (
+                  <div className="antigravity-graph-load-more">
+                    <button
+                      type="button"
+                      className="antigravity-load-more-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setVisibleCommitCount((prev) =>
+                          Math.min(prev + 100, commits.length),
+                        );
+                      }}
+                      title="Load next 100 commits"
+                    >
+                      Load More (
+                      {Math.min(visibleCommitCount, commits.length)} of{" "}
+                      {commits.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="antigravity-load-all-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setVisibleCommitCount(commits.length);
+                      }}
+                      title="Load all commits"
+                    >
+                      Load All ({commits.length})
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       );
@@ -2290,6 +2678,22 @@ function App() {
             className="git-accordion-actions"
             onClick={(e) => e.stopPropagation()}
           >
+            {id === "graph" && (
+              <button
+                className={`git-accordion-btn ${graphMode === "commits" ? "active" : ""}`}
+                onClick={() =>
+                  setGraphMode((prev) => (prev === "tree" ? "commits" : "tree"))
+                }
+                title={
+                  graphMode === "tree"
+                    ? "Toggle commit DAG view"
+                    : "Toggle Antigravity branch tree"
+                }
+                aria-label="Toggle git graph mode"
+              >
+                <GitFork size={11} />
+              </button>
+            )}
             <button
               className="git-accordion-btn"
               onClick={(e) => moveGitSection(id, "up", e)}
@@ -3064,7 +3468,7 @@ function App() {
           <div
             className={`tile-resizer-vertical ${resizingPane === "sidebar" ? "resizing" : ""}`}
             onMouseDown={startResizingSidebar}
-            onDoubleClick={() => setSidebarWidth(270)}
+            onDoubleClick={() => setSidebarWidth(280)}
             title="Drag to resize sidebar (Double-click to reset)"
           />
         )}
@@ -5538,7 +5942,7 @@ function App() {
                           aria-expanded={composerReasoningOpen}
                         >
                           <span className="composer-reasoning-val">
-                            Reasoning: {formatReasoningLevelName(
+                            {formatReasoningLevelName(
                               getEffectiveModelReasoning(activeModelMeta),
                             )}
                           </span>
@@ -5646,13 +6050,6 @@ function App() {
                         </div>
                       )}
                     </div>
-
-                    <span
-                      className="composer-tools-indicator"
-                      title={activeModelMeta.supportsTools ? "Agent tools enabled" : "No tool support"}
-                    >
-                      Tools {activeModelMeta.supportsTools ? "✓" : "—"}
-                    </span>
                   </div>
 
                   <div className="composer-toolbar-right">

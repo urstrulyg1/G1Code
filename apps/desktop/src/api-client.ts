@@ -359,7 +359,7 @@ if (typeof window !== "undefined" && !window.g1code) {
     // Extended IDE capabilities
     async getGitStatus(workspace: string) {
       return apiRequest(
-        `/api/git/status?workspace=${encodeURIComponent(workspace)}`,
+        `/api/git/status?workspace=${encodeURIComponent(workspace)}&limit=5000`,
       );
     },
 
