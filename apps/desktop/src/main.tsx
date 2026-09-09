@@ -4948,7 +4948,7 @@ function App() {
                       onClick={() => setShowContextPicker(!showContextPicker)}
                       title="Add Context (+)"
                     >
-                      <Plus size={15} />
+                      <Plus size={14} />
                     </button>
 
                     <div style={{ position: "relative" }}>
@@ -4959,7 +4959,7 @@ function App() {
                         <span style={{ textTransform: "capitalize" }}>
                           {agentMode}
                         </span>
-                        <ChevronDown size={11} />
+                        <ChevronDown size={10} />
                       </button>
                       {modeMenuOpen && (
                         <div
@@ -5036,7 +5036,7 @@ function App() {
                               getEffectiveModelReasoning(activeModelMeta),
                             )}
                           </span>
-                          <ChevronUp size={11} className="composer-reasoning-chevron" />
+                          <ChevronUp size={10} className="composer-reasoning-chevron" />
                         </button>
                       ) : (
                         <button
@@ -5045,7 +5045,7 @@ function App() {
                           onClick={() => setModelPickerOpen(true)}
                           title="Select AI Model"
                         >
-                          <ChevronUp size={11} />
+                          <ChevronUp size={10} />
                         </button>
                       )}
 
@@ -5142,7 +5142,7 @@ function App() {
 
                   <div className="composer-toolbar-right">
                     <button className="composer-icon-btn" title="Voice Input">
-                      <Mic size={15} />
+                      <Mic size={14} />
                     </button>
 
                     {/* Submit or Stop Button */}
@@ -5154,7 +5154,7 @@ function App() {
                         }}
                         title="Stop Agent"
                       >
-                        <Square size={11} fill="currentColor" stroke="none" />
+                        <Square size={10} fill="currentColor" stroke="none" />
                       </button>
                     ) : (
                       <button
@@ -5185,7 +5185,7 @@ function App() {
                             : "Send Prompt (Enter)"
                         }
                       >
-                        <ArrowRight size={15} />
+                        <ArrowRight size={14} />
                       </button>
                     )}
                   </div>
