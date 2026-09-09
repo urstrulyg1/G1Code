@@ -883,7 +883,7 @@ button {
 
 /* 4. Right-Side Agent Workspace (Primary Hero Panel) */
 .agent-workspace {
-  min-width: 280px;
+  min-width: 320px;
   max-width: 75vw;
   background: var(--bg-agent);
   border-left: 1px solid var(--border-subtle);
@@ -1715,7 +1715,7 @@ button {
 
 /* Agent Bottom Command Surface */
 .agent-composer {
-  padding: 14px;
+  padding: 10px 12px 12px 12px;
   background: var(--bg-agent);
   border-top: 1px solid var(--border-subtle);
   display: flex;
@@ -1727,8 +1727,8 @@ button {
 .composer-box {
   background: #18191d;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 12px 14px 10px 14px;
+  border-radius: 10px;
+  padding: 10px 12px 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1799,24 +1799,28 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   padding-top: 4px;
   border-top: none;
   min-width: 0;
+  width: 100%;
+  flex-wrap: nowrap;
 }
 
 .composer-toolbar-left {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 5px;
+  flex-wrap: nowrap;
   min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .composer-toolbar-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -1830,8 +1834,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 25px;
-  height: 25px;
+  width: 24px;
+  height: 24px;
   box-sizing: border-box;
   cursor: pointer;
   transition: all 0.15s;
@@ -1853,12 +1857,13 @@ button {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 0 7px;
-  height: 25px;
+  height: 24px;
   box-sizing: border-box;
   border-radius: 5px;
   cursor: pointer;
   transition: all 0.15s;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .mode-selector-btn:hover {
@@ -1871,14 +1876,16 @@ button {
 .composer-model-pill {
   display: inline-flex;
   align-items: center;
-  height: 25px;
+  height: 24px;
   box-sizing: border-box;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 5px;
   transition: all 0.15s ease;
   min-width: 0;
-  max-width: 320px;
+  max-width: 100%;
+  flex: 0 1 auto;
+  overflow: hidden;
 }
 
 .composer-model-pill:hover {
@@ -1892,13 +1899,15 @@ button {
   gap: 4px;
   background: transparent;
   border: none;
-  padding: 0 3px 0 7px;
+  padding: 0 4px 0 7px;
   height: 100%;
   color: #f4f4f5;
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
   transition: color 0.15s;
 }
 
@@ -1911,15 +1920,16 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex-shrink: 1;
 }
 
 .composer-reasoning-inline-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   background: transparent;
   border: none;
-  padding: 0 7px 0 2px;
+  padding: 0 6px 0 2px;
   height: 100%;
   color: #a1a1aa;
   font-size: 10.5px;
@@ -1928,6 +1938,7 @@ button {
   transition: color 0.15s;
   user-select: none;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .composer-reasoning-inline-btn:hover,
@@ -2006,8 +2017,8 @@ button {
 
 /* Stop Agent Button (Red square - matches reference UI) */
 .btn-stop-agent {
-  width: 25px;
-  height: 25px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2027,8 +2038,8 @@ button {
 
 /* Send Agent Button */
 .btn-send-agent {
-  width: 25px;
-  height: 25px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2994,87 +3005,15 @@ button {
 .composer-reasoning-popover {
   top: auto;
   bottom: calc(100% + 6px);
-  right: 0;
-  left: auto;
+  left: 0;
+  right: auto;
   max-width: min(280px, 90vw);
 }
 
-/* ── Responsive Composer Toolbar: Container Queries & Fallbacks ─────── */
-@container composer (max-width: 550px) {
-  .composer-reasoning-prefix {
+/* ── Responsive Composer Toolbar (Antigravity Minimalist Style) ─────── */
+@container composer (max-width: 280px) {
+  .model-promo-badge.mini {
     display: none;
-  }
-  .composer-toolbar-right {
-    gap: 6px;
-  }
-  .model-selector-btn {
-    max-width: 180px;
-  }
-}
-
-@container composer (max-width: 440px) {
-  .composer-toolbar {
-    row-gap: 8px;
-  }
-  .composer-toolbar-left {
-    width: 100%;
-    justify-content: flex-start;
-  }
-  .composer-toolbar-right {
-    width: 100%;
-    justify-content: space-between;
-    margin-left: 0;
-  }
-  .model-selector-btn {
-    max-width: none;
-    flex: 1 1 auto;
-    align-items: flex-start;
-    text-align: left;
-    padding: 2px 8px;
-  }
-  .model-selector-name {
-    justify-content: flex-start;
-  }
-}
-
-@container composer (max-width: 320px) {
-  .model-selector-provider {
-    display: none;
-  }
-  .composer-reasoning-btn {
-    padding: 0 6px;
-    gap: 3px;
-  }
-}
-
-/* Fallback Media Queries for window resizes */
-@media (max-width: 580px) {
-  .composer-reasoning-prefix {
-    display: none;
-  }
-}
-
-@media (max-width: 440px) {
-  .composer-toolbar {
-    row-gap: 8px;
-  }
-  .composer-toolbar-left {
-    width: 100%;
-    justify-content: flex-start;
-  }
-  .composer-toolbar-right {
-    width: 100%;
-    justify-content: space-between;
-    margin-left: 0;
-  }
-  .model-selector-btn {
-    max-width: none;
-    flex: 1 1 auto;
-    align-items: flex-start;
-    text-align: left;
-  }
-  .model-selector-name {
-    justify-content: flex-start;
   }
 }
 

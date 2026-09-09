@@ -459,7 +459,7 @@ function App() {
   });
   const [agentWidth, setAgentWidth] = useState(() => {
     const saved = localStorage.getItem("g1code_agent_width");
-    return saved ? Math.max(280, Math.min(900, Number(saved))) : 410;
+    return saved ? Math.max(320, Math.min(900, Number(saved))) : 410;
   });
   const [drawerHeight, setDrawerHeight] = useState(() => {
     const saved = localStorage.getItem("g1code_drawer_height");
@@ -533,7 +533,7 @@ function App() {
       const onMouseMove = (ev: MouseEvent) => {
         const delta = startX - ev.clientX; // dragging left expands width
         const nextW = Math.max(
-          280,
+          320,
           Math.min(window.innerWidth * 0.65, startW + delta),
         );
         setAgentWidth(Math.round(nextW));
@@ -2985,7 +2985,7 @@ function App() {
         {showAgentWorkspace && (
           <aside
             className="agent-workspace"
-            style={{ width: `${agentWidth}px` }}
+            style={{ width: `${agentWidth}px`, minWidth: 320 }}
           >
             {/* Header */}
             <div className="agent-header">
@@ -4964,7 +4964,12 @@ function App() {
                       {modeMenuOpen && (
                         <div
                           className="autocomplete-popover"
-                          style={{ width: 130, bottom: "100%" }}
+                          style={{
+                            width: 130,
+                            bottom: "calc(100% + 6px)",
+                            left: 0,
+                            right: "auto",
+                          }}
                         >
                           {(
                             [
