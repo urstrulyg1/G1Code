@@ -70,14 +70,45 @@ export const workspaceTools = (): AgentTool[] => [
         startLine?: number;
         endLine?: number;
       };
+      if (typeof data?.path !== "string") {
+        throw new TypeError("The 'path' argument must be a string.");
+      }
       const file = await safeRealPath(context.workspace, data.path);
-      const stat = await fs.stat(file);
+      let stat: any;
+      try {
+        stat = await fs.stat(file);
+      } catch (err: any) {
+        if (err.code === "ENOENT") {
+          return {
+            content: `File not found: "${data.path}". Check directory contents with list_directory or search with search_files to find the exact path.`,
+            isError: true,
+          };
+        }
+        return {
+          content: `Failed to access file "${data.path}": ${err.message}`,
+          isError: true,
+        };
+      }
+      if (stat.isDirectory()) {
+        return {
+          content: `"${data.path}" is a directory, not a file. Use list_directory to inspect its contents.`,
+          isError: true,
+        };
+      }
       if (stat.size > 2_000_000 && data.startLine === undefined)
         return {
           content: `File is too large (${stat.size} bytes); provide startLine and endLine.`,
           isError: true,
         };
-      const full = await fs.readFile(file, "utf8");
+      let full: string;
+      try {
+        full = await fs.readFile(file, "utf8");
+      } catch (err: any) {
+        return {
+          content: `Failed to read file "${data.path}": ${err.message}`,
+          isError: true,
+        };
+      }
       const lines = full.split(/\r?\n/);
       const start = Math.max(1, data.startLine ?? 1);
       const end = Math.min(lines.length, data.endLine ?? lines.length);
@@ -103,11 +134,27 @@ export const workspaceTools = (): AgentTool[] => [
     permission: "safe",
     inputSchema: input({ path: { type: "string" } }),
     execute: async (value, context) => {
-      const directory = await safeRealPath(
-        context.workspace,
-        String((value as { path: string }).path ?? "."),
-      );
-      const entries = await fs.readdir(directory, { withFileTypes: true });
+      let directory: string;
+      try {
+        directory = await safeRealPath(
+          context.workspace,
+          String((value as { path: string }).path ?? "."),
+        );
+      } catch (err) {
+        return {
+          content: `Path error: ${err instanceof Error ? err.message : String(err)}`,
+          isError: true,
+        };
+      }
+      let entries: any[];
+      try {
+        entries = await fs.readdir(directory, { withFileTypes: true });
+      } catch (err: any) {
+        return {
+          content: `Failed to list directory: ${err.message}`,
+          isError: true,
+        };
+      }
       const IGNORE = new Set([
         "node_modules",
         ".git",

@@ -56,17 +56,25 @@ export type ChangeApprovalResult = {
   status: "APPLIED" | "REJECTED" | "CONFLICT";
   message: string;
 };
-const BASE_SYSTEM = `You are G1Code Agent, an elite autonomous coding assistant embedded in an AI IDE (Antigravity-style). You are given direct access to the user's local workspace via tools.
+const BASE_SYSTEM = `You are G1Code Agent, an elite autonomous coding assistant embedded in an AI IDE (Antigravity-style). You have direct access to the user's local workspace via tools to investigate, edit, test, and deliver working solutions.
 
-## Core Rules
-- ALWAYS inspect files before editing them (use read_file or list_directory first).
-- Prefer apply_patch for targeted edits; use write_file only for new files or full rewrites.
-- After making changes, verify with run_command (run tests or a lint check) when relevant.
-- Never claim a tool ran unless its result was actually returned to you.
-- Work only inside the supplied workspace path. Never access paths outside it.
-- Be concise in your reasoning — show work through tool calls, not long explanations.
-- If you encounter an error, diagnose it from the tool output and retry with a fix.
-- On completion, summarise what you changed and why.
+## Core Execution Discipline (Antigravity Standard)
+1. **Targeted Investigation Over Unbounded Browsing**:
+   - Inspect ONLY the 1–3 files directly relevant to the user's request.
+   - Use 'get_project_info' or 'search_files' with specific keywords to locate target files immediately.
+   - DO NOT browse or read dozens of files in an open-ended loop without taking action.
+2. **Action-Oriented Workflow**:
+   - Move swiftly from reading to acting. Once you understand the relevant code, formulate your changes and apply them with 'apply_patch' (for targeted edits) or 'write_file' (for new files).
+   - If a prompt is broad (e.g., "fix all bugs/gaps"), identify the most critical issues, fix them decisively, verify with tests/lint, and report. Do not explore endlessly without making changes.
+3. **Resilient Path Resolution**:
+   - Always verify exact file paths and casing before reading. Check 'package.json' or use 'search_files' if you are unsure of where a configuration or source file lives.
+   - If 'read_file' returns "File not found", do NOT repeatedly guess paths. Use 'search_files' with the basename or 'list_directory' to find the exact location in one step.
+4. **Verification & Completion**:
+   - After applying edits, always verify your changes using 'run_command' (e.g., npm test, tsc, or lint checks) or 'run_tests'.
+   - When verified, STOP calling tools and provide a clear, concise final summary of:
+     * Files modified
+     * Problems identified and resolved
+     * Test / verification results
 
 ## Available Tools
 - read_file — Read any file (with optional line range)
@@ -146,9 +154,9 @@ export class AgentRuntime {
       input: unknown,
     ) => Promise<boolean>,
     private readonly limits = {
-      maxIterations: 30,
-      maxToolCalls: 100,
-      maxExecutionTime: 15 * 60_000,
+      maxIterations: 50,
+      maxToolCalls: 150,
+      maxExecutionTime: 20 * 60_000,
       maxRepairAttempts: 5,
     },
     private readonly sessionId = "",
@@ -277,10 +285,10 @@ export class AgentRuntime {
         Date.now() - started > this.limits.maxExecutionTime ||
         this.toolCalls >= this.limits.maxToolCalls
       ) {
-        this.transition("FAILED", "Agent execution limit reached");
+        this.transition("FAILED", "Task execution budget reached");
         this.event({
           type: "error",
-          message: "Agent execution limit reached. The agent stopped safely.",
+          message: `The agent reached the safety budget for this task (${this.toolCalls} tool calls). You can prompt it to continue from where it left off.`,
         });
         return;
       }
@@ -523,10 +531,10 @@ export class AgentRuntime {
         }
       }
     }
-    this.transition("FAILED", "Maximum repair iterations reached");
+    this.transition("FAILED", "Iteration budget reached");
     this.event({
       type: "error",
-      message: "The agent stopped safely after reaching its iteration limit.",
+      message: `The agent completed its allotted execution turns (${this.limits.maxIterations} iterations). You can prompt it to continue with the next step.`,
     });
   }
 }
