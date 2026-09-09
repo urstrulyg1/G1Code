@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { AIProvider, ChatMessage, ToolCall, ToolDefinition } from "../ai/types";
 import { globalModelCatalog } from "../ai/models";
 import { AgentTool, ToolContext, ToolRegistry } from "../tools/types";
+import { redactObject, redactSecrets } from "../security/redaction";
 
 export type AgentState =
   | "IDLE"
@@ -27,7 +28,15 @@ export type AgentEvent = {
   id: string;
   sessionId: string;
   at: string;
-  type: "state" | "text" | "tool" | "approval" | "error" | "done" | "command";
+  type:
+    | "state"
+    | "text"
+    | "tool"
+    | "approval"
+    | "error"
+    | "done"
+    | "command"
+    | "notice";
   state?: AgentState;
   message?: string;
   detail?: string;
@@ -35,6 +44,12 @@ export type AgentEvent = {
   toolName?: string;
   input?: unknown;
   result?: unknown;
+  command?: string;
+  action?: string;
+  stream?: "stdout" | "stderr";
+  chunk?: string;
+  exitCode?: number;
+  duration?: number;
 };
 export type ChangeApprovalResult = {
   approved: boolean;
@@ -65,24 +80,54 @@ const BASE_SYSTEM = `You are G1Code Agent, an elite autonomous coding assistant 
 - get_git_status — Complete git context (branch, modified files, recent commits)
 - git_status / git_diff / git_branch / git_log — Read-only git information`;
 
-async function buildSystemPrompt(workspace: string, mode: string): Promise<string> {
-  const lines: string[] = [BASE_SYSTEM, "", `## Session Context`, `- Workspace: ${workspace}`, `- Mode: ${mode}`];
+async function buildSystemPrompt(
+  workspace: string,
+  mode: string,
+): Promise<string> {
+  const lines: string[] = [
+    BASE_SYSTEM,
+    "",
+    `## Session Context`,
+    `- Workspace: ${workspace}`,
+    `- Mode: ${mode}`,
+  ];
   // Inject package.json project info if available
   try {
     const { promises: fs } = await import("node:fs");
-    const pkgRaw = await fs.readFile(`${workspace}/package.json`, "utf8").catch(() => null);
+    const pkgRaw = await fs
+      .readFile(`${workspace}/package.json`, "utf8")
+      .catch(() => null);
     if (pkgRaw) {
-      const pkg = JSON.parse(pkgRaw) as { name?: string; description?: string; scripts?: Record<string, string> };
-      if (pkg.name) lines.push(`- Project: ${pkg.name}${pkg.description ? ` — ${pkg.description}` : ""}`);
+      const pkg = JSON.parse(pkgRaw) as {
+        name?: string;
+        description?: string;
+        scripts?: Record<string, string>;
+      };
+      if (pkg.name)
+        lines.push(
+          `- Project: ${pkg.name}${pkg.description ? ` — ${pkg.description}` : ""}`,
+        );
       if (pkg.scripts && Object.keys(pkg.scripts).length > 0) {
-        const scriptList = Object.entries(pkg.scripts).slice(0, 8).map(([k, v]) => `  • npm run ${k}`).join("\n");
+        const scriptList = Object.entries(pkg.scripts)
+          .slice(0, 8)
+          .map(([k, v]) => `  • npm run ${k}`)
+          .join("\n");
         lines.push(`- Available scripts:\n${scriptList}`);
       }
     }
-  } catch { /* ignore */ }
-  if (mode === "ask") lines.push("- Instruction: CHAT ONLY — do not use tools.");
-  else if (mode === "plan") lines.push("- Instruction: INSPECT ONLY — list_directory and read_file are allowed; do NOT write or run commands.");
-  else lines.push("- Instruction: Full autonomous agent — inspect, edit, and verify as needed.");
+  } catch {
+    /* ignore */
+  }
+  if (mode === "ask")
+    lines.push("- Instruction: CHAT ONLY — do not use tools.");
+  else if (mode === "plan")
+    lines.push(
+      "- Instruction: INSPECT ONLY — list_directory and read_file are allowed; do NOT write or run commands.",
+    );
+  else
+    lines.push(
+      "- Instruction: Full autonomous agent — inspect, edit, and verify as needed.",
+    );
   return lines.join("\n");
 }
 
@@ -293,9 +338,12 @@ export class AgentRuntime {
               restrictedModels,
             );
             if (nextBest && nextBest.id !== activeModel) {
+              // Emit as a dedicated notice (NOT a text chunk) so the UI can render
+              // it as a system banner without swallowing the following reply.
               this.event({
-                type: "text",
-                message: `\n[Failover] Model "${activeModel}" encountered an issue (${errorMsg.slice(0, 100)}). Automatically switching to next best available free model: "${nextBest.name || nextBest.id}" (${nextBest.id})...\n`,
+                type: "notice",
+                message: `Model "${activeModel}" encountered an issue (${errorMsg.slice(0, 100)}). Switched automatically to "${nextBest.name || nextBest.id}".`,
+                detail: nextBest.id,
               });
               activeModel = nextBest.id;
               continue;
@@ -339,30 +387,43 @@ export class AgentRuntime {
           continue;
         }
         this.toolCalls += 1;
+        const sanitizedInput = redactObject(call.arguments);
         this.event({
           type: "tool",
           toolCallId: call.id,
           toolName: call.name,
-          input: call.arguments,
+          input: sanitizedInput,
           message: `Running ${call.name}`,
         });
         const context: ToolContext = {
           workspace: this.workspace,
+          toolCallId: call.id,
           approve: async (requested, input) => {
             this.event({
               type: "approval",
               toolName: requested.name,
-              input,
+              input: redactObject(input),
               message: `Approval required for ${requested.name}`,
             });
             return this.approve(requested, input);
           },
           emit: (event) =>
             this.event({
-              type: event.type === "command" ? "command" : "tool",
+              type:
+                event.type.toLowerCase().includes("command") ||
+                event.type === "command"
+                  ? "command"
+                  : "tool",
               toolName: call.name,
-              message: event.message,
-              detail: event.detail,
+              toolCallId: event.toolCallId || call.id,
+              command: event.command,
+              action: event.action,
+              stream: event.stream,
+              chunk: event.chunk ? redactSecrets(event.chunk) : undefined,
+              exitCode: event.exitCode,
+              duration: event.duration,
+              message: redactSecrets(event.message),
+              detail: event.detail ? redactSecrets(event.detail) : undefined,
             }),
           signal,
           changeService: this.changeService,
@@ -371,11 +432,12 @@ export class AgentRuntime {
         };
         try {
           const result = await tool.execute(call.arguments, context);
+          const sanitizedResult = redactObject(result);
           this.event({
             type: "tool",
             toolCallId: call.id,
             toolName: call.name,
-            result,
+            result: sanitizedResult,
             message: result.isError
               ? `${call.name} failed`
               : `${call.name} completed`,

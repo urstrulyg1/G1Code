@@ -10,7 +10,7 @@ import { ChatStorage } from "../packages/database/chat-storage";
 test("Chat Storage: getG1CodeDirectories resolves root folder with folder named G1Code", () => {
   const fakeWorkspace = path.join(os.tmpdir(), `test-ws-${Date.now()}`);
   const dirs = ChatStorage.getG1CodeDirectories(fakeWorkspace);
-  
+
   assert.ok(dirs.length >= 1, "Should return candidate directories");
   assert.ok(
     dirs.some((d) => d === path.join(fakeWorkspace, "G1Code")),
@@ -23,7 +23,9 @@ test("Chat Storage: getG1CodeDirectories resolves root folder with folder named 
 });
 
 test("Chat Storage: persistChat creates JSON, Markdown transcript, and index in G1Code/chats", () => {
-  const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "g1code-chat-test-"));
+  const tempWorkspace = fs.mkdtempSync(
+    path.join(os.tmpdir(), "g1code-chat-test-"),
+  );
   try {
     const session = {
       id: "test-session-123",
@@ -45,15 +47,23 @@ test("Chat Storage: persistChat creates JSON, Markdown transcript, and index in 
       },
       {
         role: "assistant",
-        content: "I have inspected the project and created `auth.ts` with JWT verification.",
+        content:
+          "I have inspected the project and created `auth.ts` with JWT verification.",
         createdAt: new Date().toISOString(),
       },
     ];
 
-    ChatStorage.persistChat(session, messages, "Successfully added JWT authentication middleware");
+    ChatStorage.persistChat(
+      session,
+      messages,
+      "Successfully added JWT authentication middleware",
+    );
 
     const chatsDir = path.join(tempWorkspace, "G1Code", "chats");
-    assert.ok(fs.existsSync(chatsDir), "G1Code/chats folder should exist in workspace root");
+    assert.ok(
+      fs.existsSync(chatsDir),
+      "G1Code/chats folder should exist in workspace root",
+    );
 
     // 1. Verify JSON file
     const jsonPath = path.join(chatsDir, "test-session-123.json");
@@ -64,13 +74,18 @@ test("Chat Storage: persistChat creates JSON, Markdown transcript, and index in 
     assert.equal(jsonContent.messages.length, 2);
     assert.equal(jsonContent.messages[0].role, "user");
     assert.equal(jsonContent.messages[1].role, "assistant");
-    assert.equal(jsonContent.summary, "Successfully added JWT authentication middleware");
+    assert.equal(
+      jsonContent.summary,
+      "Successfully added JWT authentication middleware",
+    );
 
     // 2. Verify Markdown file
     const mdPath = path.join(chatsDir, "test-session-123.md");
     assert.ok(fs.existsSync(mdPath), "Session Markdown file should exist");
     const mdContent = fs.readFileSync(mdPath, "utf8");
-    assert.ok(mdContent.includes("# G1Code Chat: Add authentication middleware"));
+    assert.ok(
+      mdContent.includes("# G1Code Chat: Add authentication middleware"),
+    );
     assert.ok(mdContent.includes("Session ID"));
     assert.ok(mdContent.includes("Please add JWT authentication middleware"));
     assert.ok(mdContent.includes("I have inspected the project"));
@@ -90,7 +105,9 @@ test("Chat Storage: persistChat creates JSON, Markdown transcript, and index in 
 });
 
 test("DatabaseStore automatically persists chats to G1Code/chats on session create and addMessage", () => {
-  const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "g1code-db-chat-test-"));
+  const tempWorkspace = fs.mkdtempSync(
+    path.join(os.tmpdir(), "g1code-db-chat-test-"),
+  );
   const db = new Database(":memory:");
   db.exec(`
     CREATE TABLE sessions (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL, mode TEXT NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -114,20 +131,38 @@ test("DatabaseStore automatically persists chats to G1Code/chats on session crea
     });
 
     const chatsDir = path.join(tempWorkspace, "G1Code", "chats");
-    assert.ok(fs.existsSync(chatsDir), "G1Code/chats should be created on session creation");
+    assert.ok(
+      fs.existsSync(chatsDir),
+      "G1Code/chats should be created on session creation",
+    );
     assert.ok(fs.existsSync(path.join(chatsDir, `${sessionId}.json`)));
 
     // 2. Add User Message
-    store.addMessage(sessionId, "user", "Fix the responsive drawer layout on mobile");
+    store.addMessage(
+      sessionId,
+      "user",
+      "Fix the responsive drawer layout on mobile",
+    );
 
-    let json = JSON.parse(fs.readFileSync(path.join(chatsDir, `${sessionId}.json`), "utf8"));
+    let json = JSON.parse(
+      fs.readFileSync(path.join(chatsDir, `${sessionId}.json`), "utf8"),
+    );
     assert.equal(json.messages.length, 1);
-    assert.equal(json.messages[0].content, "Fix the responsive drawer layout on mobile");
+    assert.equal(
+      json.messages[0].content,
+      "Fix the responsive drawer layout on mobile",
+    );
 
     // 3. Add Assistant Message
-    store.addMessage(sessionId, "assistant", "Adjusted media queries in styles.css to collapse drawer at 768px.");
+    store.addMessage(
+      sessionId,
+      "assistant",
+      "Adjusted media queries in styles.css to collapse drawer at 768px.",
+    );
 
-    json = JSON.parse(fs.readFileSync(path.join(chatsDir, `${sessionId}.json`), "utf8"));
+    json = JSON.parse(
+      fs.readFileSync(path.join(chatsDir, `${sessionId}.json`), "utf8"),
+    );
     assert.equal(json.messages.length, 2);
     assert.equal(json.messages[1].role, "assistant");
 
@@ -138,8 +173,15 @@ test("DatabaseStore automatically persists chats to G1Code/chats on session crea
     assert.ok(md.includes("Adjusted media queries in styles.css"));
 
     // 5. Save task summary
-    store.saveTaskSummary(sessionId, "Fix responsive layout", "COMPLETED", "Media queries updated");
-    json = JSON.parse(fs.readFileSync(path.join(chatsDir, `${sessionId}.json`), "utf8"));
+    store.saveTaskSummary(
+      sessionId,
+      "Fix responsive layout",
+      "COMPLETED",
+      "Media queries updated",
+    );
+    json = JSON.parse(
+      fs.readFileSync(path.join(chatsDir, `${sessionId}.json`), "utf8"),
+    );
     assert.equal(json.summary, "Media queries updated");
   } finally {
     db.close();
@@ -148,7 +190,9 @@ test("DatabaseStore automatically persists chats to G1Code/chats on session crea
 });
 
 test("Chat Storage: enforces max storage limit by automatically deleting oldest chats first", () => {
-  const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "g1code-limit-test-"));
+  const tempWorkspace = fs.mkdtempSync(
+    path.join(os.tmpdir(), "g1code-limit-test-"),
+  );
   const chatsDir = path.join(tempWorkspace, "G1Code", "chats");
   fs.mkdirSync(chatsDir, { recursive: true });
 
@@ -196,8 +240,14 @@ test("Chat Storage: enforces max storage limit by automatically deleting oldest 
 
     for (const s of sessions) {
       ChatStorage.persistChat(s, [
-        { role: "user", content: `Query for ${s.id} with some padding content to take disk space.` },
-        { role: "assistant", content: `Response for ${s.id} with detailed answer.` },
+        {
+          role: "user",
+          content: `Query for ${s.id} with some padding content to take disk space.`,
+        },
+        {
+          role: "assistant",
+          content: `Response for ${s.id} with detailed answer.`,
+        },
       ]);
     }
 
@@ -215,32 +265,65 @@ test("Chat Storage: enforces max storage limit by automatically deleting oldest 
       fs.statSync(path.join(chatsDir, "session-1.md")).size;
     const tightLimit = totalBefore - Math.floor(session1Size / 2);
 
-    const result = ChatStorage.enforceStorageLimit(chatsDir, undefined, tightLimit);
+    const result = ChatStorage.enforceStorageLimit(
+      chatsDir,
+      undefined,
+      tightLimit,
+    );
 
     // Oldest (session-1) should have been deleted first!
-    assert.ok(result.deletedSessions.includes("session-1"), "Oldest session-1 must be deleted");
-    assert.ok(!fs.existsSync(path.join(chatsDir, "session-1.json")), "session-1.json should be removed");
-    assert.ok(!fs.existsSync(path.join(chatsDir, "session-1.md")), "session-1.md should be removed");
+    assert.ok(
+      result.deletedSessions.includes("session-1"),
+      "Oldest session-1 must be deleted",
+    );
+    assert.ok(
+      !fs.existsSync(path.join(chatsDir, "session-1.json")),
+      "session-1.json should be removed",
+    );
+    assert.ok(
+      !fs.existsSync(path.join(chatsDir, "session-1.md")),
+      "session-1.md should be removed",
+    );
 
     // Newer sessions (session-2 and session-3) must remain intact
-    assert.ok(fs.existsSync(path.join(chatsDir, "session-2.json")), "session-2.json should remain");
-    assert.ok(fs.existsSync(path.join(chatsDir, "session-3.json")), "session-3.json should remain");
+    assert.ok(
+      fs.existsSync(path.join(chatsDir, "session-2.json")),
+      "session-2.json should remain",
+    );
+    assert.ok(
+      fs.existsSync(path.join(chatsDir, "session-3.json")),
+      "session-3.json should remain",
+    );
 
     // Storage is now within the tightLimit
-    assert.ok(result.totalBytesAfter <= tightLimit, "Storage must return back within limit");
+    assert.ok(
+      result.totalBytesAfter <= tightLimit,
+      "Storage must return back within limit",
+    );
 
     // Index should reflect eviction
     const indexList = ChatStorage.listChats(tempWorkspace);
-    assert.ok(!indexList.some((item) => item.id === "session-1"), "Evicted session must not be in index");
-    assert.ok(indexList.some((item) => item.id === "session-2"), "Remaining session-2 must be in index");
-    assert.ok(indexList.some((item) => item.id === "session-3"), "Remaining session-3 must be in index");
+    assert.ok(
+      !indexList.some((item) => item.id === "session-1"),
+      "Evicted session must not be in index",
+    );
+    assert.ok(
+      indexList.some((item) => item.id === "session-2"),
+      "Remaining session-2 must be in index",
+    );
+    assert.ok(
+      indexList.some((item) => item.id === "session-3"),
+      "Remaining session-3 must be in index",
+    );
   } finally {
     fs.rmSync(tempWorkspace, { recursive: true, force: true });
   }
 });
 
 test("Chat Storage: ensures cleanup never deletes the currently active chat and isolates non-chat files", () => {
-  const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "g1code-active-protect-"));
+  const tempWorkspace = fs.mkdtempSync(
+    path.join(os.tmpdir(), "g1code-active-protect-"),
+  );
   const g1Dir = path.join(tempWorkspace, "G1Code");
   const chatsDir = path.join(g1Dir, "chats");
   fs.mkdirSync(chatsDir, { recursive: true });
@@ -278,33 +361,61 @@ test("Chat Storage: ensures cleanup never deletes the currently active chat and 
       updatedAt: new Date(baseDate + 3600000).toISOString(),
     };
 
-    ChatStorage.persistChat(activeSession, [{ role: "user", content: "Active prompt" }]);
-    ChatStorage.persistChat(otherSession, [{ role: "user", content: "Other prompt" }]);
+    ChatStorage.persistChat(activeSession, [
+      { role: "user", content: "Active prompt" },
+    ]);
+    ChatStorage.persistChat(otherSession, [
+      { role: "user", content: "Other prompt" },
+    ]);
 
     // Enforce an aggressive storage limit with activeSessionId specified
-    const result = ChatStorage.enforceStorageLimit(chatsDir, "active-session", 10);
+    const result = ChatStorage.enforceStorageLimit(
+      chatsDir,
+      "active-session",
+      10,
+    );
 
     // Active session must NOT be deleted even though it is older
-    assert.ok(fs.existsSync(path.join(chatsDir, "active-session.json")), "Active chat JSON must be protected");
-    assert.ok(fs.existsSync(path.join(chatsDir, "active-session.md")), "Active chat MD must be protected");
-    assert.ok(!result.deletedSessions.includes("active-session"), "active-session should not be in deleted list");
+    assert.ok(
+      fs.existsSync(path.join(chatsDir, "active-session.json")),
+      "Active chat JSON must be protected",
+    );
+    assert.ok(
+      fs.existsSync(path.join(chatsDir, "active-session.md")),
+      "Active chat MD must be protected",
+    );
+    assert.ok(
+      !result.deletedSessions.includes("active-session"),
+      "active-session should not be in deleted list",
+    );
 
     // Other session should be deleted
-    assert.ok(!fs.existsSync(path.join(chatsDir, "other-session.json")), "Non-active session should be deleted");
+    assert.ok(
+      !fs.existsSync(path.join(chatsDir, "other-session.json")),
+      "Non-active session should be deleted",
+    );
     assert.ok(result.deletedSessions.includes("other-session"));
 
     // Critical non-chat files must remain completely untouched
     assert.ok(fs.existsSync(sqliteFake), "g1code.sqlite must not be affected");
-    assert.equal(fs.readFileSync(sqliteFake, "utf8"), "SQLITE_DATABASE_MOCK_DATA");
+    assert.equal(
+      fs.readFileSync(sqliteFake, "utf8"),
+      "SQLITE_DATABASE_MOCK_DATA",
+    );
     assert.ok(fs.existsSync(projectFile), "Project file must not be affected");
-    assert.equal(fs.readFileSync(projectFile, "utf8"), "console.log('project code');");
+    assert.equal(
+      fs.readFileSync(projectFile, "utf8"),
+      "console.log('project code');",
+    );
   } finally {
     fs.rmSync(tempWorkspace, { recursive: true, force: true });
   }
 });
 
 test("Chat Storage: synchronizes eviction with DatabaseStore to remove deleted sessions from SQLite", () => {
-  const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "g1code-db-sync-test-"));
+  const tempWorkspace = fs.mkdtempSync(
+    path.join(os.tmpdir(), "g1code-db-sync-test-"),
+  );
   const db = new Database(":memory:");
   db.exec(`
     CREATE TABLE sessions (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL, mode TEXT NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -346,15 +457,29 @@ test("Chat Storage: synchronizes eviction with DatabaseStore to remove deleted s
     store.createSession(newSession);
     store.addMessage(newSession.id, "user", "New message content");
 
-    assert.ok(store.getSession("evict-old-session") !== undefined, "Old session should exist in DB");
-    assert.ok(store.getSession("keep-new-session") !== undefined, "New session should exist in DB");
+    assert.ok(
+      store.getSession("evict-old-session") !== undefined,
+      "Old session should exist in DB",
+    );
+    assert.ok(
+      store.getSession("keep-new-session") !== undefined,
+      "New session should exist in DB",
+    );
 
     // Trigger enforcement with tight limit to evict the old chat
     ChatStorage.enforceStorageLimit(chatsDir, undefined, 10);
 
     // Old session should be removed from SQLite database
-    assert.equal(store.getSession("evict-old-session"), undefined, "Old session should be removed from DB");
-    assert.equal(store.sessionMessages("evict-old-session").length, 0, "Old messages should be removed from DB");
+    assert.equal(
+      store.getSession("evict-old-session"),
+      undefined,
+      "Old session should be removed from DB",
+    );
+    assert.equal(
+      store.sessionMessages("evict-old-session").length,
+      0,
+      "Old messages should be removed from DB",
+    );
 
     // New session should also be cleaned up if exceeding 10 bytes, or if activeSession is kept
   } finally {
@@ -365,7 +490,9 @@ test("Chat Storage: synchronizes eviction with DatabaseStore to remove deleted s
 });
 
 test("Chat Storage: enforceAllStorageLimits performs reliable cleanup across application restarts", () => {
-  const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "g1code-restart-test-"));
+  const tempWorkspace = fs.mkdtempSync(
+    path.join(os.tmpdir(), "g1code-restart-test-"),
+  );
   const chatsDir = path.join(tempWorkspace, "G1Code", "chats");
   fs.mkdirSync(chatsDir, { recursive: true });
 
@@ -390,12 +517,14 @@ test("Chat Storage: enforceAllStorageLimits performs reliable cleanup across app
     assert.ok(fs.existsSync(path.join(chatsDir, "pre-restart-session.json")));
 
     // On application startup / restart, enforceAllStorageLimits is triggered
-    const results = ChatStorage.enforceAllStorageLimits(tempWorkspace, undefined, 10);
+    const results = ChatStorage.enforceAllStorageLimits(
+      tempWorkspace,
+      undefined,
+      10,
+    );
     assert.ok(results[chatsDir]?.includes("pre-restart-session"));
     assert.ok(!fs.existsSync(path.join(chatsDir, "pre-restart-session.json")));
   } finally {
     fs.rmSync(tempWorkspace, { recursive: true, force: true });
   }
 });
-
-

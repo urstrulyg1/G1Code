@@ -3,6 +3,7 @@ import { discoverTests } from "./discovery";
 import { runTests } from "./runner";
 import { classifyCommand } from "../tools/command-policy";
 import type { AgentTool } from "../tools/types";
+import { redactSecrets } from "../security/redaction";
 
 export function testingTools(): AgentTool[] {
   return [
@@ -47,7 +48,10 @@ export function testingTools(): AgentTool[] {
         )
           return { content: "User denied test execution.", isError: true };
         context.emit({
-          type: "COMMAND_STARTED",
+          type: "command",
+          toolCallId: context.toolCallId,
+          action: "started",
+          command,
           message: `Running ${command}`,
         });
         const run = await runTests(
@@ -56,24 +60,37 @@ export function testingTools(): AgentTool[] {
           candidates,
           context.signal,
           (stream, chunk) => {
+            const redactedChunk = redactSecrets(chunk);
             context.emit({
-              type: stream === "stdout" ? "COMMAND_STDOUT" : "COMMAND_STDERR",
-              message: chunk,
+              type: "command",
+              toolCallId: context.toolCallId,
+              action: "chunk",
+              command,
+              stream: stream === "stdout" ? "stdout" : "stderr",
+              chunk: redactedChunk,
+              message: redactedChunk,
             });
           },
         );
+        const cleanStdout = redactSecrets(run.result?.stdout || "");
+        const cleanStderr = redactSecrets(run.result?.stderr || "");
         context.recordTestRun?.({
           command: run.command,
           cwd: run.cwd,
           targeted: run.targeted,
           exitCode: run.exitCode,
           passed: run.passed,
-          stdout: run.result?.stdout,
-          stderr: run.result?.stderr,
+          stdout: cleanStdout,
+          stderr: cleanStderr,
           duration: run.result?.duration,
         });
         context.emit({
-          type: run.passed ? "COMMAND_COMPLETED" : "COMMAND_FAILED",
+          type: "command",
+          toolCallId: context.toolCallId,
+          action: run.passed ? "completed" : "failed",
+          command: run.command,
+          exitCode: run.exitCode,
+          duration: run.result?.duration,
           message: `Test command exited ${run.exitCode}`,
         });
         return {
@@ -84,12 +101,16 @@ export function testingTools(): AgentTool[] {
             executionSucceeded: run.exitCode !== undefined,
             testsPassed: run.passed,
             exitCode: run.exitCode,
-            stdout: run.result?.stdout,
-            stderr: run.result?.stderr,
+            stdout: cleanStdout,
+            stderr: cleanStderr,
+            duration: run.result?.duration,
             tests: candidates,
           }),
           isError: !run.passed,
           exitCode: run.exitCode,
+          duration: run.result?.duration,
+          stdout: cleanStdout,
+          stderr: cleanStderr,
         };
       },
     },

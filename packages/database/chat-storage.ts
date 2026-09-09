@@ -45,7 +45,9 @@ export class ChatStorage {
   /**
    * Registers a callback fired when an old chat is evicted due to storage limits.
    */
-  public static onSessionEvicted(listener: (sessionId: string) => void): () => void {
+  public static onSessionEvicted(
+    listener: (sessionId: string) => void,
+  ): () => void {
     this.evictionListeners.add(listener);
     return () => {
       this.evictionListeners.delete(listener);
@@ -140,8 +142,7 @@ export class ChatStorage {
     const sessionMap = new Map<string, { id: string; timestamp: number }>();
     for (const entry of index) {
       const ts =
-        new Date(entry.updatedAt || entry.createdAt).getTime() ||
-        Date.now();
+        new Date(entry.updatedAt || entry.createdAt).getTime() || Date.now();
       sessionMap.set(entry.id, { id: entry.id, timestamp: ts });
     }
 
@@ -239,7 +240,10 @@ export class ChatStorage {
       try {
         fs.writeFileSync(indexPath, JSON.stringify(index, null, 2), "utf8");
       } catch (err) {
-        console.error(`[ChatStorage] Error updating index.json after cleanup:`, err);
+        console.error(
+          `[ChatStorage] Error updating index.json after cleanup:`,
+          err,
+        );
       }
     }
 

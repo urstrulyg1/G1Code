@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { AgentTool } from "./types";
 import { spawnCommand } from "./command";
+import { redactSecrets } from "../security/redaction";
 const exec = promisify(execFile);
 export function safePath(workspace: string, requested: string) {
   const windowsStyle = /^[A-Za-z]:[\\/]/.test(workspace);
@@ -80,15 +81,19 @@ export const workspaceTools = (): AgentTool[] => [
       const lines = full.split(/\r?\n/);
       const start = Math.max(1, data.startLine ?? 1);
       const end = Math.min(lines.length, data.endLine ?? lines.length);
+      const relPath = path.relative(context.workspace, file);
       return {
         content: JSON.stringify({
-          path: file,
+          path: relPath,
           size: stat.size,
           modified: stat.mtime.toISOString(),
           startLine: start,
           endLine: end,
+          lineCount: lines.length,
           content: lines.slice(start - 1, end).join("\n"),
         }),
+        path: relPath,
+        lineCount: lines.length,
       };
     },
   },
@@ -103,11 +108,21 @@ export const workspaceTools = (): AgentTool[] => [
         String((value as { path: string }).path ?? "."),
       );
       const entries = await fs.readdir(directory, { withFileTypes: true });
-      const IGNORE = new Set(["node_modules", ".git", ".next", "dist", "dist-electron", ".cache", "coverage"]);
+      const IGNORE = new Set([
+        "node_modules",
+        ".git",
+        ".next",
+        "dist",
+        "dist-electron",
+        ".cache",
+        "coverage",
+      ]);
       return {
         content: JSON.stringify(
           entries
-            .filter((entry) => !IGNORE.has(entry.name) && !entry.name.startsWith("."))
+            .filter(
+              (entry) => !IGNORE.has(entry.name) && !entry.name.startsWith("."),
+            )
             .map((entry) => ({
               name: entry.name,
               kind: entry.isDirectory() ? "directory" : "file",
@@ -118,34 +133,63 @@ export const workspaceTools = (): AgentTool[] => [
   },
   {
     name: "get_project_info",
-    description: "Returns project metadata: package.json (name, scripts, dependencies) and README excerpt. Use this at the start of any task to understand the project structure before diving in.",
+    description:
+      "Returns project metadata: package.json (name, scripts, dependencies) and README excerpt. Use this at the start of any task to understand the project structure before diving in.",
     permission: "safe",
     inputSchema: { type: "object", properties: {} },
     execute: async (_value, context) => {
       const results: Record<string, unknown> = {};
       try {
-        const pkgRaw = await fs.readFile(path.join(context.workspace, "package.json"), "utf8");
+        const pkgRaw = await fs.readFile(
+          path.join(context.workspace, "package.json"),
+          "utf8",
+        );
         const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
         results.package = {
           name: pkg.name,
           version: pkg.version,
           description: pkg.description,
           scripts: pkg.scripts,
-          dependencies: Object.keys((pkg.dependencies as Record<string,string>) || {}).slice(0, 20),
-          devDependencies: Object.keys((pkg.devDependencies as Record<string,string>) || {}).slice(0, 20),
+          dependencies: Object.keys(
+            (pkg.dependencies as Record<string, string>) || {},
+          ).slice(0, 20),
+          devDependencies: Object.keys(
+            (pkg.devDependencies as Record<string, string>) || {},
+          ).slice(0, 20),
         };
-      } catch { results.package = null; }
+      } catch {
+        results.package = null;
+      }
       try {
-        const readme = await fs.readFile(path.join(context.workspace, "README.md"), "utf8");
+        const readme = await fs.readFile(
+          path.join(context.workspace, "README.md"),
+          "utf8",
+        );
         results.readme = readme.slice(0, 1500);
-      } catch { results.readme = null; }
+      } catch {
+        results.readme = null;
+      }
       try {
-        const entries = await fs.readdir(context.workspace, { withFileTypes: true });
-        const IGNORE = new Set(["node_modules", ".git", ".next", "dist", "dist-electron", "coverage"]);
+        const entries = await fs.readdir(context.workspace, {
+          withFileTypes: true,
+        });
+        const IGNORE = new Set([
+          "node_modules",
+          ".git",
+          ".next",
+          "dist",
+          "dist-electron",
+          "coverage",
+        ]);
         results.rootFiles = entries
-          .filter(e => !IGNORE.has(e.name))
-          .map(e => ({ name: e.name, kind: e.isDirectory() ? "directory" : "file" }));
-      } catch { results.rootFiles = []; }
+          .filter((e) => !IGNORE.has(e.name))
+          .map((e) => ({
+            name: e.name,
+            kind: e.isDirectory() ? "directory" : "file",
+          }));
+      } catch {
+        results.rootFiles = [];
+      }
       return { content: JSON.stringify(results, null, 2) };
     },
   },
@@ -177,7 +221,18 @@ export const workspaceTools = (): AgentTool[] => [
         command,
         { cwd: context.workspace, timeout: 30000, maxBuffer: 500_000 },
       );
-      return { content: result.stdout || "No matches found." };
+      const output = result.stdout || "No matches found.";
+      const lines =
+        output.trim() && !output.includes("No matches found")
+          ? output
+              .trim()
+              .split("\n")
+              .filter((l) => Boolean(l.trim()))
+          : [];
+      return {
+        content: output,
+        matchesCount: lines.length,
+      };
     },
   },
   {
@@ -291,47 +346,89 @@ export const workspaceTools = (): AgentTool[] => [
         /(^|\s)(rm|del|format|sudo)|git\s+(reset|clean|push)|npm\s+install/i.test(
           data.command,
         );
-      const tool = workspaceTools()[5];
+      const self = workspaceTools().find((t) => t.name === "run_command")!;
       if (
         dangerous ||
-        !(await context.approve(tool, { command: data.command, cwd }))
+        !(await context.approve(self, { command: data.command, cwd }))
       )
         return { content: "User denied command execution.", isError: true };
       const execution = spawnCommand(data.command, cwd, context.signal);
       context.emit({
         type: "command",
+        toolCallId: context.toolCallId,
+        action: "started",
+        command: data.command,
         message: `COMMAND_STARTED ${data.command}`,
       });
       const MAX_OUTPUT = 30_000;
-      const drain = async (stream: AsyncIterable<string>, type: string) => {
+      const drain = async (
+        stream: AsyncIterable<string>,
+        streamType: "stdout" | "stderr",
+      ) => {
         let buffered = "";
         let total = 0;
         for await (const chunk of stream) {
           if (total >= MAX_OUTPUT) break;
-          buffered += chunk;
-          total += chunk.length;
-          if (buffered.length >= 4096) {
-            context.emit({ type, message: buffered.slice(0, 4096) });
-            buffered = buffered.slice(4096);
+          const redactedChunk = redactSecrets(chunk);
+          buffered += redactedChunk;
+          total += redactedChunk.length;
+          if (buffered.length >= 2048) {
+            context.emit({
+              type: "command",
+              toolCallId: context.toolCallId,
+              action: "chunk",
+              command: data.command,
+              stream: streamType,
+              chunk: buffered,
+              message: buffered,
+            });
+            buffered = "";
           }
         }
-        if (buffered) context.emit({ type, message: buffered });
+        if (buffered) {
+          context.emit({
+            type: "command",
+            toolCallId: context.toolCallId,
+            action: "chunk",
+            command: data.command,
+            stream: streamType,
+            chunk: buffered,
+            message: buffered,
+          });
+        }
       };
       const [result] = await Promise.all([
         execution.wait(),
-        drain(execution.stdout, "COMMAND_STDOUT"),
-        drain(execution.stderr, "COMMAND_STDERR"),
+        drain(execution.stdout, "stdout"),
+        drain(execution.stderr, "stderr"),
       ]);
+      const redactedStdout = redactSecrets(result.stdout || "");
+      const redactedStderr = redactSecrets(result.stderr || "");
+      const isSuccess = result.exitCode === 0;
       context.emit({
-        type: result.exitCode === 0 ? "COMMAND_COMPLETED" : "COMMAND_FAILED",
-        message: `exit ${result.exitCode}`,
-      });
-      // Truncate final result content for context window safety
-      const truncated = (result.stdout + result.stderr).slice(0, MAX_OUTPUT);
-      return {
-        content: JSON.stringify({ ...result, stdout: truncated, stderr: "" }),
-        isError: result.exitCode !== 0,
+        type: "command",
+        toolCallId: context.toolCallId,
+        action: isSuccess ? "completed" : "failed",
+        command: data.command,
         exitCode: result.exitCode,
+        duration: result.duration,
+        message: isSuccess
+          ? "COMMAND_COMPLETED exit 0"
+          : `COMMAND_FAILED exit ${result.exitCode}`,
+      });
+      const truncatedStdout = redactedStdout.slice(0, MAX_OUTPUT);
+      const truncatedStderr = redactedStderr.slice(0, MAX_OUTPUT);
+      return {
+        content: JSON.stringify({
+          ...result,
+          stdout: truncatedStdout,
+          stderr: truncatedStderr,
+        }),
+        isError: !isSuccess,
+        exitCode: result.exitCode,
+        duration: result.duration,
+        stdout: truncatedStdout,
+        stderr: truncatedStderr,
       };
     },
   },

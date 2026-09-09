@@ -38,11 +38,11 @@ async function apiRequest<T = any>(
   options?: RequestInit,
 ): Promise<T> {
   const response = await fetch(endpoint, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...(options?.headers || {}),
     },
-    ...options,
   });
   if (!response.ok) {
     let errorMsg = `HTTP ${response.status} ${response.statusText}`;
@@ -70,11 +70,7 @@ if (typeof window !== "undefined" && !window.g1code) {
     async getCurrentWorkspace(): Promise<string | null> {
       try {
         const res = await apiRequest<{ workspace: string }>(
-          "/api/workspace/choose",
-          {
-            method: "POST",
-            body: JSON.stringify({}),
-          },
+          "/api/workspace/current",
         );
         return res.workspace || null;
       } catch {
@@ -82,7 +78,9 @@ if (typeof window !== "undefined" && !window.g1code) {
       }
     },
 
-    async openNativeFolder(targetPath?: string): Promise<{ success: boolean; path?: string }> {
+    async openNativeFolder(
+      targetPath?: string,
+    ): Promise<{ success: boolean; path?: string }> {
       return apiRequest<{ success: boolean; path?: string }>(
         "/api/workspace/open-folder",
         {
@@ -158,14 +156,25 @@ if (typeof window !== "undefined" && !window.g1code) {
     async getModels(provider?: string) {
       const q = provider ? `?provider=${encodeURIComponent(provider)}` : "";
       return apiRequest<
-        Array<{ id: string; name: string; supportsTools?: boolean; provider?: string }>
+        Array<{
+          id: string;
+          name: string;
+          supportsTools?: boolean;
+          provider?: string;
+        }>
       >(`/api/provider/models${q}`);
     },
 
     async getFreeModels(provider?: string) {
       const q = provider ? `?provider=${encodeURIComponent(provider)}` : "";
       return apiRequest<
-        Array<{ id: string; name: string; supportsTools?: boolean; isPromotional?: boolean; provider?: string }>
+        Array<{
+          id: string;
+          name: string;
+          supportsTools?: boolean;
+          isPromotional?: boolean;
+          provider?: string;
+        }>
       >(`/api/provider/models/free${q}`);
     },
 
@@ -236,10 +245,10 @@ if (typeof window !== "undefined" && !window.g1code) {
     },
 
     stopAgent(sessionId: string) {
-      void apiRequest("/api/agent/stop", {
+      apiRequest("/api/agent/stop", {
         method: "POST",
         body: JSON.stringify({ sessionId }),
-      });
+      }).catch((err) => console.error("Failed to stop agent:", err));
     },
 
     async listSessions(workspace: string) {
@@ -324,10 +333,10 @@ if (typeof window !== "undefined" && !window.g1code) {
     },
 
     respondPermission(requestId: string, allowed: boolean) {
-      void apiRequest("/api/agent/permission", {
+      apiRequest("/api/agent/permission", {
         method: "POST",
         body: JSON.stringify({ requestId, allowed }),
-      });
+      }).catch((err) => console.error("Failed to respond to permission:", err));
     },
 
     onAgentEvent(listener: (event: unknown) => void): () => void {

@@ -39,7 +39,10 @@ export function registerRuntimeHandlers(
   try {
     ChatStorage.enforceAllStorageLimits(getSelectedWorkspace());
   } catch (err) {
-    console.error("[ChatStorage] Desktop startup limit enforcement error:", err);
+    console.error(
+      "[ChatStorage] Desktop startup limit enforcement error:",
+      err,
+    );
   }
   for (const batch of store.activeChangeBatches()) {
     void new ChangeService(store, batch.workspaceId).recoverActiveBatches();
@@ -258,7 +261,9 @@ export function registerRuntimeHandlers(
           output: target
             ? `Model ${targetModel} verified active via non-billable catalog.`
             : "",
-          error: target ? undefined : `Model ${targetModel} not found in catalog.`,
+          error: target
+            ? undefined
+            : `Model ${targetModel} not found in catalog.`,
         };
       } catch (err) {
         return {
@@ -527,13 +532,11 @@ export function registerRuntimeHandlers(
         throw new Error("Session does not belong to workspace");
       for (const change of store.pendingChanges(input.sessionId)) {
         if (approvalWaiters.has(change.id)) {
-          approvalWaiters
-            .get(change.id)
-            ?.resolve({
-              approved: false,
-              status: "REJECTED",
-              message: "Session discarded by user.",
-            });
+          approvalWaiters.get(change.id)?.resolve({
+            approved: false,
+            status: "REJECTED",
+            message: "Session discarded by user.",
+          });
           approvalWaiters.delete(change.id);
         }
         new ChangeService(store, workspace).rejectChange(change.id);

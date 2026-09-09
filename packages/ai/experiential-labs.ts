@@ -158,7 +158,8 @@ export class ExperientialLabsProvider implements AIProvider {
     const now = Date.now();
     if (
       ExperientialLabsProvider.publicCatalogCache &&
-      now - ExperientialLabsProvider.publicCatalogCache.timestamp < 5 * 60 * 1000
+      now - ExperientialLabsProvider.publicCatalogCache.timestamp <
+        5 * 60 * 1000
     ) {
       return ExperientialLabsProvider.publicCatalogCache.data;
     }
@@ -311,8 +312,7 @@ export class ExperientialLabsProvider implements AIProvider {
         const enriched = publicMeta.get(slug);
 
         const itemPricing = item.pricing as
-          | { input?: number; output?: number; free?: boolean }
-          | undefined;
+          { input?: number; output?: number; free?: boolean } | undefined;
         const enrichedInput =
           enriched?.input_micro !== undefined && enriched.input_micro !== null
             ? Number(enriched.input_micro) / 1_000_000
@@ -371,7 +371,8 @@ export class ExperientialLabsProvider implements AIProvider {
           capabilities:
             typeof item.capabilities === "object" && item.capabilities
               ? (item.capabilities as any)
-              : typeof enriched?.capabilities === "object" && enriched?.capabilities
+              : typeof enriched?.capabilities === "object" &&
+                  enriched?.capabilities
                 ? (enriched.capabilities as any)
                 : undefined,
           pricing: hasPricing
@@ -401,7 +402,8 @@ export class ExperientialLabsProvider implements AIProvider {
       };
     } catch {
       const fallback = globalModelCatalog.getModels("experiential-labs");
-      const fallbackFree = globalModelCatalog.getFreeModels("experiential-labs");
+      const fallbackFree =
+        globalModelCatalog.getFreeModels("experiential-labs");
       return {
         models: fallback,
         freeModels: fallbackFree,
@@ -486,7 +488,11 @@ export class ExperientialLabsProvider implements AIProvider {
     messages: ChatMessage[],
   ): Record<string, unknown>[] {
     return messages.map((msg) => {
-      if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
+      if (
+        msg.role === "assistant" &&
+        msg.toolCalls &&
+        msg.toolCalls.length > 0
+      ) {
         return {
           role: msg.role,
           content: msg.content ?? null,

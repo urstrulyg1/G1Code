@@ -68,7 +68,13 @@ test("agent pauses on pending change and resumes after explicit approval", async
     () => approval,
   );
   const run = runtime.run("fix it", "agent");
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  for (
+    let i = 0;
+    i < 20 && !states.includes("WAITING_FOR_CHANGE_APPROVAL");
+    i++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   assert.ok(states.includes("WAITING_FOR_CHANGE_APPROVAL"));
   assert.equal(requestCount, 1);
   release({

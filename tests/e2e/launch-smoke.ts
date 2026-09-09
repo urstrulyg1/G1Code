@@ -8,13 +8,22 @@ const electronDirectory = path.join(
   "electron",
   "dist",
 );
-const pathFile = path.join(process.cwd(), "node_modules", "electron", "path.txt");
+const pathFile = path.join(
+  process.cwd(),
+  "node_modules",
+  "electron",
+  "path.txt",
+);
 const platformPath = existsSync(pathFile)
   ? readFileSync(pathFile, "utf8").trim()
   : "";
 const electronBinary = path.join(electronDirectory, platformPath);
 
-if (!platformPath || !existsSync(electronBinary) || statSync(electronBinary).size <= 1000) {
+if (
+  !platformPath ||
+  !existsSync(electronBinary) ||
+  statSync(electronBinary).size <= 1000
+) {
   console.error(
     "BLOCKED: Electron platform binary is unavailable at node_modules/electron/dist.",
   );

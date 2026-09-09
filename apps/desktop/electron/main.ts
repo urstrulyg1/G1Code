@@ -235,25 +235,60 @@ function registerApiBridgeHandlers() {
   ipcMain.handle("settings:save", async (_e, input) =>
     api("/api/settings", { method: "POST", body: JSON.stringify(input) }),
   );
-  ipcMain.handle("provider:models", async () => api("/api/provider/models"));
-  ipcMain.handle("provider:test", async (_e, model) =>
+  const providerQuery = (input?: { provider?: string }) =>
+    input?.provider ? `?provider=${encodeURIComponent(input.provider)}` : "";
+  ipcMain.handle("provider:models", async (_e, input) =>
+    api(`/api/provider/models${providerQuery(input)}`),
+  );
+  ipcMain.handle("provider:models:free", async (_e, input) =>
+    api(`/api/provider/models/free${providerQuery(input)}`),
+  );
+  // preload sends a single `{ model, provider }` object
+  ipcMain.handle("provider:test", async (_e, input) =>
     api("/api/provider/test", {
       method: "POST",
-      body: JSON.stringify({ model }),
+      body: JSON.stringify(
+        input && typeof input === "object" ? input : { model: input },
+      ),
+    }),
+  );
+  ipcMain.handle("provider:verify", async (_e, input) =>
+    api("/api/provider/verify", {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    }),
+  );
+  ipcMain.handle("provider:refresh", async (_e, input) =>
+    api("/api/provider/refresh", {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    }),
+  );
+  ipcMain.handle("provider:usage-limits", async () =>
+    api("/api/provider/usage-limits"),
+  );
+  ipcMain.handle("provider:usage-limits:simulate", async (_e, input) =>
+    api("/api/provider/usage-limits/simulate", {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
     }),
   );
 
   ipcMain.handle("agent:start", async (_e, input) =>
     api("/api/agent/start", { method: "POST", body: JSON.stringify(input) }),
   );
-  ipcMain.on(
-    "agent:stop",
-    (_e, sessionId) =>
-      void api("/api/agent/stop", {
-        method: "POST",
-        body: JSON.stringify({ sessionId }),
-      }),
+  ipcMain.handle("agent:session-model", async (_e, input) =>
+    api("/api/agent/session-model", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   );
+  ipcMain.on("agent:stop", (_e, sessionId) => {
+    api("/api/agent/stop", {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+    }).catch((err) => console.error("[IPC] agent:stop failed:", err));
+  });
   ipcMain.handle("agent:sessions", async (_e, ws) =>
     api(
       `/api/agent/sessions?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}`,
@@ -298,13 +333,42 @@ function registerApiBridgeHandlers() {
       body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
     }),
   );
-  ipcMain.on(
-    "permission:response",
-    (_e, input) =>
-      void api("/api/agent/permission", {
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
+  ipcMain.on("permission:response", (_e, input) => {
+    api("/api/agent/permission", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).catch((err) =>
+      console.error("[IPC] permission:response failed:", err),
+    );
+  });
+
+  // Git / search / diagnostics
+  ipcMain.handle("git:commit", async (_e, input) =>
+    api("/api/git/commit", {
+      method: "POST",
+      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+    }),
+  );
+  ipcMain.handle("git:generate-commit-msg", async (_e, input) =>
+    api("/api/git/generate-commit-msg", {
+      method: "POST",
+      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+    }),
+  );
+  ipcMain.handle("git:status", async (_e, ws) =>
+    api(
+      `/api/git/status?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}`,
+    ),
+  );
+  ipcMain.handle("problems:get", async (_e, ws) =>
+    api(
+      `/api/problems?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}`,
+    ),
+  );
+  ipcMain.handle("workspace:search", async (_e, { workspace, query }) =>
+    api(
+      `/api/workspace/search?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&query=${encodeURIComponent(query ?? "")}`,
+    ),
   );
 
   ipcMain.handle("index:rebuild", async (_e, input) =>

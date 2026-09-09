@@ -10,8 +10,7 @@ contextBridge.exposeInMainWorld("g1code", {
       success: boolean;
       path?: string;
     }>,
-  getUsageLimits: () =>
-    ipcRenderer.invoke("provider:usage-limits"),
+  getUsageLimits: () => ipcRenderer.invoke("provider:usage-limits"),
   simulateLimit: (
     modelId: string,
     resetInSeconds = 60,
@@ -113,4 +112,8 @@ contextBridge.exposeInMainWorld("g1code", {
     ipcRenderer.on("permission:request", callback);
     return () => ipcRenderer.removeListener("permission:request", callback);
   },
+  getGitStatus: (workspace: string) =>
+    ipcRenderer.invoke("git:status", workspace),
+  getProblems: (workspace: string) =>
+    ipcRenderer.invoke("problems:get", workspace),
 });

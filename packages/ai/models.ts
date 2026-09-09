@@ -21,7 +21,8 @@ export type ModelMetadata = AIModel & {
     input?: number;
     output?: number;
   };
-  recommendedRole?: "coding" | "reasoning" | "fast" | "balanced" | "review" | "agent";
+  recommendedRole?:
+    "coding" | "reasoning" | "fast" | "balanced" | "review" | "agent";
   apiRank?: number;
 };
 
@@ -58,7 +59,12 @@ export function parseModelMetadata(
       vision?: boolean;
       reasoning?: boolean;
     };
-    pricing?: { free?: boolean; promotional?: boolean; input?: number; output?: number };
+    pricing?: {
+      free?: boolean;
+      promotional?: boolean;
+      input?: number;
+      output?: number;
+    };
     is_free?: boolean;
     free?: boolean;
     requires_payment?: boolean;
@@ -74,11 +80,12 @@ export function parseModelMetadata(
     raw.capabilities?.tools ??
     raw.capabilities?.function_calling ??
     (!id.includes("embedding") && !id.includes("moderation"));
-  const supportsStreaming =
-    raw.capabilities?.streaming ?? true;
+  const supportsStreaming = raw.capabilities?.streaming ?? true;
   const supportsVision =
     raw.capabilities?.vision ??
-    (id.includes("vision") || id.includes("image") || id.includes("multimodal"));
+    (id.includes("vision") ||
+      id.includes("image") ||
+      id.includes("multimodal"));
   const reasoning =
     raw.capabilities?.reasoning ??
     (id.includes("reasoning") ||
@@ -108,9 +115,20 @@ export function parseModelMetadata(
   const lower = id.toLowerCase();
   if (lower.includes("code") || lower.includes("coder")) {
     recommendedRole = "coding";
-  } else if (reasoning || lower.includes("r1") || lower.includes("ultra") || lower.includes("think")) {
+  } else if (
+    reasoning ||
+    lower.includes("r1") ||
+    lower.includes("ultra") ||
+    lower.includes("think")
+  ) {
     recommendedRole = "reasoning";
-  } else if (lower.includes("flash") || lower.includes("mini") || lower.includes("nano") || lower.includes("lite") || lower.includes("small")) {
+  } else if (
+    lower.includes("flash") ||
+    lower.includes("mini") ||
+    lower.includes("nano") ||
+    lower.includes("lite") ||
+    lower.includes("small")
+  ) {
     recommendedRole = "fast";
   } else {
     recommendedRole = "balanced";
@@ -143,10 +161,7 @@ export function parseModelMetadata(
       streaming: supportsStreaming,
       vision: supportsVision,
       reasoning,
-      maxOutputTokens:
-        raw.max_output_tokens ??
-        raw.max_tokens ??
-        4096,
+      maxOutputTokens: raw.max_output_tokens ?? raw.max_tokens ?? 4096,
       contextWindow,
     },
   };

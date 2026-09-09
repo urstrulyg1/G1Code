@@ -2,19 +2,26 @@ interface Window {
   g1code: {
     chooseWorkspace(): Promise<string | null>;
     getCurrentWorkspace?(): Promise<string | null>;
-    openNativeFolder?(targetPath?: string): Promise<{ success: boolean; path?: string }>;
-    getUsageLimits?(): Promise<Record<string, {
-      modelId: string;
-      name: string;
-      hourlyLimit: number;
-      hourlyUsed: number;
-      hourlyResetAt: number;
-      dailyLimit: number;
-      dailyUsed: number;
-      dailyResetAt: number;
-      isLimitReached: boolean;
-      limitType?: "hourly" | "daily";
-    }>>;
+    openNativeFolder?(
+      targetPath?: string,
+    ): Promise<{ success: boolean; path?: string }>;
+    getUsageLimits?(): Promise<
+      Record<
+        string,
+        {
+          modelId: string;
+          name: string;
+          hourlyLimit: number;
+          hourlyUsed: number;
+          hourlyResetAt: number;
+          dailyLimit: number;
+          dailyUsed: number;
+          dailyResetAt: number;
+          isLimitReached: boolean;
+          limitType?: "hourly" | "daily";
+        }
+      >
+    >;
     simulateLimit?(
       modelId: string,
       resetInSeconds?: number,
@@ -151,9 +158,7 @@ interface Window {
       count: number;
     }>;
     stopAgent(sessionId: string): void;
-    listSessions(
-      workspace: string,
-    ): Promise<
+    listSessions(workspace: string): Promise<
       Array<{
         id: string;
         title: string;

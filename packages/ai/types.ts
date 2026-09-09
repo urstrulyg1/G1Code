@@ -85,9 +85,7 @@ export interface AIProvider {
     modelCount: number;
     message: string;
   }>;
-  testModel?(
-    modelId: string,
-  ): Promise<{
+  testModel?(modelId: string): Promise<{
     working: boolean;
     latencyMs: number;
     ttftMs: number;

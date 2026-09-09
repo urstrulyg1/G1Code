@@ -2,8 +2,16 @@ import { AgentTool } from "./types";
 import { safePath } from "./workspace";
 import { spawnCommand } from "./command";
 
-async function runGit(args: string, cwd: string, signal?: AbortSignal): Promise<string> {
-  const result = await spawnCommand(`git --no-pager ${args}`, cwd, signal).wait();
+async function runGit(
+  args: string,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const result = await spawnCommand(
+    `git --no-pager ${args}`,
+    cwd,
+    signal,
+  ).wait();
   return (result.stdout + result.stderr).trim();
 }
 
@@ -13,7 +21,10 @@ export function gitTools(): AgentTool[] {
     description: `Read-only git ${action} for the workspace.`,
     permission: "safe" as const,
     inputSchema: { type: "object", properties: {} },
-    execute: async (_input: unknown, context: import("./types").ToolContext) => {
+    execute: async (
+      _input: unknown,
+      context: import("./types").ToolContext,
+    ) => {
       const cwd = safePath(context.workspace, ".");
       const result = await spawnCommand(
         `git --no-pager ${action}`,
@@ -43,7 +54,12 @@ export function gitTools(): AgentTool[] {
         runGit("diff --stat HEAD", cwd, context.signal),
       ]);
       return {
-        content: JSON.stringify({ branch, status, recentCommits: log, diffStat: diff }),
+        content: JSON.stringify({
+          branch,
+          status,
+          recentCommits: log,
+          diffStat: diff,
+        }),
       };
     },
   };

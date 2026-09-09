@@ -91,7 +91,11 @@ class UsageLimitManager {
       dailyUsed: rec.dailyUsed,
       dailyResetAt: rec.dailyResetAt,
       isLimitReached,
-      limitType: isDailyReached ? "daily" : isHourlyReached ? "hourly" : undefined,
+      limitType: isDailyReached
+        ? "daily"
+        : isHourlyReached
+          ? "hourly"
+          : undefined,
     };
   }
 
@@ -105,9 +109,10 @@ class UsageLimitManager {
     return result;
   }
 
-  public checkAndIncrement(
-    modelId: string,
-  ): { allowed: boolean; limitInfo: ModelUsageLimit } {
+  public checkAndIncrement(modelId: string): {
+    allowed: boolean;
+    limitInfo: ModelUsageLimit;
+  } {
     const limitInfo = this.getModelUsage(modelId);
     if (limitInfo.isLimitReached) {
       return { allowed: false, limitInfo };

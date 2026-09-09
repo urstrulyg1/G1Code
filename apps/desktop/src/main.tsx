@@ -1,5 +1,11 @@
 import "./api-client";
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { createRoot } from "react-dom/client";
 import Editor, { DiffEditor } from "@monaco-editor/react";
 import {
@@ -43,6 +49,7 @@ import {
   User,
   X,
   Zap,
+  Copy,
 } from "lucide-react";
 import "./styles.css";
 
@@ -52,11 +59,19 @@ type Event = {
   type: string;
   state?: string;
   message?: string;
+  detail?: string;
   toolName?: string;
   toolCallId?: string;
   changeId?: string;
   input?: unknown;
   result?: unknown;
+  command?: string;
+  action?: string;
+  stream?: "stdout" | "stderr";
+  chunk?: string;
+  exitCode?: number;
+  duration?: number;
+  at?: string;
 };
 type Change = {
   id: string;
@@ -162,8 +177,10 @@ function renderMarkdown(
       nodes.push(
         <div className="md-code-block" key={key()}>
           {lang && <div className="md-code-lang">{lang}</div>}
-          <pre><code>{codeLines.join("\n")}</code></pre>
-        </div>
+          <pre>
+            <code>{codeLines.join("\n")}</code>
+          </pre>
+        </div>,
       );
       continue;
     }
@@ -173,7 +190,11 @@ function renderMarkdown(
     if (headingMatch) {
       const level = headingMatch[1].length;
       const Tag = `h${level}` as "h1" | "h2" | "h3" | "h4";
-      nodes.push(<Tag className={`md-h${level}`} key={key()}>{inlineMarkdown(headingMatch[2], openFile, workspace, key)}</Tag>);
+      nodes.push(
+        <Tag className={`md-h${level}`} key={key()}>
+          {inlineMarkdown(headingMatch[2], openFile, workspace, key)}
+        </Tag>,
+      );
       i++;
       continue;
     }
@@ -194,8 +215,13 @@ function renderMarkdown(
       }
       nodes.push(
         <blockquote className="md-blockquote" key={key()}>
-          {quoteLines.map((ql, qi) => <span key={qi}>{inlineMarkdown(ql, openFile, workspace, key)}<br /></span>)}
-        </blockquote>
+          {quoteLines.map((ql, qi) => (
+            <span key={qi}>
+              {inlineMarkdown(ql, openFile, workspace, key)}
+              <br />
+            </span>
+          ))}
+        </blockquote>,
       );
       continue;
     }
@@ -209,8 +235,10 @@ function renderMarkdown(
       }
       nodes.push(
         <ul className="md-ul" key={key()}>
-          {items.map((item, ii) => <li key={ii}>{inlineMarkdown(item, openFile, workspace, key)}</li>)}
-        </ul>
+          {items.map((item, ii) => (
+            <li key={ii}>{inlineMarkdown(item, openFile, workspace, key)}</li>
+          ))}
+        </ul>,
       );
       continue;
     }
@@ -224,8 +252,10 @@ function renderMarkdown(
       }
       nodes.push(
         <ol className="md-ol" key={key()}>
-          {items.map((item, ii) => <li key={ii}>{inlineMarkdown(item, openFile, workspace, key)}</li>)}
-        </ol>
+          {items.map((item, ii) => (
+            <li key={ii}>{inlineMarkdown(item, openFile, workspace, key)}</li>
+          ))}
+        </ol>,
       );
       continue;
     }
@@ -241,7 +271,7 @@ function renderMarkdown(
     nodes.push(
       <p className="md-p" key={key()}>
         {inlineMarkdown(line, openFile, workspace, key)}
-      </p>
+      </p>,
     );
     i++;
   }
@@ -256,19 +286,33 @@ function inlineMarkdown(
   key: () => number,
 ): React.ReactNode {
   // Split on inline code, bold, italic, and file paths
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|_[^_]+_|\/[\w./\-]+\.[a-z]{1,5})/g;
+  const pattern =
+    /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|_[^_]+_|\/[\w./\-]+\.[a-z]{1,5})/g;
   const parts = text.split(pattern);
   return parts.map((part) => {
     if (part.startsWith("`") && part.endsWith("`")) {
-      return <code className="md-inline-code" key={key()}>{part.slice(1, -1)}</code>;
+      return (
+        <code className="md-inline-code" key={key()}>
+          {part.slice(1, -1)}
+        </code>
+      );
     }
-    if ((part.startsWith("**") && part.endsWith("**")) || (part.startsWith("__") && part.endsWith("__"))) {
+    if (
+      (part.startsWith("**") && part.endsWith("**")) ||
+      (part.startsWith("__") && part.endsWith("__"))
+    ) {
       return <strong key={key()}>{part.slice(2, -2)}</strong>;
     }
-    if ((part.startsWith("*") && part.endsWith("*")) || (part.startsWith("_") && part.endsWith("_"))) {
+    if (
+      (part.startsWith("*") && part.endsWith("*")) ||
+      (part.startsWith("_") && part.endsWith("_"))
+    ) {
       return <em key={key()}>{part.slice(1, -1)}</em>;
     }
-    if (/^\/[\w./\-]+\.[a-z]{1,5}$/.test(part) && workspace !== "No workspace open") {
+    if (
+      /^\/[\w./\-]+\.[a-z]{1,5}$/.test(part) &&
+      workspace !== "No workspace open"
+    ) {
       return (
         <span
           key={key()}
@@ -282,6 +326,74 @@ function inlineMarkdown(
     }
     return <React.Fragment key={key()}>{part}</React.Fragment>;
   });
+}
+
+function cleanAssistantText(raw: string): string {
+  if (!raw) return "";
+  // Strip closed <think>...</think> blocks
+  let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  // Strip unclosed <think>... if streaming in progress
+  cleaned = cleaned.replace(/<think>[\s\S]*$/gi, "");
+  // Strip <scratchpad> blocks
+  cleaned = cleaned.replace(/<scratchpad>[\s\S]*?<\/scratchpad>/gi, "");
+  cleaned = cleaned.replace(/<scratchpad>[\s\S]*$/gi, "");
+  return cleaned.trim();
+}
+
+/**
+ * Fold a single incoming agent event into the event list.
+ * Shared by the live SSE stream and by session-history replay so both paths
+ * produce identical timelines:
+ *  - consecutive `text` chunks are concatenated into one bubble
+ *  - `command` chunks attach to their tool call
+ *  - a resolved `approval` (with `result`) updates the pending card in place
+ */
+function mergeAgentEvent(old: Event[], event: Event): Event[] {
+  if (event.type === "text") {
+    if (!event.message) return old;
+    const last = old[old.length - 1];
+    if (last && last.type === "text") {
+      return [
+        ...old.slice(0, -1),
+        { ...last, message: (last.message || "") + event.message },
+      ];
+    }
+    return [...old, event];
+  }
+
+  if (event.type === "command" && event.action === "chunk" && event.toolCallId) {
+    const idx = old.findIndex(
+      (e) =>
+        (e.type === "command" || e.type === "tool") &&
+        e.toolCallId === event.toolCallId,
+    );
+    if (idx !== -1) {
+      const copy = [...old];
+      copy[idx] = {
+        ...copy[idx],
+        chunk: (copy[idx].chunk || "") + (event.chunk || event.message || ""),
+      };
+      return copy;
+    }
+  }
+
+  if (event.type === "approval" && event.result && event.changeId) {
+    const idx = old.findIndex((e) => {
+      if (e.type !== "approval") return false;
+      const inputId =
+        e.input && typeof e.input === "object"
+          ? (e.input as { changeId?: string }).changeId
+          : undefined;
+      return (inputId || e.changeId) === event.changeId;
+    });
+    if (idx !== -1) {
+      const copy = [...old];
+      copy[idx] = { ...copy[idx], result: event.result, message: event.message };
+      return copy;
+    }
+  }
+
+  return [...old, event];
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -329,7 +441,9 @@ function App() {
     const saved = localStorage.getItem("g1code_drawer_height");
     return saved ? Math.max(80, Math.min(650, Number(saved))) : 220;
   });
-  const [resizingPane, setResizingPane] = useState<"sidebar" | "agent" | "drawer" | null>(null);
+  const [resizingPane, setResizingPane] = useState<
+    "sidebar" | "agent" | "drawer" | null
+  >(null);
   const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
 
   // Keep workspaceRef in sync so closures always see the latest workspace
@@ -356,73 +470,91 @@ function App() {
   }, [drawerHeight]);
 
   // Drag Sidebar (Left Tile Splitter)
-  const startResizingSidebar = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setResizingPane("sidebar");
-    const startX = e.clientX;
-    const startW = sidebarWidth;
+  const startResizingSidebar = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setResizingPane("sidebar");
+      const startX = e.clientX;
+      const startW = sidebarWidth;
 
-    const onMouseMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - startX;
-      const nextW = Math.max(160, Math.min(window.innerWidth * 0.45, startW + delta));
-      setSidebarWidth(Math.round(nextW));
-    };
+      const onMouseMove = (ev: MouseEvent) => {
+        const delta = ev.clientX - startX;
+        const nextW = Math.max(
+          160,
+          Math.min(window.innerWidth * 0.45, startW + delta),
+        );
+        setSidebarWidth(Math.round(nextW));
+      };
 
-    const onMouseUp = () => {
-      setResizingPane(null);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
+      const onMouseUp = () => {
+        setResizingPane(null);
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      };
 
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  }, [sidebarWidth]);
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [sidebarWidth],
+  );
 
   // Drag Agent Workspace (Right Tile Splitter)
-  const startResizingAgent = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setResizingPane("agent");
-    const startX = e.clientX;
-    const startW = agentWidth;
+  const startResizingAgent = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setResizingPane("agent");
+      const startX = e.clientX;
+      const startW = agentWidth;
 
-    const onMouseMove = (ev: MouseEvent) => {
-      const delta = startX - ev.clientX; // dragging left expands width
-      const nextW = Math.max(280, Math.min(window.innerWidth * 0.65, startW + delta));
-      setAgentWidth(Math.round(nextW));
-    };
+      const onMouseMove = (ev: MouseEvent) => {
+        const delta = startX - ev.clientX; // dragging left expands width
+        const nextW = Math.max(
+          280,
+          Math.min(window.innerWidth * 0.65, startW + delta),
+        );
+        setAgentWidth(Math.round(nextW));
+      };
 
-    const onMouseUp = () => {
-      setResizingPane(null);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
+      const onMouseUp = () => {
+        setResizingPane(null);
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      };
 
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  }, [agentWidth]);
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [agentWidth],
+  );
 
   // Drag Bottom Drawer (Bottom Tile Splitter)
-  const startResizingDrawer = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setResizingPane("drawer");
-    const startY = e.clientY;
-    const startH = drawerHeight;
+  const startResizingDrawer = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setResizingPane("drawer");
+      const startY = e.clientY;
+      const startH = drawerHeight;
 
-    const onMouseMove = (ev: MouseEvent) => {
-      const delta = startY - ev.clientY; // dragging up increases height
-      const nextH = Math.max(80, Math.min(window.innerHeight * 0.75, startH + delta));
-      setDrawerHeight(Math.round(nextH));
-    };
+      const onMouseMove = (ev: MouseEvent) => {
+        const delta = startY - ev.clientY; // dragging up increases height
+        const nextH = Math.max(
+          80,
+          Math.min(window.innerHeight * 0.75, startH + delta),
+        );
+        setDrawerHeight(Math.round(nextH));
+      };
 
-    const onMouseUp = () => {
-      setResizingPane(null);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
+      const onMouseUp = () => {
+        setResizingPane(null);
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      };
 
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  }, [drawerHeight]);
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [drawerHeight],
+  );
 
   // Center Monaco Editor State
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -497,12 +629,84 @@ function App() {
       return next;
     });
 
+  // Antigravity + Codex execution timeline interactive states
+  const [expandedCommands, setExpandedCommands] = useState<Set<string>>(
+    new Set(),
+  );
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
+  const [copiedCommandId, setCopiedCommandId] = useState<string | null>(null);
+  const [showAllLinesCommands, setShowAllLinesCommands] = useState<Set<string>>(
+    new Set(),
+  );
+  const [liveElapsedSeconds, setLiveElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!running) {
+      setLiveElapsedSeconds(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setLiveElapsedSeconds((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+
+  const toggleCommand = (id: string) => {
+    setExpandedCommands((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleFile = (id: string) => {
+    setExpandedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleShowAllLines = (id: string) => {
+    setShowAllLinesCommands((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const copyOutput = (id: string, text: string) => {
+    void navigator.clipboard.writeText(text);
+    setCopiedCommandId(id);
+    setTimeout(() => {
+      setCopiedCommandId((curr) => (curr === id ? null : curr));
+    }, 2000);
+  };
+
   // Structured Timeline (retired fake state — now driven by real events)
   // keep a ref to the last submitted prompt for Retry
   const lastPromptRef = useRef<string>("");
   const workspaceRef = useRef<string>(workspace);
   const agentBodyRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
+  // Refs mirrored from state so the long-lived SSE listener (registered once
+  // on mount) never reads stale closures.
+  const sessionIdRef = useRef<string>("");
+  const runningRef = useRef<boolean>(false);
+  /** True between clicking Send and receiving the sessionId from the server. */
+  const pendingSessionRef = useRef<boolean>(false);
+  const loadChangesRef = useRef<() => Promise<void>>(async () => {});
+  /** Whether the chat body is scrolled to (near) the bottom; gates auto-scroll. */
+  const stickToBottomRef = useRef<boolean>(true);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+  useEffect(() => {
+    runningRef.current = running;
+  }, [running]);
 
   // Experiential Labs Provider & Models (Dynamically loaded directly from ExperientialLabs.ai)
   const [settings, setSettings] = useState<SettingsType>({
@@ -682,48 +886,68 @@ function App() {
     }
 
     const offEvent = window.g1code.onAgentEvent((value) => {
-      const event = value as Event;
-      setEvents((old) => {
-        // Accumulate streaming text into the active text message
-        if (event.type === "text" && event.message) {
-          const last = old[old.length - 1];
-          if (last && last.type === "text") {
-            return [
-              ...old.slice(0, -1),
-              { ...last, message: (last.message || "") + event.message },
-            ];
-          }
-        }
-        return [...old, event];
-      });
+      const event = value as Event & { sessionId?: string };
+
+      // The server broadcasts every session's events to every SSE client.
+      // Only render events that belong to the session this panel is showing.
+      // (While the POST /api/agent/start is in flight we don't yet know the
+      // id, so `pendingSessionRef` lets the very first events through.)
+      const currentId = sessionIdRef.current;
+      if (event.sessionId && currentId && event.sessionId !== currentId) return;
+      if (event.sessionId && !currentId && !pendingSessionRef.current) return;
+      if (event.sessionId && !currentId) {
+        sessionIdRef.current = event.sessionId;
+        setSessionId(event.sessionId);
+      }
+
+      setEvents((old) => mergeAgentEvent(old, event));
 
       if (
         event.type === "done" ||
-        event.type === "error" ||
         ["COMPLETED", "FAILED", "STOPPED", "CANCELLED"].includes(
           event.state ?? "",
         )
       ) {
         setRunning(false);
-        // Refresh changes and git status on completion — use ref to avoid stale closure
-        void loadChanges();
+        pendingSessionRef.current = false;
+        setPermission(null);
+        void loadChangesRef.current();
         void loadGitAndProblems(workspaceRef.current);
+        if (workspaceRef.current !== "No workspace open") {
+          void window.g1code
+            .listSessions(workspaceRef.current)
+            .then(setSessions)
+            .catch(() => {});
+        }
       }
       if (event.state === "WAITING_FOR_CHANGE_APPROVAL") {
-        void loadChanges();
+        void loadChangesRef.current();
+      }
+      if (event.type === "approval" && event.result) {
+        // A change was applied/rejected — pending list changed
+        void loadChangesRef.current();
       }
       if (event.type === "command" && event.message) {
         setTerminalOutput(
           (old) => `${old}${event.message!.replace(/^COMMAND_[A-Z]+ /, "")}\n`,
         );
-        setBottomTab("terminal");
       }
     });
 
     const offPermission = window.g1code.onPermissionRequest((value) => {
-      setPermission(
-        value as { requestId: string; tool: string; input: unknown },
-      );
+      const req = value as {
+        requestId: string;
+        tool: string;
+        input: unknown;
+        sessionId?: string;
+      };
+      if (
+        req.sessionId &&
+        sessionIdRef.current &&
+        req.sessionId !== sessionIdRef.current
+      )
+        return;
+      setPermission(req);
     });
 
     return () => {
@@ -748,21 +972,26 @@ function App() {
   };
 
   const loadChanges = async () => {
-    if (workspace === "No workspace open") return;
+    const ws = workspaceRef.current;
+    const sid = sessionIdRef.current;
+    if (ws === "No workspace open" || !sid) return;
     try {
-      const list = await window.g1code.listChanges(workspace, sessionId);
+      const list = await window.g1code.listChanges(ws, sid);
       setChanges(list);
       void reloadOpenTabs();
     } catch {
       // ignore
     }
   };
+  loadChangesRef.current = loadChanges;
 
   const openNativeProjectFolder = async () => {
     try {
       if (window.g1code?.openNativeFolder) {
         const targetPath =
-          workspace && workspace !== "No workspace open" ? workspace : undefined;
+          workspace && workspace !== "No workspace open"
+            ? workspace
+            : undefined;
         await window.g1code.openNativeFolder(targetPath);
       }
     } catch (err) {
@@ -775,16 +1004,20 @@ function App() {
     // folder picker — opens the OS panel directly with no intermediate dialog.
     if (typeof (window as any).showDirectoryPicker === "function") {
       try {
-        const handle = await (window as any).showDirectoryPicker({ mode: "read" });
+        const handle = await (window as any).showDirectoryPicker({
+          mode: "read",
+        });
         const folderName: string = handle.name;
         // Resolve to absolute path via the server's cwd
-        const { cwd } = await fetch("/api/workspace/cwd").then((r) => r.json()) as { cwd: string };
+        const { cwd } = (await fetch("/api/workspace/cwd").then((r) =>
+          r.json(),
+        )) as { cwd: string };
         const absolutePath = cwd.replace(/\/+$/, "") + "/" + folderName;
-        const { workspace: serverWs } = await fetch("/api/workspace/choose", {
+        const { workspace: serverWs } = (await fetch("/api/workspace/choose", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path: absolutePath }),
-        }).then((r) => r.json()) as { workspace: string };
+        }).then((r) => r.json())) as { workspace: string };
         const finalWs = serverWs || absolutePath;
         setWorkspace(finalWs);
         setWorkspaceInput(finalWs);
@@ -807,11 +1040,11 @@ function App() {
     const chosen = workspaceInput.trim();
     try {
       // Tell the server which workspace to use, then load it
-      const { workspace: serverWs } = await fetch("/api/workspace/choose", {
+      const { workspace: serverWs } = (await fetch("/api/workspace/choose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: chosen }),
-      }).then((r) => r.json()) as { workspace: string };
+      }).then((r) => r.json())) as { workspace: string };
       const finalWs = serverWs || chosen;
       setWorkspace(finalWs);
       setWorkspaceInput(finalWs);
@@ -920,45 +1153,78 @@ function App() {
 
   const switchSession = async (sessId: string) => {
     if (workspace === "No workspace open" || !sessId) return;
+    if (sessId === sessionId) {
+      setShowSessionHistory(false);
+      return;
+    }
     try {
+      // A live stream (if any) belongs to the previous session — stop showing it.
+      setRunning(false);
+      pendingSessionRef.current = false;
+      setPermission(null);
       setSessionId(sessId);
+      sessionIdRef.current = sessId;
       setShowSessionHistory(false);
       const targetSession = sessions.find((s) => s.id === sessId);
       if (targetSession) {
         setSessionTitle(targetSession.title);
+        if (targetSession.model) setSelectedModel(targetSession.model);
       }
-      const sessEvents = await window.g1code.loadSessionEvents(workspace, sessId);
+      const sessEvents = await window.g1code.loadSessionEvents(
+        workspace,
+        sessId,
+      );
       if (Array.isArray(sessEvents)) {
         // DB records have shape { id, sessionId, eventType, payload }
-        // payload IS the original AgentEvent ({ type, state, message, ... })
-        // Merge consecutive streaming text chunks into a single event (same as live)
-        const rawEvents: Event[] = sessEvents.map((e: any) => {
+        // payload IS the original AgentEvent ({ type, state, message, ... }).
+        // Replay through the same merger the live stream uses so history
+        // renders identically (text chunks collapsed, approvals resolved…).
+        let merged: Event[] = [];
+        for (const e of sessEvents as any[]) {
           const ev = e?.payload ?? e?.data ?? e;
-          // Normalise eventType → type (DB stores eventType, renderer expects type)
-          if (ev && !ev.type && e?.eventType) {
-            return { ...ev, type: e.eventType.toLowerCase() };
+          if (!ev || typeof ev !== "object") continue;
+          const normalized: Event =
+            !ev.type && e?.eventType
+              ? { ...ev, type: String(e.eventType).toLowerCase() }
+              : (ev as Event);
+          // Server-side bookkeeping rows aren't renderable timeline events.
+          if (
+            [
+              "test_run_recorded",
+              "repair_attempt_recorded",
+              "change_batch_applied",
+              "model_changed",
+            ].includes(normalized.type)
+          )
+            continue;
+          if (normalized.type === "session_discarded") {
+            merged = mergeAgentEvent(merged, {
+              type: "state",
+              state: "STOPPED",
+              message: normalized.message,
+            });
+            continue;
           }
-          return ev as Event;
-        });
-
-        // Collapse consecutive text events (replays streaming chunks as one bubble)
-        const merged: Event[] = [];
-        for (const ev of rawEvents) {
-          if (ev.type === "text" && ev.message) {
-            const last = merged[merged.length - 1];
-            if (last && last.type === "text") {
-              merged[merged.length - 1] = {
-                ...last,
-                message: (last.message || "") + ev.message,
-              };
-              continue;
-            }
-          }
-          merged.push(ev);
+          merged = mergeAgentEvent(merged, normalized);
         }
         setEvents(merged);
-        // Restore the user task prompt from the session title (full prompt stored as title)
-        setUserTaskPrompt(targetSession?.title || "");
+        // Prefer the persisted user message; fall back to the (truncated) title.
+        try {
+          const full = (await window.g1code.loadSession(workspace, sessId)) as {
+            messages?: Array<{ role: string; content: string }>;
+          };
+          const firstUser = full?.messages?.find((m) => m.role === "user");
+          setUserTaskPrompt(firstUser?.content || targetSession?.title || "");
+        } catch {
+          setUserTaskPrompt(targetSession?.title || "");
+        }
+        // If this session is still running on the server, resume the live view.
+        if (
+          targetSession?.status === "RUNNING" ||
+          targetSession?.status === "WAITING_FOR_APPROVAL"
+        ) {
+          setRunning(true);
+        }
       }
       const sessChanges = await window.g1code.listChanges(workspace, sessId);
       if (Array.isArray(sessChanges)) {
@@ -1014,8 +1280,11 @@ function App() {
 
   // Agent Actions
   const startAgent = async (overridePrompt?: string) => {
-    const task = overridePrompt || agentPrompt;
-    if (!task.trim()) return;
+    const task = (overridePrompt || agentPrompt).trim();
+    if (!task) return;
+    // Guard against starting a second session while one is streaming
+    // (the Send button is disabled, but Enter in the textarea is not).
+    if (runningRef.current || pendingSessionRef.current) return;
 
     if (workspace === "No workspace open") {
       setWorkspaceModal(true);
@@ -1077,16 +1346,26 @@ function App() {
     }
 
     setRunning(true);
+    runningRef.current = true;
+    // Start a fresh session: clear the previous id so the SSE listener accepts
+    // the first events of the new session (matched via pendingSessionRef).
+    setSessionId("");
+    sessionIdRef.current = "";
+    pendingSessionRef.current = true;
+    setPermission(null);
+    stickToBottomRef.current = true;
     // Reset events; re-add any pre-flight notice so it isn't lost
     setEvents(
-      preflightNotice
-        ? [{ type: "text", message: preflightNotice }]
-        : [],
+      preflightNotice ? [{ type: "notice", message: preflightNotice }] : [],
     );
     setChanges([]);
     setUserTaskPrompt(task);
     setSessionTitle(task.length > 50 ? task.slice(0, 50) + "…" : task);
     lastPromptRef.current = task;
+    // Clear the composer immediately so the UI feels responsive
+    setAgentPrompt("");
+    setAttachedContext([]);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     try {
       const res = await window.g1code.startAgent({
@@ -1098,14 +1377,20 @@ function App() {
         provider: "experiential-labs",
         attachedContext,
       });
+      // Events may already have arrived and set the id; don't overwrite with a
+      // different one (would indicate a mismatch — trust the server response).
       setSessionId(res.sessionId);
-      setAgentPrompt("");
-      setAttachedContext([]);
+      sessionIdRef.current = res.sessionId;
+      pendingSessionRef.current = false;
       if (window.g1code.getUsageLimits) {
         void window.g1code.getUsageLimits().then((l) => l && setUsageLimits(l));
       }
     } catch (err) {
       setRunning(false);
+      runningRef.current = false;
+      pendingSessionRef.current = false;
+      // Restore the prompt so the user can fix and resend
+      setAgentPrompt(task);
       setEvents((old) => [
         ...old,
         {
@@ -1116,11 +1401,19 @@ function App() {
     }
   };
 
-  // Auto-scroll agent body to bottom whenever new events arrive
+  // Auto-scroll agent body to bottom whenever new events arrive — but only if
+  // the user hasn't scrolled up to read something (don't yank them back down).
   useEffect(() => {
     const el = agentBodyRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [events]);
+    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, [events, running, permission, changes.length]);
+
+  const handleChatScroll = useCallback(() => {
+    const el = agentBodyRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distance < 48;
+  }, []);
 
   // Auto-scroll terminal panel to bottom on new output
   useEffect(() => {
@@ -1256,11 +1549,73 @@ function App() {
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, []);
 
-  // Autocomplete triggers
+  // ── Composer autocomplete ──────────────────────────────────────────────────
+  const SLASH_ACTIONS = useMemo(
+    () => [
+      { cmd: "plan", desc: "Formulate step-by-step implementation plan" },
+      { cmd: "test", desc: "Run test suite and diagnose failures" },
+      { cmd: "review", desc: "Perform deep code review" },
+      { cmd: "debug", desc: "Analyze bug with stack trace diagnosis" },
+      { cmd: "refactor", desc: "Behavior-preserving code cleanups" },
+      { cmd: "git", desc: "Inspect and commit repository changes" },
+    ],
+    [],
+  );
+  const contextItems = useMemo(() => {
+    const files = entries
+      .filter((e) => e.name.toLowerCase().includes(contextFilter.toLowerCase()))
+      .slice(0, 6)
+      .map((e) => ({ id: e.name, label: e.name, kind: e.kind as string }));
+    const extras = [
+      { id: "Problems", label: `Problems (${problems.length})`, kind: "virtual" },
+      { id: "GitChanges", label: "Git Changes", kind: "virtual" },
+    ].filter((x) => x.id.toLowerCase().includes(contextFilter.toLowerCase()));
+    return [...files, ...extras];
+  }, [entries, contextFilter, problems.length]);
+  const slashItems = useMemo(
+    () => SLASH_ACTIONS.filter((a) => a.cmd.includes(actionFilter.toLowerCase())),
+    [SLASH_ACTIONS, actionFilter],
+  );
+  const [autocompleteIndex, setAutocompleteIndex] = useState(0);
+  useEffect(() => {
+    setAutocompleteIndex(0);
+  }, [contextFilter, actionFilter, showContextPicker, showActionPicker]);
+
   const handlePromptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const popoverOpen =
+      (showContextPicker && contextItems.length > 0) ||
+      (showActionPicker && slashItems.length > 0);
+
+    if (popoverOpen) {
+      const count = showContextPicker ? contextItems.length : slashItems.length;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setAutocompleteIndex((i) => (i + 1) % count);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setAutocompleteIndex((i) => (i - 1 + count) % count);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setShowContextPicker(false);
+        setShowActionPicker(false);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        if (showContextPicker) insertContextMention(contextItems[autocompleteIndex].id);
+        else insertSlashAction(slashItems[autocompleteIndex].cmd);
+        return;
+      }
+    }
+
     // Enter without shift → send; Cmd/Ctrl+Enter also sends
     if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
+      if (running) return; // don't start a second session while streaming
       void startAgent();
       return;
     }
@@ -1280,8 +1635,9 @@ function App() {
       setShowContextPicker(false);
     }
 
-    // Check for / slash command
-    const slashMatch = val.match(/\/([a-zA-Z0-9_\-]*)$/);
+    // Check for / slash command (only at start of input or after whitespace,
+    // so typing a file path like src/foo doesn't pop the menu)
+    const slashMatch = val.match(/(?:^|\s)\/([a-zA-Z0-9_\-]*)$/);
     if (slashMatch) {
       setShowActionPicker(true);
       setActionFilter(slashMatch[1] || "");
@@ -1325,9 +1681,10 @@ function App() {
     if (modelFilterTab === "free") return isTrulyFree(m);
     if (modelFilterTab === "tools") return m.supportsTools;
     // Use the recommendedRole assigned dynamically from the API, not hardcoded id fragments
-    if (modelFilterTab === "reasoning") return m.recommendedRole === "reasoning";
-    if (modelFilterTab === "coding")  return m.recommendedRole === "coding";
-    if (modelFilterTab === "fast")    return m.recommendedRole === "fast";
+    if (modelFilterTab === "reasoning")
+      return m.recommendedRole === "reasoning";
+    if (modelFilterTab === "coding") return m.recommendedRole === "coding";
+    if (modelFilterTab === "fast") return m.recommendedRole === "fast";
     if (modelFilterTab === "balanced") return m.recommendedRole === "balanced";
     return true; // "all"
   });
@@ -1346,7 +1703,9 @@ function App() {
     const limit = usageLimits[m.id];
     const isLimited = limit?.isLimitReached === true;
     const resetAt = isLimited
-      ? (limit.limitType === "daily" ? limit.dailyResetAt : limit.hourlyResetAt)
+      ? limit.limitType === "daily"
+        ? limit.dailyResetAt
+        : limit.hourlyResetAt
       : 0;
     const secondsUntilReset = isLimited
       ? Math.max(0, Math.ceil((resetAt - Date.now()) / 1000))
@@ -1355,8 +1714,8 @@ function App() {
       ? secondsUntilReset > 3600
         ? `Resets in ${Math.ceil(secondsUntilReset / 3600)}h`
         : secondsUntilReset > 60
-        ? `Resets in ${Math.ceil(secondsUntilReset / 60)}m`
-        : `Resets in ${secondsUntilReset}s`
+          ? `Resets in ${Math.ceil(secondsUntilReset / 60)}m`
+          : `Resets in ${secondsUntilReset}s`
       : "";
 
     const rankNumber = index + 1;
@@ -1364,16 +1723,18 @@ function App() {
       rankNumber === 1
         ? "model-rank-badge rank-1"
         : rankNumber === 2
-        ? "model-rank-badge rank-2"
-        : rankNumber === 3
-        ? "model-rank-badge rank-3"
-        : "model-rank-badge";
+          ? "model-rank-badge rank-2"
+          : rankNumber === 3
+            ? "model-rank-badge rank-3"
+            : "model-rank-badge";
 
     const rankLabel = rankNumber === 1 ? "★ #1" : `#${rankNumber}`;
 
     const isGenericDesc =
       !m.description ||
-      m.description.includes("Free ($0 input / $0 output) model on Experiential Labs gateway");
+      m.description.includes(
+        "Free ($0 input / $0 output) model on Experiential Labs gateway",
+      );
 
     return (
       <div
@@ -1396,14 +1757,15 @@ function App() {
           </div>
           <div className="model-badges-group">
             {m.recommendedRole && (
-              <span className="model-role-badge">
-                {m.recommendedRole}
-              </span>
+              <span className="model-role-badge">{m.recommendedRole}</span>
             )}
             {isLimited ? (
               <span className="model-limit-badge">LIMIT REACHED</span>
             ) : isTrulyFree(m) ? (
-              <span className="model-free-pill" title={m.pricingFormatted || "Free ($0 input / $0 output)"}>
+              <span
+                className="model-free-pill"
+                title={m.pricingFormatted || "Free ($0 input / $0 output)"}
+              >
                 <Zap size={10} /> Free · $0/M
               </span>
             ) : (
@@ -1436,10 +1798,18 @@ function App() {
         )}
 
         <div className="model-caps-row">
-          <span className="model-cap-tag">{m.contextWindowFormatted || "128K"} Context</span>
-          {m.supportsTools && <span className="model-cap-tag cap-accent">Tools ✓</span>}
-          {m.supportsStreaming !== false && <span className="model-cap-tag">Streaming ✓</span>}
-          {m.supportsVision && <span className="model-cap-tag cap-accent">Vision ✓</span>}
+          <span className="model-cap-tag">
+            {m.contextWindowFormatted || "128K"} Context
+          </span>
+          {m.supportsTools && (
+            <span className="model-cap-tag cap-accent">Tools ✓</span>
+          )}
+          {m.supportsStreaming !== false && (
+            <span className="model-cap-tag">Streaming ✓</span>
+          )}
+          {m.supportsVision && (
+            <span className="model-cap-tag cap-accent">Vision ✓</span>
+          )}
           <span className="model-host-label">Experiential Cloud</span>
         </div>
       </div>
@@ -2056,7 +2426,10 @@ function App() {
             />
           )}
           {showBottomPanel && (
-            <div className="bottom-drawer" style={{ height: `${drawerHeight}px` }}>
+            <div
+              className="bottom-drawer"
+              style={{ height: `${drawerHeight}px` }}
+            >
               <div className="drawer-tabs">
                 <button
                   className={`drawer-tab ${bottomTab === "terminal" ? "active" : ""}`}
@@ -2167,7 +2540,8 @@ function App() {
                       ))
                     ) : (
                       <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                        No test runs recorded for this session. Use the terminal or ask the agent to run tests.
+                        No test runs recorded for this session. Use the terminal
+                        or ask the agent to run tests.
                       </div>
                     )}
                   </div>
@@ -2219,7 +2593,8 @@ function App() {
                         }}
                       >
                         <span style={{ color: "var(--accent-agent)" }}>●</span>
-                        System ready. Agent activity, tool calls, and execution steps will appear here in real-time.
+                        System ready. Agent activity, tool calls, and execution
+                        steps will appear here in real-time.
                       </div>
                     )}
                   </div>
@@ -2240,7 +2615,10 @@ function App() {
 
         {/* 4. Right-Side Agent Workspace (Antigravity / BOB Style) */}
         {showAgentWorkspace && (
-          <aside className="agent-workspace" style={{ width: `${agentWidth}px` }}>
+          <aside
+            className="agent-workspace"
+            style={{ width: `${agentWidth}px` }}
+          >
             {/* Header */}
             <div className="agent-header">
               <div className="agent-title-col">
@@ -2261,13 +2639,19 @@ function App() {
                 <button
                   className="agent-icon-btn"
                   onClick={() => {
+                    if (running && sessionId) window.g1code.stopAgent(sessionId);
+                    setRunning(false);
+                    pendingSessionRef.current = false;
                     setSessionId("");
+                    sessionIdRef.current = "";
                     setSessionTitle("");
                     setUserTaskPrompt("");
                     setEvents([]);
                     setChanges([]);
+                    setPermission(null);
                     setAgentPrompt("");
                     lastPromptRef.current = "";
+                    textareaRef.current?.focus();
                   }}
                   title="New Task / Reset"
                 >
@@ -2276,7 +2660,9 @@ function App() {
                 {running && (
                   <button
                     className="agent-icon-btn agent-icon-btn--stop"
-                    onClick={() => sessionId && window.g1code.stopAgent(sessionId)}
+                    onClick={() =>
+                      sessionId && window.g1code.stopAgent(sessionId)
+                    }
                     title="Stop Agent"
                   >
                     <X size={16} />
@@ -2328,23 +2714,39 @@ function App() {
                         className={`session-history-item ${s.id === sessionId ? "active" : ""}`}
                         onClick={() => void switchSession(s.id)}
                       >
-                        <div className="session-history-title">{s.title || "Untitled Task"}</div>
+                        <div className="session-history-title">
+                          {s.title || "Untitled Task"}
+                        </div>
                         <div className="session-history-meta">
-                          <span className={`session-status-tag status-${s.status.toLowerCase()}`}>{s.status}</span>
+                          <span
+                            className={`session-status-tag status-${s.status.toLowerCase()}`}
+                          >
+                            {s.status}
+                          </span>
                           <span className="session-mode-tag">{s.mode}</span>
-                          {s.model && <span className="session-model-name">{s.model.split("/").pop()}</span>}
+                          {s.model && (
+                            <span className="session-model-name">
+                              {s.model.split("/").pop()}
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))
                   ) : (
-                    <div className="session-history-empty">No past sessions found</div>
+                    <div className="session-history-empty">
+                      No past sessions found
+                    </div>
                   )}
                 </div>
               </div>
             )}
 
             {/* Bob-style Chat Body */}
-            <div className="chat-body" ref={agentBodyRef}>
+            <div
+              className="chat-body"
+              ref={agentBodyRef}
+              onScroll={handleChatScroll}
+            >
               {/* Empty state */}
               {!userTaskPrompt && events.length === 0 && (
                 <div className="chat-empty-state">
@@ -2353,7 +2755,8 @@ function App() {
                   </div>
                   <div className="chat-empty-title">G1Code Agent</div>
                   <div className="chat-empty-hint">
-                    Ask anything. The agent will inspect, plan, edit, and verify autonomously.
+                    Ask anything. The agent will inspect, plan, edit, and verify
+                    autonomously.
                   </div>
                   <div className="chat-empty-pills">
                     {[
@@ -2381,382 +2784,1563 @@ function App() {
               {userTaskPrompt && (
                 <div className="chat-row chat-row--user">
                   <div className="chat-bubble chat-bubble--user">
-                    {userTaskPrompt}
+                    <div className="chat-bubble-meta chat-bubble-meta--user">
+                      <span>You</span>
+                      <span className="chat-mode-chip">{agentMode}</span>
+                    </div>
+                    <div className="chat-user-text">{userTaskPrompt}</div>
+                  </div>
+                  <div className="chat-avatar chat-avatar--user">
+                    <User size={13} />
                   </div>
                 </div>
               )}
 
-              {/* Bob-style event feed — tools grouped into collapsible activity blocks */}
+              {/* Antigravity + Codex execution timeline */}
               {(() => {
-                // ── Segment events into activity groups and standalone events ──────
-                type Segment =
-                  | { kind: "activity"; events: Event[]; groupKey: string }
-                  | { kind: "event"; ev: Event; idx: number };
+                type ToolItem = {
+                  id: string;
+                  toolName: string;
+                  command?: string;
+                  input?: any;
+                  result?: any;
+                  status: "running" | "completed" | "failed" | "cancelled";
+                  exitCode?: number;
+                  duration?: number;
+                  stdout?: string;
+                  stderr?: string;
+                  chunk?: string;
+                  diff?: string;
+                  path?: string;
+                  lineCount?: number;
+                  matchesCount?: number;
+                };
 
-                const segments: Segment[] = [];
+                type TimelineSegment =
+                  | { kind: "text"; message: string; idx: number }
+                  | { kind: "tools"; items: ToolItem[]; key: string }
+                  | { kind: "approval"; ev: Event; idx: number }
+                  | { kind: "error"; ev: Event; idx: number }
+                  | { kind: "failover"; message: string; idx: number }
+                  | {
+                      kind: "state";
+                      state: string;
+                      message?: string;
+                      idx: number;
+                    };
+
+                const segments: TimelineSegment[] = [];
                 let i = 0;
+
                 while (i < events.length) {
                   const ev = events[i];
-                  const isToolOrState =
-                    ev.type === "tool" ||
-                    (ev.type === "state" &&
-                      ev.state !== "IDLE" &&
-                      !["COMPLETED", "FAILED", "CANCELLED", "STOPPED"].includes(ev.state ?? "") &&
-                      !(ev.message?.includes("[Failover]") || ev.message?.includes("Switched automatically")));
 
-                  if (isToolOrState) {
-                    const groupEvents: Event[] = [];
+                  // 1. Approval
+                  if (ev.type === "approval") {
+                    segments.push({ kind: "approval", ev, idx: i });
+                    i++;
+                    continue;
+                  }
+
+                  // 2. Error
+                  if (ev.type === "error") {
+                    segments.push({ kind: "error", ev, idx: i });
+                    i++;
+                    continue;
+                  }
+
+                  // 3. System notice (model failover / auto-switch)
+                  if (
+                    ev.type === "notice" ||
+                    (ev.type !== "text" &&
+                      (ev.message?.includes("[Failover]") ||
+                        ev.message?.includes("Switched automatically")))
+                  ) {
+                    segments.push({
+                      kind: "failover",
+                      message: ev.message || "",
+                      idx: i,
+                    });
+                    i++;
+                    continue;
+                  }
+
+                  // 4. Streaming or completed text
+                  if (ev.type === "text" && ev.message) {
+                    const cleaned = cleanAssistantText(ev.message);
+                    if (cleaned) {
+                      segments.push({ kind: "text", message: cleaned, idx: i });
+                    }
+                    i++;
+                    continue;
+                  }
+
+                  // 5. Done event carrying text without prior text
+                  if (ev.type === "done" && ev.message) {
+                    const hasTextBefore = events
+                      .slice(0, i)
+                      .some((e) => e.type === "text" && e.message);
+                    if (!hasTextBefore) {
+                      const cleaned = cleanAssistantText(ev.message);
+                      if (cleaned) {
+                        segments.push({
+                          kind: "text",
+                          message: cleaned,
+                          idx: i,
+                        });
+                      }
+                    }
+                    i++;
+                    continue;
+                  }
+
+                  // 6. Tool or command activities (collect consecutive tool/command events)
+                  const isToolOrCommand =
+                    ev.type === "tool" ||
+                    ev.type === "command" ||
+                    (ev.type === "state" &&
+                      ev.state &&
+                      ![
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "STOPPED",
+                        "IDLE",
+                      ].includes(ev.state));
+
+                  if (isToolOrCommand) {
+                    const toolEvents: Event[] = [];
                     const startIdx = i;
                     while (i < events.length) {
                       const cur = events[i];
-                      const stillTool =
+                      const stillToolOrCommand =
                         cur.type === "tool" ||
+                        cur.type === "command" ||
                         (cur.type === "state" &&
-                          cur.state !== "IDLE" &&
-                          !["COMPLETED", "FAILED", "CANCELLED", "STOPPED"].includes(cur.state ?? "") &&
-                          !(cur.message?.includes("[Failover]") || cur.message?.includes("Switched automatically")));
-                      if (!stillTool) break;
-                      groupEvents.push(cur);
+                          cur.state &&
+                          ![
+                            "COMPLETED",
+                            "FAILED",
+                            "CANCELLED",
+                            "STOPPED",
+                            "IDLE",
+                          ].includes(cur.state));
+                      if (!stillToolOrCommand) break;
+                      toolEvents.push(cur);
                       i++;
                     }
-                    segments.push({ kind: "activity", events: groupEvents, groupKey: `grp-${startIdx}` });
-                  } else {
-                    segments.push({ kind: "event", ev, idx: i });
-                    i++;
+
+                    // Correlate tool events by toolCallId
+                    const toolMap = new Map<string, ToolItem>();
+                    const toolOrder: string[] = [];
+
+                    for (const te of toolEvents) {
+                      if (te.type === "state") continue;
+
+                      const id =
+                        te.toolCallId ||
+                        (te.input &&
+                        typeof te.input === "object" &&
+                        (te.input as any).command
+                          ? `cmd-${(te.input as any).command}`
+                          : te.command
+                            ? `cmd-${te.command}`
+                            : `tool-${te.toolName || "action"}-${startIdx}`);
+
+                      let item = toolMap.get(id);
+                      if (!item) {
+                        item = {
+                          id,
+                          toolName:
+                            te.toolName ||
+                            (te.command ? "run_command" : "tool"),
+                          // Start as running; a later result/exit event resolves it.
+                          status: "running",
+                        };
+                        toolMap.set(id, item);
+                        toolOrder.push(id);
+                      }
+
+                      if (te.toolName) item.toolName = te.toolName;
+                      if (te.input !== undefined) item.input = te.input;
+                      if (te.command) item.command = te.command;
+                      if (
+                        !item.command &&
+                        te.input &&
+                        typeof te.input === "object"
+                      ) {
+                        if ((te.input as any).command)
+                          item.command = (te.input as any).command;
+                        else if ((te.input as any).paths) {
+                          const p = (te.input as any).paths;
+                          item.command = Array.isArray(p)
+                            ? `run_tests ${p.join(" ")}`
+                            : "run_tests";
+                        }
+                      }
+
+                      if (te.chunk) {
+                        item.chunk = (item.chunk || "") + te.chunk;
+                      }
+
+                      if (te.exitCode !== undefined) {
+                        item.exitCode = te.exitCode;
+                        item.status =
+                          te.exitCode === 0 ? "completed" : "failed";
+                      }
+                      if (te.duration !== undefined) {
+                        item.duration = te.duration;
+                      }
+
+                      if (te.action === "completed") {
+                        item.status = "completed";
+                      } else if (te.action === "failed") {
+                        item.status = "failed";
+                      }
+
+                      if (te.result !== undefined) {
+                        item.result = te.result;
+                        const res = te.result as any;
+                        if (res && typeof res === "object") {
+                          if (res.exitCode !== undefined) {
+                            item.exitCode = res.exitCode;
+                            item.status =
+                              res.exitCode === 0 ? "completed" : "failed";
+                          } else if (res.isError) {
+                            item.status = "failed";
+                          } else {
+                            item.status = "completed";
+                          }
+                          if (res.duration !== undefined)
+                            item.duration = res.duration;
+                          if (res.stdout !== undefined)
+                            item.stdout = res.stdout;
+                          if (res.stderr !== undefined)
+                            item.stderr = res.stderr;
+                          if (res.diff !== undefined) item.diff = res.diff;
+                          if (res.path !== undefined) item.path = res.path;
+                          if (res.lineCount !== undefined)
+                            item.lineCount = res.lineCount;
+                          if (res.matchesCount !== undefined)
+                            item.matchesCount = res.matchesCount;
+                        }
+                      }
+
+                      // Try parsing JSON content if result is string or has JSON content
+                      if (
+                        item.result &&
+                        typeof item.result === "object" &&
+                        typeof (item.result as any).content === "string"
+                      ) {
+                        try {
+                          const parsed = JSON.parse(
+                            (item.result as any).content,
+                          );
+                          if (parsed && typeof parsed === "object") {
+                            if (
+                              parsed.exitCode !== undefined &&
+                              item.exitCode === undefined
+                            ) {
+                              item.exitCode = parsed.exitCode;
+                              item.status =
+                                parsed.exitCode === 0 ? "completed" : "failed";
+                            }
+                            if (
+                              parsed.duration !== undefined &&
+                              item.duration === undefined
+                            ) {
+                              item.duration = parsed.duration;
+                            }
+                            if (parsed.stdout !== undefined && !item.stdout)
+                              item.stdout = parsed.stdout;
+                            if (parsed.stderr !== undefined && !item.stderr)
+                              item.stderr = parsed.stderr;
+                            if (parsed.diff !== undefined && !item.diff)
+                              item.diff = parsed.diff;
+                            if (parsed.path !== undefined && !item.path)
+                              item.path = parsed.path;
+                            if (
+                              parsed.lineCount !== undefined &&
+                              !item.lineCount
+                            )
+                              item.lineCount = parsed.lineCount;
+                            if (parsed.command && !item.command)
+                              item.command = parsed.command;
+                          }
+                        } catch {
+                          // not JSON
+                        }
+                      }
+                    }
+
+                    const items = toolOrder
+                      .map((id) => toolMap.get(id)!)
+                      .filter(Boolean);
+                    // Anything still "running" once the agent has stopped never
+                    // reported back (cancelled / history replay) — don't spin forever.
+                    if (!running) {
+                      for (const it of items) {
+                        if (it.status === "running") it.status = "cancelled";
+                      }
+                    }
+                    if (items.length > 0) {
+                      segments.push({
+                        kind: "tools",
+                        items,
+                        key: `tool-seq-${startIdx}`,
+                      });
+                    }
+                    continue;
                   }
+
+                  // 7. State events
+                  if (ev.type === "state" && ev.state && ev.state !== "IDLE") {
+                    segments.push({
+                      kind: "state",
+                      state: ev.state,
+                      message: ev.message,
+                      idx: i,
+                    });
+                    i++;
+                    continue;
+                  }
+
+                  i++;
                 }
 
-                // ── Render each segment ───────────────────────────────────────────
-                return segments.map((seg) => {
-                  // ── Activity group block ──────────────────────────────────────
-                  if (seg.kind === "activity") {
-                    const grpKey = seg.groupKey;
-                    const isExpanded = expandedGroups.has(grpKey);
-                    const toolEvts = seg.events.filter((e) => e.type === "tool");
-                    const isDone = toolEvts.every((e) => Boolean(e.result || e.message?.includes("completed")));
-                    const hasFail = toolEvts.some((e) => e.message?.includes("failed"));
+                // Collect summary data for completed task
+                const isTaskCompleted = events.some(
+                  (e) => e.type === "state" && e.state === "COMPLETED",
+                );
+                const summaryValidations: Array<{
+                  command: string;
+                  passed: boolean;
+                  duration?: number;
+                  exitCode?: number;
+                }> = [];
+                const summaryChanges: string[] = [];
+                const summaryFilesChanged: string[] = [];
 
-                    // Build summary counts: files read, searches, commands, writes
-                    let fileCount = 0, searchCount = 0, cmdCount = 0, writeCount = 0;
-                    for (const e of toolEvts) {
-                      if (!e.input) continue;
-                      const n = e.toolName || "";
-                      if (n === "read_file" || n === "list_directory") fileCount++;
-                      else if (n === "search_files" || n === "search_symbols") searchCount++;
-                      else if (n === "run_command" || n === "run_tests") cmdCount++;
-                      else if (n === "write_file" || n === "apply_patch") writeCount++;
-                      else fileCount++; // fallback count
+                for (const seg of segments) {
+                  if (seg.kind === "tools") {
+                    for (const item of seg.items) {
+                      const isCmd =
+                        item.toolName === "run_command" ||
+                        item.toolName === "run_tests" ||
+                        Boolean(item.command);
+                      if (isCmd && item.command) {
+                        summaryValidations.push({
+                          command: item.command,
+                          passed: item.status === "completed",
+                          duration: item.duration,
+                          exitCode: item.exitCode,
+                        });
+                      }
+                      if (
+                        item.toolName === "write_file" ||
+                        item.toolName === "apply_patch"
+                      ) {
+                        const targetPath =
+                          item.path || (item.input as any)?.path;
+                        if (
+                          targetPath &&
+                          !summaryFilesChanged.includes(targetPath)
+                        ) {
+                          summaryFilesChanged.push(targetPath);
+                        }
+                      }
                     }
-                    const summaryParts: string[] = [];
-                    if (fileCount > 0) summaryParts.push(`${fileCount} file${fileCount > 1 ? "s" : ""}`);
-                    if (searchCount > 0) summaryParts.push(`${searchCount} search${searchCount > 1 ? "es" : ""}`);
-                    if (cmdCount > 0) summaryParts.push(`${cmdCount} command${cmdCount > 1 ? "s" : ""}`);
-                    if (writeCount > 0) summaryParts.push(`${writeCount} edit${writeCount > 1 ? "s" : ""}`);
-                    const summary = summaryParts.length > 0 ? summaryParts.join(", ") : `${toolEvts.length} action${toolEvts.length !== 1 ? "s" : ""}`;
+                  }
+                }
+                for (const ch of changes) {
+                  if (ch.path && !summaryFilesChanged.includes(ch.path)) {
+                    summaryFilesChanged.push(ch.path);
+                  }
+                }
+                if (summaryFilesChanged.length > 0) {
+                  summaryChanges.push(
+                    `Updated ${summaryFilesChanged.length} file${summaryFilesChanged.length > 1 ? "s" : ""}`,
+                  );
+                }
+                if (summaryValidations.length > 0) {
+                  const passedCount = summaryValidations.filter(
+                    (v) => v.passed,
+                  ).length;
+                  summaryChanges.push(
+                    `Verified ${passedCount}/${summaryValidations.length} command${summaryValidations.length > 1 ? "s" : ""} passed`,
+                  );
+                }
 
-                    return (
-                      <div className="activity-group" key={grpKey}>
-                        {/* Collapsible header row */}
-                        <button
-                          className={`activity-group-header ${hasFail ? "activity-group-header--fail" : isDone ? "activity-group-header--done" : "activity-group-header--running"}`}
-                          onClick={() => toggleGroup(grpKey)}
-                        >
-                          <span className="activity-group-icon">
-                            {hasFail ? (
-                              <AlertTriangle size={13} />
-                            ) : isDone ? (
-                              <CheckCircle2 size={13} />
-                            ) : (
-                              <RefreshCw size={12} className="spin-icon" />
+                // Current action description while working
+                const currentActiveAction = (() => {
+                  for (let idx = events.length - 1; idx >= 0; idx--) {
+                    const e = events[idx];
+                    if (e.type === "command" && e.command) {
+                      return `Running ${e.command}`;
+                    }
+                    if (e.type === "tool" && e.toolName) {
+                      if (
+                        e.toolName === "run_command" ||
+                        e.toolName === "run_tests"
+                      ) {
+                        const cmd =
+                          (e.input as any)?.command ||
+                          (e.input as any)?.paths ||
+                          "";
+                        return `Running ${cmd || "command"}...`;
+                      }
+                      if (e.toolName === "read_file") {
+                        const p = (e.input as any)?.path || "";
+                        return `Reading ${p || "file"}...`;
+                      }
+                      if (e.toolName === "search_files") {
+                        const q = (e.input as any)?.query || "";
+                        return `Searching "${q}"...`;
+                      }
+                      if (
+                        e.toolName === "write_file" ||
+                        e.toolName === "apply_patch"
+                      ) {
+                        const p = (e.input as any)?.path || "";
+                        return `Editing ${p || "file"}...`;
+                      }
+                      return `${e.toolName.replace(/_/g, " ")}...`;
+                    }
+                    if (e.type === "state" && e.state && e.state !== "IDLE") {
+                      return `${e.state.replace(/_/g, " ").toLowerCase()}...`;
+                    }
+                  }
+                  return "Inspecting project...";
+                })();
+
+                return (
+                  <div className="activity-timeline">
+                    {segments.map((seg, sIdx) => {
+                      // ── 1. Assistant Text Bubble ──────────────────────────────────────────
+                      if (seg.kind === "text") {
+                        const isLastSegment = sIdx === segments.length - 1;
+                        const isStreaming =
+                          running &&
+                          isLastSegment &&
+                          events[events.length - 1]?.type === "text";
+                        const copyKey = `text-${seg.idx}`;
+                        return (
+                          <div
+                            className="chat-row chat-row--assistant"
+                            key={copyKey}
+                          >
+                            <div className="chat-avatar chat-avatar--bot">
+                              <Bot size={14} />
+                            </div>
+                            <div
+                              className={`chat-bubble chat-bubble--assistant ${isStreaming ? "chat-bubble--streaming" : ""}`}
+                            >
+                              <div className="chat-bubble-meta">
+                                <span className="chat-model-label">
+                                  {activeModelMeta.name || selectedModel}
+                                </span>
+                                {!isStreaming && (
+                                  <button
+                                    className={`chat-bubble-copy ${copiedCommandId === copyKey ? "chat-bubble-copy--done" : ""}`}
+                                    onClick={() =>
+                                      copyOutput(copyKey, seg.message)
+                                    }
+                                    title="Copy message"
+                                  >
+                                    {copiedCommandId === copyKey ? (
+                                      <Check size={11} />
+                                    ) : (
+                                      <Copy size={11} />
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                              <div className="chat-markdown">
+                                {renderMarkdown(
+                                  seg.message,
+                                  openFile,
+                                  workspace,
+                                )}
+                                {isStreaming && (
+                                  <span className="chat-stream-caret" />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // ── 2. Failover / System Notice ───────────────────────────────────────
+                      if (seg.kind === "failover") {
+                        return (
+                          <div
+                            className="chat-system-notice"
+                            key={`failover-${seg.idx}`}
+                          >
+                            <Sparkles size={12} color="var(--accent-model)" />
+                            <span>
+                              {seg.message.replace(/^\[Failover\]\s*/, "")}
+                            </span>
+                          </div>
+                        );
+                      }
+
+                      // ── 3. Approval Card ──────────────────────────────────────────────────
+                      if (seg.kind === "approval") {
+                        const { ev } = seg;
+                        const changeInput = ev.input as
+                          | {
+                              changeId?: string;
+                              path?: string;
+                              diff?: string;
+                              status?: string;
+                            }
+                          | undefined;
+                        const targetChangeId =
+                          changeInput?.changeId || ev.changeId;
+                        const filePath =
+                          changeInput?.path ||
+                          (ev.toolName ? `${ev.toolName}` : "File change");
+                        const isApplied =
+                          ev.result &&
+                          typeof ev.result === "object" &&
+                          (ev.result as any).status === "APPLIED";
+                        const isRejected =
+                          ev.result &&
+                          typeof ev.result === "object" &&
+                          (ev.result as any).status === "REJECTED";
+                        return (
+                          <div
+                            className={`chat-approval-card ${isApplied ? "chat-approval-card--applied" : isRejected ? "chat-approval-card--rejected" : ""}`}
+                            key={`appr-${seg.idx}`}
+                          >
+                            <div className="chat-approval-header">
+                              {isApplied ? (
+                                <CheckCircle2 size={13} />
+                              ) : isRejected ? (
+                                <X size={13} />
+                              ) : (
+                                <GitFork size={13} />
+                              )}
+                              <span>
+                                {isApplied
+                                  ? "Change Applied"
+                                  : isRejected
+                                    ? "Change Rejected"
+                                    : "Approval Required"}
+                              </span>
+                              <code className="chat-approval-file">
+                                {filePath}
+                              </code>
+                            </div>
+                            {changeInput?.diff && (
+                              <pre className="chat-approval-diff">
+                                {changeInput.diff
+                                  .split("\n")
+                                  .slice(0, 8)
+                                  .join("\n")}
+                              </pre>
                             )}
-                          </span>
-                          <span className="activity-group-label">
-                            {hasFail ? "Failed" : isDone ? "Explored" : "Exploring"}
-                          </span>
-                          <span className="activity-group-summary">{summary}</span>
-                          <span className="activity-group-chevron">
-                            {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                          </span>
-                        </button>
+                            {!isApplied && !isRejected && targetChangeId && (
+                              <div className="chat-approval-actions">
+                                <button
+                                  className="chat-approval-btn chat-approval-btn--neutral"
+                                  onClick={() => {
+                                    const found = changes.find(
+                                      (c) => c.id === targetChangeId,
+                                    );
+                                    if (found) setActiveDiff(found);
+                                    else if (changeInput) {
+                                      setActiveDiff({
+                                        id: targetChangeId,
+                                        path: changeInput.path || filePath,
+                                        patch: changeInput.diff || "",
+                                        status: "pending_approval",
+                                      });
+                                    }
+                                  }}
+                                >
+                                  <ExternalLink size={12} /> View Diff
+                                </button>
+                                <button
+                                  className="chat-approval-btn chat-approval-btn--approve"
+                                  onClick={() =>
+                                    void approveChange(targetChangeId)
+                                  }
+                                >
+                                  <Check size={12} /> Apply
+                                </button>
+                                <button
+                                  className="chat-approval-btn chat-approval-btn--reject"
+                                  onClick={() =>
+                                    void rejectChange(targetChangeId)
+                                  }
+                                >
+                                  <X size={12} /> Reject
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
 
-                        {/* Expanded detail rows */}
-                        {isExpanded && (
-                          <div className="activity-group-body">
-                            {seg.events.map((e, ei) => {
-                              if (e.type === "state") {
+                      // ── 4. Error Bubble ───────────────────────────────────────────────────
+                      if (seg.kind === "error") {
+                        const { ev } = seg;
+                        return (
+                          <div
+                            className="chat-row chat-row--assistant"
+                            key={`err-${seg.idx}`}
+                          >
+                            <div className="chat-avatar chat-avatar--error">
+                              <AlertTriangle size={14} />
+                            </div>
+                            <div className="chat-bubble chat-bubble--error">
+                              <div className="chat-error-title">Error</div>
+                              <div className="chat-error-body">
+                                {ev.message}
+                              </div>
+                              <div className="chat-error-actions">
+                                {lastPromptRef.current && !running && (
+                                  <button
+                                    className="chat-action-btn chat-action-btn--retry"
+                                    onClick={() =>
+                                      void startAgent(lastPromptRef.current)
+                                    }
+                                  >
+                                    <RefreshCw size={12} /> Retry
+                                  </button>
+                                )}
+                                {ev.message
+                                  ?.toLowerCase()
+                                  .includes("api key") && (
+                                  <button
+                                    className="chat-action-btn"
+                                    onClick={() => setSettingsOpen(true)}
+                                  >
+                                    <Key size={12} /> Configure Key
+                                  </button>
+                                )}
+                                {ev.message
+                                  ?.toLowerCase()
+                                  .includes("workspace") && (
+                                  <button
+                                    className="chat-action-btn"
+                                    onClick={() => setWorkspaceModal(true)}
+                                  >
+                                    <FolderOpen size={12} /> Open Workspace
+                                  </button>
+                                )}
+                                {ev.message
+                                  ?.toLowerCase()
+                                  .includes("model") && (
+                                  <button
+                                    className="chat-action-btn"
+                                    onClick={() => setModelPickerOpen(true)}
+                                  >
+                                    <Sparkles size={12} /> Switch Model
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // ── 5. Terminal State Pill ─────────────────────────────────────────────
+                      if (seg.kind === "state") {
+                        const stateClass: Record<string, string> = {
+                          COMPLETED: "chat-state-pill--done",
+                          FAILED: "chat-state-pill--fail",
+                          CANCELLED: "chat-state-pill--stopped",
+                          STOPPED: "chat-state-pill--stopped",
+                        };
+                        return (
+                          <div
+                            className={`chat-state-pill ${stateClass[seg.state] || ""}`}
+                            key={`state-${seg.idx}`}
+                          >
+                            {seg.state === "COMPLETED" ? (
+                              <CheckCircle2 size={11} />
+                            ) : (
+                              <AlertTriangle size={11} />
+                            )}
+                            <span>{seg.state.replace(/_/g, " ")}</span>
+                            {seg.message && (
+                              <span className="chat-state-pill-msg">
+                                {seg.message}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      // ── 6. Tool & Command Execution Activities ────────────────────────────
+                      if (seg.kind === "tools") {
+                        // Group consecutive inspection (read/search) operations if >= 2
+                        type DisplayUnit =
+                          | { type: "command"; item: ToolItem }
+                          | { type: "edit"; item: ToolItem }
+                          | {
+                              type: "inspection_group";
+                              items: ToolItem[];
+                              groupKey: string;
+                            }
+                          | { type: "single_inspection"; item: ToolItem }
+                          | { type: "generic"; item: ToolItem };
+
+                        const units: DisplayUnit[] = [];
+                        let u = 0;
+                        while (u < seg.items.length) {
+                          const it = seg.items[u];
+                          const isCmd =
+                            it.toolName === "run_command" ||
+                            it.toolName === "run_tests" ||
+                            Boolean(it.command);
+                          const isEdit =
+                            it.toolName === "write_file" ||
+                            it.toolName === "apply_patch";
+                          const isInsp = [
+                            "read_file",
+                            "list_directory",
+                            "search_files",
+                            "search_symbols",
+                            "get_git_status",
+                          ].includes(it.toolName);
+
+                          if (isCmd) {
+                            units.push({ type: "command", item: it });
+                            u++;
+                          } else if (isEdit) {
+                            units.push({ type: "edit", item: it });
+                            u++;
+                          } else if (isInsp) {
+                            // Check how many consecutive inspections
+                            const inspGroup: ToolItem[] = [];
+                            const startU = u;
+                            while (u < seg.items.length) {
+                              const nextIt = seg.items[u];
+                              const nextInsp = [
+                                "read_file",
+                                "list_directory",
+                                "search_files",
+                                "search_symbols",
+                                "get_git_status",
+                              ].includes(nextIt.toolName);
+                              if (!nextInsp) break;
+                              inspGroup.push(nextIt);
+                              u++;
+                            }
+                            if (inspGroup.length >= 2) {
+                              units.push({
+                                type: "inspection_group",
+                                items: inspGroup,
+                                groupKey: `${seg.key}-insp-${startU}`,
+                              });
+                            } else {
+                              units.push({
+                                type: "single_inspection",
+                                item: inspGroup[0],
+                              });
+                            }
+                          } else {
+                            units.push({ type: "generic", item: it });
+                            u++;
+                          }
+                        }
+
+                        // Render each display unit
+                        return (
+                          <div
+                            className="activity-timeline-group"
+                            key={seg.key}
+                          >
+                            {units.map((unit, unitIdx) => {
+                              // A. Command Card
+                              if (unit.type === "command") {
+                                const cmd = unit.item;
+                                const isCmdExpanded = expandedCommands.has(
+                                  cmd.id,
+                                );
+                                const hasError = cmd.status === "failed";
+                                const isCmdRunning =
+                                  cmd.status === "running" && running;
+                                const isCmdCancelled =
+                                  cmd.status === "cancelled";
+                                const isCmdDone = cmd.status === "completed";
+
+                                const fullOutput =
+                                  (cmd.stdout || "") +
+                                  (cmd.stderr
+                                    ? (cmd.stdout ? "\n" : "") + cmd.stderr
+                                    : "");
+                                const displayOutput =
+                                  fullOutput ||
+                                  cmd.chunk ||
+                                  (isCmdRunning
+                                    ? "Command running..."
+                                    : "Completed with no output.");
+
+                                const errorPreview = hasError
+                                  ? cmd.stderr ||
+                                    (cmd.stdout &&
+                                      cmd.stdout
+                                        .split("\n")
+                                        .slice(-6)
+                                        .join("\n")) ||
+                                    (typeof cmd.result === "string"
+                                      ? cmd.result
+                                      : cmd.result?.content) ||
+                                    `Command failed with exit code ${cmd.exitCode ?? 1}`
+                                  : null;
+
+                                const durationText = cmd.duration
+                                  ? `${(cmd.duration / 1000).toFixed(1)}s`
+                                  : isCmdRunning
+                                    ? `${liveElapsedSeconds}s`
+                                    : null;
+
                                 return (
-                                  <div className="activity-state-row" key={ei}>
-                                    <span className="activity-state-dot" />
-                                    <span className="activity-state-label">{e.state?.replace(/_/g, " ")}</span>
-                                    {e.message && <span className="activity-state-msg">{e.message}</span>}
+                                  <div
+                                    className={`command-card ${hasError ? "command-card--failed" : isCmdRunning ? "command-card--running" : ""}`}
+                                    key={cmd.id}
+                                  >
+                                    <div
+                                      className="command-card-header"
+                                      onClick={() => toggleCommand(cmd.id)}
+                                      title="Click to toggle command output"
+                                    >
+                                      <div className="command-card-title-row">
+                                        <span className="command-toggle-icon">
+                                          {isCmdExpanded ? (
+                                            <ChevronDown size={13} />
+                                          ) : (
+                                            <ChevronRight size={13} />
+                                          )}
+                                        </span>
+                                        <span className="command-prompt-symbol">
+                                          ▶
+                                        </span>
+                                        <code className="command-code-text">
+                                          {cmd.command || "command"}
+                                        </code>
+                                      </div>
+                                      {durationText && (
+                                        <span className="command-duration-badge">
+                                          {durationText}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="command-card-sub">
+                                      <div className="command-status-text">
+                                        {isCmdDone && (
+                                          <span className="command-status--success">
+                                            ✓ Completed · Exit code{" "}
+                                            {cmd.exitCode ?? 0}
+                                          </span>
+                                        )}
+                                        {hasError && (
+                                          <span className="command-status--failed">
+                                            ✗ Failed · Exit code{" "}
+                                            {cmd.exitCode ?? 1}
+                                          </span>
+                                        )}
+                                        {isCmdRunning && (
+                                          <span className="command-status--running">
+                                            ● Running · {durationText || "0s"}
+                                          </span>
+                                        )}
+                                        {isCmdCancelled && (
+                                          <span className="command-status--cancelled">
+                                            ⊘ Cancelled · Exit code: —
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: 6,
+                                        }}
+                                      >
+                                        {isCmdRunning && sessionId && (
+                                          <button
+                                            className="command-stop-btn"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              window.g1code.stopAgent(
+                                                sessionId,
+                                              );
+                                            }}
+                                            title="Stop command"
+                                          >
+                                            <X
+                                              size={10}
+                                              style={{ marginRight: 3 }}
+                                            />{" "}
+                                            Stop
+                                          </button>
+                                        )}
+                                        <button
+                                          className="command-toggle-btn"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleCommand(cmd.id);
+                                          }}
+                                        >
+                                          {isCmdExpanded
+                                            ? "Collapse output ▴"
+                                            : isCmdRunning
+                                              ? "View live output ▾"
+                                              : "Expand output ▾"}
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* Auto error preview for failed commands */}
+                                    {hasError &&
+                                      !isCmdExpanded &&
+                                      errorPreview && (
+                                        <div className="command-error-preview">
+                                          {errorPreview}
+                                        </div>
+                                      )}
+
+                                    {/* Expanded output panel */}
+                                    {isCmdExpanded && (
+                                      <div className="command-output-wrapper">
+                                        <div className="command-output-header">
+                                          <span>Output</span>
+                                          {cmd.exitCode !== undefined && (
+                                            <span>
+                                              Exit code: {cmd.exitCode}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <pre className="command-output-box">
+                                          {(() => {
+                                            const lines =
+                                              displayOutput.split("\n");
+                                            const showAll =
+                                              showAllLinesCommands.has(cmd.id);
+                                            if (
+                                              lines.length > 150 &&
+                                              !showAll
+                                            ) {
+                                              return (
+                                                <>
+                                                  {lines
+                                                    .slice(0, 150)
+                                                    .join("\n")}
+                                                  <div
+                                                    style={{
+                                                      marginTop: 8,
+                                                      color:
+                                                        "var(--text-muted)",
+                                                      fontStyle: "italic",
+                                                    }}
+                                                  >
+                                                    Showing lines 1–150 of{" "}
+                                                    {lines.length} lines.
+                                                  </div>
+                                                </>
+                                              );
+                                            }
+                                            return displayOutput;
+                                          })()}
+                                        </pre>
+                                        <div className="command-actions-bar">
+                                          {displayOutput.split("\n").length >
+                                            150 && (
+                                            <button
+                                              className="command-action-btn"
+                                              onClick={() =>
+                                                toggleShowAllLines(cmd.id)
+                                              }
+                                            >
+                                              {showAllLinesCommands.has(cmd.id)
+                                                ? "Show first 150 lines"
+                                                : `View full output (${displayOutput.split("\n").length} lines)`}
+                                            </button>
+                                          )}
+                                          <button
+                                            className={`command-action-btn ${copiedCommandId === cmd.id ? "command-action-btn--copied" : ""}`}
+                                            onClick={() =>
+                                              copyOutput(cmd.id, displayOutput)
+                                            }
+                                            title="Copy output to clipboard"
+                                          >
+                                            {copiedCommandId === cmd.id ? (
+                                              <Check size={11} />
+                                            ) : (
+                                              <Copy size={11} />
+                                            )}
+                                            <span>
+                                              {copiedCommandId === cmd.id
+                                                ? "Copied!"
+                                                : "Copy output"}
+                                            </span>
+                                          </button>
+                                          <button
+                                            className="command-action-btn"
+                                            onClick={() =>
+                                              toggleCommand(cmd.id)
+                                            }
+                                          >
+                                            Collapse ▴
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               }
-                              const done = Boolean(e.result || e.message?.includes("completed"));
-                              const fail = Boolean(e.message?.includes("failed"));
-                              const inp = e.input && typeof e.input === "object" ? e.input as Record<string, unknown> : null;
-                              const arg = inp
-                                ? String(inp.path || inp.filePath || inp.command || inp.query || inp.pattern || "").slice(0, 70)
-                                : "";
-                              const toolIcon: Record<string, React.ReactNode> = {
-                                read_file: <FileCode size={12} />,
-                                list_directory: <Folder size={12} />,
-                                write_file: <Edit3 size={12} />,
-                                apply_patch: <Edit3 size={12} />,
-                                run_command: <TerminalIcon size={12} />,
-                                run_tests: <CheckCircle2 size={12} />,
-                                search_files: <Search size={12} />,
-                                search_symbols: <Search size={12} />,
-                                get_git_status: <GitBranch size={12} />,
+
+                              // B. File Edit Card
+                              if (unit.type === "edit") {
+                                const it = unit.item;
+                                const isEditExpanded = expandedFiles.has(it.id);
+                                const editPath =
+                                  it.path || (it.input as any)?.path || "file";
+                                const diff =
+                                  it.diff ||
+                                  it.result?.diff ||
+                                  (it.input as any)?.content;
+                                const isCreated =
+                                  (it.input as any)?.search === undefined &&
+                                  !it.result?.diff?.includes("@@");
+
+                                return (
+                                  <div className="file-op-card" key={it.id}>
+                                    <div
+                                      className="file-op-header"
+                                      onClick={() => toggleFile(it.id)}
+                                    >
+                                      <span
+                                        className={`file-op-badge ${isCreated ? "file-op-badge--create" : "file-op-badge--edit"}`}
+                                      >
+                                        <Edit3 size={12} />
+                                        <span>
+                                          {isCreated ? "Created" : "Edited"}
+                                        </span>
+                                      </span>
+                                      <span
+                                        className="file-op-path"
+                                        title={editPath}
+                                      >
+                                        {editPath}
+                                      </span>
+                                      <span className="file-op-chevron">
+                                        {isEditExpanded ? (
+                                          <ChevronUp size={12} />
+                                        ) : (
+                                          <ChevronDown size={12} />
+                                        )}
+                                      </span>
+                                    </div>
+                                    {isEditExpanded && (
+                                      <div className="file-op-body">
+                                        {diff ? (
+                                          <pre className="file-op-diff-pre">
+                                            {diff
+                                              .split("\n")
+                                              .slice(0, 120)
+                                              .map(
+                                                (dl: string, dli: number) => {
+                                                  const cls = dl.startsWith("+")
+                                                    ? "diff-line--add"
+                                                    : dl.startsWith("-")
+                                                      ? "diff-line--del"
+                                                      : dl.startsWith("@")
+                                                        ? "diff-line--info"
+                                                        : "";
+                                                  return (
+                                                    <span
+                                                      key={dli}
+                                                      className={cls}
+                                                    >
+                                                      {dl}
+                                                      {"\n"}
+                                                    </span>
+                                                  );
+                                                },
+                                              )}
+                                          </pre>
+                                        ) : (
+                                          <div
+                                            style={{
+                                              color: "var(--text-muted)",
+                                              fontSize: 11,
+                                            }}
+                                          >
+                                            File modified in workspace.
+                                          </div>
+                                        )}
+                                        <div className="command-actions-bar">
+                                          {it.result?.changeId && (
+                                            <button
+                                              className="command-action-btn"
+                                              onClick={() => {
+                                                const ch = changes.find(
+                                                  (c) =>
+                                                    c.id ===
+                                                    it.result?.changeId,
+                                                );
+                                                if (ch) setActiveDiff(ch);
+                                                else if (diff) {
+                                                  setActiveDiff({
+                                                    id: it.result.changeId,
+                                                    path: editPath,
+                                                    patch: diff,
+                                                    status:
+                                                      it.result.status ||
+                                                      "completed",
+                                                  });
+                                                }
+                                              }}
+                                            >
+                                              <ExternalLink size={11} /> View
+                                              Full Diff
+                                            </button>
+                                          )}
+                                          <button
+                                            className="command-action-btn"
+                                            onClick={() => toggleFile(it.id)}
+                                          >
+                                            Collapse ▴
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              }
+
+                              // Helper for rendering a single inspection card (read or search)
+                              const renderSingleInspection = (
+                                item: ToolItem,
+                              ) => {
+                                const isSearch =
+                                  item.toolName === "search_files" ||
+                                  item.toolName === "search_symbols";
+                                const isRead =
+                                  item.toolName === "read_file" ||
+                                  item.toolName === "list_directory";
+                                const isCardExpanded = expandedFiles.has(
+                                  item.id,
+                                );
+
+                                if (isSearch) {
+                                  const query =
+                                    (item.input as any)?.query ||
+                                    (item.input as any)?.pattern ||
+                                    "";
+                                  const matchesCount =
+                                    item.matchesCount ??
+                                    item.result?.matchesCount;
+                                  return (
+                                    <div className="file-op-card" key={item.id}>
+                                      <div
+                                        className="file-op-header"
+                                        onClick={() => toggleFile(item.id)}
+                                      >
+                                        <span className="file-op-badge">
+                                          <Search size={12} />
+                                          <span>Search</span>
+                                        </span>
+                                        <span className="file-op-path">
+                                          "{query}"
+                                        </span>
+                                        <span className="file-op-meta">
+                                          {matchesCount !== undefined
+                                            ? `${matchesCount} matches`
+                                            : "completed"}
+                                        </span>
+                                        <span className="file-op-chevron">
+                                          {isCardExpanded ? (
+                                            <ChevronUp size={12} />
+                                          ) : (
+                                            <ChevronDown size={12} />
+                                          )}
+                                        </span>
+                                      </div>
+                                      {isCardExpanded && (
+                                        <div className="file-op-body">
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              flexDirection: "column",
+                                              gap: 3,
+                                            }}
+                                          >
+                                            {String(
+                                              item.result?.content ||
+                                                item.result ||
+                                                "",
+                                            )
+                                              .split("\n")
+                                              .filter((l) => Boolean(l.trim()))
+                                              .slice(0, 60)
+                                              .map((line, li) => {
+                                                const matchParts =
+                                                  line.match(
+                                                    /^([^:]+):(\d+):?(.*)/,
+                                                  );
+                                                if (matchParts) {
+                                                  const [
+                                                    ,
+                                                    mPath,
+                                                    mLine,
+                                                    mText,
+                                                  ] = matchParts;
+                                                  return (
+                                                    <div
+                                                      className="file-search-match-row"
+                                                      key={li}
+                                                      onClick={() =>
+                                                        void openFile(mPath)
+                                                      }
+                                                      title={`Open ${mPath}:${mLine}`}
+                                                    >
+                                                      <span className="file-search-match-loc">
+                                                        {mPath}:{mLine}
+                                                      </span>
+                                                      <span className="file-search-match-text">
+                                                        {mText}
+                                                      </span>
+                                                    </div>
+                                                  );
+                                                }
+                                                return (
+                                                  <div
+                                                    key={li}
+                                                    className="file-search-match-row"
+                                                  >
+                                                    <span className="file-search-match-text">
+                                                      {line}
+                                                    </span>
+                                                  </div>
+                                                );
+                                              })}
+                                          </div>
+                                          <div className="command-actions-bar">
+                                            <button
+                                              className="command-action-btn"
+                                              onClick={() =>
+                                                toggleFile(item.id)
+                                              }
+                                            >
+                                              Collapse ▴
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                }
+
+                                if (isRead) {
+                                  const relPath =
+                                    item.path ||
+                                    (item.input as any)?.path ||
+                                    "file";
+                                  const lineCount =
+                                    item.lineCount || item.result?.lineCount;
+                                  return (
+                                    <div className="file-op-card" key={item.id}>
+                                      <div
+                                        className="file-op-header"
+                                        onClick={() => toggleFile(item.id)}
+                                      >
+                                        <span className="file-op-badge">
+                                          <Check size={12} />
+                                          <span>
+                                            {item.toolName === "list_directory"
+                                              ? "List"
+                                              : "Read"}
+                                          </span>
+                                        </span>
+                                        <span
+                                          className="file-op-path"
+                                          title={relPath}
+                                        >
+                                          {relPath}
+                                        </span>
+                                        <span className="file-op-meta">
+                                          {lineCount
+                                            ? `${lineCount} lines`
+                                            : item.toolName === "list_directory"
+                                              ? "directory"
+                                              : "file"}
+                                        </span>
+                                        <span className="file-op-chevron">
+                                          {isCardExpanded ? (
+                                            <ChevronUp size={12} />
+                                          ) : (
+                                            <ChevronDown size={12} />
+                                          )}
+                                        </span>
+                                      </div>
+                                      {isCardExpanded && (
+                                        <div className="file-op-body">
+                                          <pre className="file-op-diff-pre">
+                                            {item.result?.content ||
+                                              (typeof item.result === "string"
+                                                ? item.result
+                                                : JSON.stringify(
+                                                    item.result,
+                                                    null,
+                                                    2,
+                                                  ))}
+                                          </pre>
+                                          <div className="command-actions-bar">
+                                            <button
+                                              className="command-action-btn"
+                                              onClick={() =>
+                                                void openFile(relPath)
+                                              }
+                                            >
+                                              <ExternalLink size={11} /> Open in
+                                              Editor
+                                            </button>
+                                            <button
+                                              className="command-action-btn"
+                                              onClick={() =>
+                                                toggleFile(item.id)
+                                              }
+                                            >
+                                              Collapse ▴
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                }
+
+                                return null;
                               };
+
+                              // C. Single Inspection Card
+                              if (unit.type === "single_inspection") {
+                                return renderSingleInspection(unit.item);
+                              }
+
+                              // D. Grouped Related Inspections (Requirement #14 & #15)
+                              if (unit.type === "inspection_group") {
+                                const isGrpExpanded = expandedGroups.has(
+                                  unit.groupKey,
+                                );
+                                let filesRead = 0;
+                                let searchesDone = 0;
+                                for (const it of unit.items) {
+                                  if (
+                                    it.toolName === "read_file" ||
+                                    it.toolName === "list_directory"
+                                  )
+                                    filesRead++;
+                                  else if (
+                                    it.toolName === "search_files" ||
+                                    it.toolName === "search_symbols"
+                                  )
+                                    searchesDone++;
+                                }
+                                const summaryParts: string[] = [];
+                                if (filesRead > 0)
+                                  summaryParts.push(
+                                    `${filesRead} file${filesRead > 1 ? "s" : ""} read`,
+                                  );
+                                if (searchesDone > 0)
+                                  summaryParts.push(
+                                    `${searchesDone} search${searchesDone > 1 ? "es" : ""}`,
+                                  );
+                                const summaryStr =
+                                  summaryParts.join(", ") ||
+                                  `${unit.items.length} operations`;
+
+                                return (
+                                  <div
+                                    className="activity-group"
+                                    key={unit.groupKey}
+                                  >
+                                    <button
+                                      className="activity-group-header activity-group-header--done"
+                                      onClick={() => toggleGroup(unit.groupKey)}
+                                    >
+                                      <span className="activity-group-icon">
+                                        <CheckCircle2 size={13} />
+                                      </span>
+                                      <span className="activity-group-label">
+                                        Inspected project
+                                      </span>
+                                      <span className="activity-group-summary">
+                                        {summaryStr}
+                                      </span>
+                                      <span className="activity-group-chevron">
+                                        {isGrpExpanded ? (
+                                          <ChevronUp size={12} />
+                                        ) : (
+                                          <ChevronDown size={12} />
+                                        )}
+                                      </span>
+                                    </button>
+                                    {isGrpExpanded && (
+                                      <div className="activity-group-body">
+                                        {unit.items.map((it) =>
+                                          renderSingleInspection(it),
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              }
+
+                              // E. Generic tool card fallback
+                              const it = unit.item;
                               return (
-                                <div
-                                  className={`activity-tool-row ${fail ? "activity-tool-row--fail" : done ? "activity-tool-row--done" : "activity-tool-row--running"}`}
-                                  key={ei}
-                                >
-                                  <span className="activity-tool-icon">
-                                    {fail ? <AlertTriangle size={12} /> : done ? <Check size={12} /> : <RefreshCw size={11} className="spin-icon" />}
-                                  </span>
-                                  <span className="activity-tool-type-icon">
-                                    {toolIcon[e.toolName || ""] || <Zap size={12} />}
-                                  </span>
-                                  <span className="activity-tool-name">{e.toolName || "tool"}</span>
-                                  {arg && <code className="activity-tool-arg">{arg}</code>}
+                                <div className="file-op-card" key={it.id}>
+                                  <div
+                                    className="file-op-header"
+                                    onClick={() => toggleFile(it.id)}
+                                  >
+                                    <span className="file-op-badge">
+                                      <Zap size={12} />
+                                      <span>{it.toolName}</span>
+                                    </span>
+                                    <span className="file-op-path">
+                                      {it.input && typeof it.input === "object"
+                                        ? JSON.stringify(it.input).slice(0, 60)
+                                        : ""}
+                                    </span>
+                                  </div>
                                 </div>
                               );
                             })}
                           </div>
+                        );
+                      }
+
+                      return null;
+                    })}
+
+                    {/* Codex-Style Turn Summary when completed (Requirement #26) */}
+                    {isTaskCompleted && (
+                      <div className="codex-summary-card">
+                        <div className="codex-summary-header">
+                          <CheckCircle2 size={15} />
+                          <span>Completed</span>
+                        </div>
+                        {summaryChanges.length > 0 && (
+                          <div className="codex-summary-section">
+                            <div className="codex-summary-title">Changes</div>
+                            {summaryChanges.map((sc, sci) => (
+                              <div className="codex-summary-item" key={sci}>
+                                <span style={{ color: "#10b981" }}>✓</span>
+                                <span>{sc}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {summaryValidations.length > 0 && (
+                          <div className="codex-summary-section">
+                            <div className="codex-summary-title">
+                              Validation
+                            </div>
+                            {summaryValidations.map((sv, svi) => (
+                              <div className="codex-summary-item" key={svi}>
+                                <span
+                                  style={{
+                                    color: sv.passed ? "#10b981" : "#f43f5e",
+                                  }}
+                                >
+                                  {sv.passed ? "✓" : "✗"}
+                                </span>
+                                <code>{sv.command}</code>
+                                {sv.duration !== undefined && (
+                                  <span
+                                    style={{
+                                      color: "var(--text-muted)",
+                                      fontSize: 11,
+                                    }}
+                                  >
+                                    · {(sv.duration / 1000).toFixed(1)}s
+                                  </span>
+                                )}
+                                {sv.exitCode !== undefined && (
+                                  <span
+                                    style={{
+                                      color: "var(--text-muted)",
+                                      fontSize: 11,
+                                    }}
+                                  >
+                                    · Exit code {sv.exitCode}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {summaryFilesChanged.length > 0 && (
+                          <div className="codex-summary-section">
+                            <div className="codex-summary-title">
+                              Files changed
+                            </div>
+                            {summaryFilesChanged.map((sf, sfi) => (
+                              <div className="codex-summary-item" key={sfi}>
+                                <span className="codex-summary-file-badge">
+                                  M
+                                </span>
+                                <span
+                                  className="agent-file-link"
+                                  onClick={() => void openFile(sf)}
+                                >
+                                  {sf}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         )}
                       </div>
-                    );
-                  }
+                    )}
 
-                  // ── Standalone event ──────────────────────────────────────────
-                  const { ev, idx: i } = seg;
-
-                // Approval card
-                if (ev.type === "approval") {
-                  const changeInput = ev.input as
-                    | { changeId?: string; path?: string; diff?: string; status?: string }
-                    | undefined;
-                  const targetChangeId = changeInput?.changeId || ev.changeId;
-                  const filePath =
-                    changeInput?.path || (ev.toolName ? `${ev.toolName}` : "File change");
-                  const isApplied =
-                    ev.result && typeof ev.result === "object" &&
-                    (ev.result as any).status === "APPLIED";
-                  const isRejected =
-                    ev.result && typeof ev.result === "object" &&
-                    (ev.result as any).status === "REJECTED";
-                  return (
-                    <div className="chat-approval-card" key={`appr-${i}`}>
-                      <div className="chat-approval-header">
-                        <GitFork size={13} />
-                        <span>
-                          {isApplied ? "Change Applied" : isRejected ? "Change Rejected" : "Approval Required"}
-                        </span>
-                        <code className="chat-approval-file">{filePath}</code>
-                      </div>
-                      {changeInput?.diff && (
-                        <pre className="chat-approval-diff">
-                          {changeInput.diff.split("\n").slice(0, 8).join("\n")}
-                        </pre>
-                      )}
-                      {!isApplied && !isRejected && targetChangeId && (
-                        <div className="chat-approval-actions">
-                          <button
-                            className="chat-approval-btn chat-approval-btn--neutral"
-                            onClick={() => {
-                              const found = changes.find((c) => c.id === targetChangeId);
-                              if (found) setActiveDiff(found);
-                              else if (changeInput) {
-                                setActiveDiff({
-                                  id: targetChangeId,
-                                  path: changeInput.path || filePath,
-                                  patch: changeInput.diff || "",
-                                  status: "pending_approval",
-                                });
-                              }
-                            }}
-                          >
-                            <ExternalLink size={12} /> View Diff
-                          </button>
-                          <button
-                            className="chat-approval-btn chat-approval-btn--approve"
-                            onClick={() => void approveChange(targetChangeId)}
-                          >
-                            <Check size={12} /> Apply
-                          </button>
-                          <button
-                            className="chat-approval-btn chat-approval-btn--reject"
-                            onClick={() => void rejectChange(targetChangeId)}
-                          >
-                            <X size={12} /> Reject
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-
-                // Error → error bubble
-                if (ev.type === "error") {
-                  return (
-                    <div className="chat-row chat-row--assistant" key={`err-${i}`}>
-                      <div className="chat-avatar chat-avatar--error">
-                        <AlertTriangle size={14} />
-                      </div>
-                      <div className="chat-bubble chat-bubble--error">
-                        <div className="chat-error-title">Error</div>
-                        <div className="chat-error-body">{ev.message}</div>
-                        <div className="chat-error-actions">
-                          {lastPromptRef.current && !running && (
-                            <button
-                              className="chat-action-btn chat-action-btn--retry"
-                              onClick={() => void startAgent(lastPromptRef.current)}
-                            >
-                              <RefreshCw size={12} /> Retry
-                            </button>
-                          )}
-                          {ev.message?.toLowerCase().includes("api key") && (
-                            <button
-                              className="chat-action-btn"
-                              onClick={() => setSettingsOpen(true)}
-                            >
-                              <Key size={12} /> Configure Key
-                            </button>
-                          )}
-                          {ev.message?.toLowerCase().includes("workspace") && (
-                            <button
-                              className="chat-action-btn"
-                              onClick={() => setWorkspaceModal(true)}
-                            >
-                              <FolderOpen size={12} /> Open Workspace
-                            </button>
-                          )}
-                          {ev.message?.toLowerCase().includes("model") && (
-                            <button
-                              className="chat-action-btn"
-                              onClick={() => setModelPickerOpen(true)}
-                            >
-                              <Sparkles size={12} /> Switch Model
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                  // Failover / auto-switch system notice — must come before text bubble check
-                  if (
-                    ev.message?.includes("[Failover]") ||
-                    ev.message?.includes("Switched automatically")
-                  ) {
-                    return (
-                      <div className="chat-system-notice" key={`failover-${i}`}>
-                        <Sparkles size={12} color="var(--accent-model)" />
-                        <span>{ev.message!.replace(/^\[Failover\]\s*/, "")}</span>
-                      </div>
-                    );
-                  }
-
-                // Streaming text → AI message bubble with markdown
-                // `done` events carry the full accumulated message but the individual
-                // `text` chunks were already merged into a bubble above — skip `done`
-                // when it has no message or when text events already rendered content.
-                if (ev.type === "text" && ev.message) {
-                  return (
-                    <div className="chat-row chat-row--assistant" key={i}>
-                      <div className="chat-avatar chat-avatar--bot">
-                        <Bot size={14} />
-                      </div>
-                      <div className="chat-bubble chat-bubble--assistant">
-                        <div className="chat-bubble-meta">
-                          <span className="chat-model-label">
-                            {activeModelMeta.name || selectedModel}
-                          </span>
-                        </div>
-                        <div className="chat-markdown">
-                          {renderMarkdown(ev.message, openFile, workspace)}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                // `done` event: the runtime emits this with the full accumulated text,
-                // but streaming already rendered it via `text` events.
-                // Only render a bubble if this done event carries content that was
-                // NOT preceded by any text events (non-streaming completion).
-                if (ev.type === "done" && ev.message) {
-                  // Check if any text bubble was already rendered before this event index
-                  const hasTextBefore = events
-                    .slice(0, i)
-                    .some((e) => e.type === "text" && e.message);
-                  if (!hasTextBefore) {
-                    return (
-                      <div className="chat-row chat-row--assistant" key={i}>
-                        <div className="chat-avatar chat-avatar--bot">
-                          <Bot size={14} />
-                        </div>
-                        <div className="chat-bubble chat-bubble--assistant">
-                          <div className="chat-bubble-meta">
-                            <span className="chat-model-label">
-                              {activeModelMeta.name || selectedModel}
+                    {/* Live working indicator — shown while the agent is busy but
+                        not currently streaming text (the streaming bubble has its
+                        own caret). Combines the thinking dots with the current action. */}
+                    {running &&
+                      !permission &&
+                      events[events.length - 1]?.type !== "text" && (
+                        <div className="chat-row chat-row--assistant">
+                          <div className="chat-avatar chat-avatar--bot">
+                            <Bot size={14} />
+                          </div>
+                          <div className="chat-thinking chat-thinking--labelled">
+                            <span className="thinking-dot" />
+                            <span className="thinking-dot" />
+                            <span className="thinking-dot" />
+                            <span className="chat-thinking-label">
+                              {currentActiveAction}
+                            </span>
+                            <span className="chat-thinking-elapsed">
+                              {liveElapsedSeconds}s
                             </span>
                           </div>
-                          <div className="chat-markdown">
-                            {renderMarkdown(ev.message, openFile, workspace)}
-                          </div>
                         </div>
-                      </div>
-                    );
-                  }
-                  return null;
-                }
-
-                  // Terminal state pills (COMPLETED / FAILED / STOPPED / CANCELLED)
-                  if (ev.type === "state" && ev.state && ev.state !== "IDLE") {
-                    const stateClass: Record<string, string> = {
-                      COMPLETED: "chat-state-pill--done",
-                      FAILED: "chat-state-pill--fail",
-                      CANCELLED: "chat-state-pill--stopped",
-                      STOPPED: "chat-state-pill--stopped",
-                    };
-                    return (
-                      <div className={`chat-state-pill ${stateClass[ev.state] || ""}`} key={`state-${i}`}>
-                        {["COMPLETED"].includes(ev.state) ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
-                        <span>{ev.state.replace(/_/g, " ")}</span>
-                        {ev.message && <span className="chat-state-pill-msg">{ev.message}</span>}
-                      </div>
-                    );
-                  }
-
-                  return null;
-                });
+                      )}
+                  </div>
+                );
               })()}
-
-              {/* Streaming indicator — only show thinking dots when NOT already streaming text */}
-              {running && events[events.length - 1]?.type !== "text" && (
-                <div className="chat-row chat-row--assistant">
-                  <div className="chat-avatar chat-avatar--bot">
-                    <Bot size={14} />
-                  </div>
-                  <div className="chat-thinking">
-                    <span className="thinking-dot" />
-                    <span className="thinking-dot" />
-                    <span className="thinking-dot" />
-                  </div>
-                </div>
-              )}
 
               {/* Change Review Bar — only when there are changes */}
               {changes.length > 0 && (
                 <div className="chat-changes-bar">
                   <div className="chat-changes-info">
                     <GitFork size={13} color="var(--accent-warning)" />
-                    <span>{changes.length} file{changes.length > 1 ? "s" : ""} changed</span>
+                    <span>
+                      {changes.length} file{changes.length > 1 ? "s" : ""}{" "}
+                      changed
+                    </span>
                   </div>
                   <div className="chat-changes-actions">
                     <button
@@ -2794,7 +4378,9 @@ function App() {
                   <div className="chat-permission-body">
                     <p className="chat-permission-desc">
                       The agent wants to run{" "}
-                      <code className="chat-permission-tool">{permission.tool}</code>
+                      <code className="chat-permission-tool">
+                        {permission.tool}
+                      </code>
                     </p>
                     {Boolean(permission.input) && (
                       <pre className="chat-permission-input">
@@ -2806,7 +4392,10 @@ function App() {
                     <button
                       className="chat-approval-btn chat-approval-btn--reject"
                       onClick={() => {
-                        window.g1code.respondPermission(permission.requestId, false);
+                        window.g1code.respondPermission(
+                          permission.requestId,
+                          false,
+                        );
                         setPermission(null);
                       }}
                     >
@@ -2815,7 +4404,10 @@ function App() {
                     <button
                       className="chat-approval-btn chat-approval-btn--approve"
                       onClick={() => {
-                        window.g1code.respondPermission(permission.requestId, true);
+                        window.g1code.respondPermission(
+                          permission.requestId,
+                          true,
+                        );
                         setPermission(null);
                       }}
                     >
@@ -2840,45 +4432,35 @@ function App() {
                     }}
                   >
                     ADD CONTEXT (@)
+                    <span className="autocomplete-hint">↑↓ navigate · Enter select</span>
                   </div>
-                  {entries
-                    .filter((e) =>
-                      e.name
-                        .toLowerCase()
-                        .includes(contextFilter.toLowerCase()),
-                    )
-                    .slice(0, 6)
-                    .map((e) => (
-                      <div
-                        className="autocomplete-item"
-                        key={e.name}
-                        onClick={() => insertContextMention(e.name)}
-                      >
-                        <div className="autocomplete-label">
+                  {contextItems.length === 0 && (
+                    <div className="autocomplete-empty">No matches</div>
+                  )}
+                  {contextItems.map((item, idx) => (
+                    <div
+                      className={`autocomplete-item ${idx === autocompleteIndex ? "autocomplete-item--active" : ""}`}
+                      key={item.id}
+                      onMouseEnter={() => setAutocompleteIndex(idx)}
+                      onClick={() => insertContextMention(item.id)}
+                    >
+                      <div className="autocomplete-label">
+                        {item.id === "Problems" ? (
+                          <AlertTriangle size={13} color="var(--accent-warning)" />
+                        ) : item.id === "GitChanges" ? (
+                          <GitBranch size={13} color="var(--accent-agent)" />
+                        ) : item.kind === "directory" ? (
+                          <Folder size={13} />
+                        ) : (
                           <FileCode size={13} />
-                          <span>{e.name}</span>
-                        </div>
-                        <span className="autocomplete-desc">{e.kind}</span>
+                        )}
+                        <span>{item.label}</span>
                       </div>
-                    ))}
-                  <div
-                    className="autocomplete-item"
-                    onClick={() => insertContextMention("Problems")}
-                  >
-                    <div className="autocomplete-label">
-                      <AlertTriangle size={13} color="var(--accent-warning)" />
-                      <span>Problems ({problems.length})</span>
+                      {item.kind !== "virtual" && (
+                        <span className="autocomplete-desc">{item.kind}</span>
+                      )}
                     </div>
-                  </div>
-                  <div
-                    className="autocomplete-item"
-                    onClick={() => insertContextMention("GitChanges")}
-                  >
-                    <div className="autocomplete-label">
-                      <GitBranch size={13} color="var(--accent-agent)" />
-                      <span>Git Changes</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               )}
 
@@ -2894,44 +4476,25 @@ function App() {
                     }}
                   >
                     AGENT ACTIONS (/)
+                    <span className="autocomplete-hint">↑↓ navigate · Enter select</span>
                   </div>
-                  {[
-                    {
-                      cmd: "plan",
-                      desc: "Formulate step-by-step implementation plan",
-                    },
-                    {
-                      cmd: "test",
-                      desc: "Run test suite and diagnose failures",
-                    },
-                    { cmd: "review", desc: "Perform deep code review" },
-                    {
-                      cmd: "debug",
-                      desc: "Analyze bug with stack trace diagnosis",
-                    },
-                    {
-                      cmd: "refactor",
-                      desc: "Behavior-preserving code cleanups",
-                    },
-                    {
-                      cmd: "git",
-                      desc: "Inspect and commit repository changes",
-                    },
-                  ]
-                    .filter((a) => a.cmd.includes(actionFilter.toLowerCase()))
-                    .map((a) => (
-                      <div
-                        className="autocomplete-item"
-                        key={a.cmd}
-                        onClick={() => insertSlashAction(a.cmd)}
-                      >
-                        <div className="autocomplete-label">
-                          <Sparkles size={13} color="var(--accent-model)" />
-                          <span>/{a.cmd}</span>
-                        </div>
-                        <span className="autocomplete-desc">{a.desc}</span>
+                  {slashItems.length === 0 && (
+                    <div className="autocomplete-empty">No matching action</div>
+                  )}
+                  {slashItems.map((a, idx) => (
+                    <div
+                      className={`autocomplete-item ${idx === autocompleteIndex ? "autocomplete-item--active" : ""}`}
+                      key={a.cmd}
+                      onMouseEnter={() => setAutocompleteIndex(idx)}
+                      onClick={() => insertSlashAction(a.cmd)}
+                    >
+                      <div className="autocomplete-label">
+                        <Sparkles size={13} color="var(--accent-model)" />
+                        <span>/{a.cmd}</span>
                       </div>
-                    ))}
+                      <span className="autocomplete-desc">{a.desc}</span>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -3195,7 +4758,10 @@ function App() {
             <div className="model-picker-header">
               <div className="model-picker-title">
                 <h3>Experiential Labs — Free Models</h3>
-                <span>High-Capability Coding Models · Free Promotional Tier · Usage-Limited</span>
+                <span>
+                  High-Capability Coding Models · Free Promotional Tier ·
+                  Usage-Limited
+                </span>
               </div>
               <button onClick={() => setModelPickerOpen(false)}>
                 <X size={16} color="var(--text-muted)" />
@@ -3205,7 +4771,8 @@ function App() {
             <div className="model-free-notice">
               <div className="live-pulse-dot" />
               <div className="live-tier-text">
-                <strong>Live Free Tier:</strong> Confirmed $0/M Input · $0/M Output · Refreshes every 30s
+                <strong>Live Free Tier:</strong> Confirmed $0/M Input · $0/M
+                Output · Refreshes every 30s
               </div>
               <span className="live-badge">100% Free</span>
             </div>
@@ -3242,17 +4809,31 @@ function App() {
 
             <div className="model-list-scroll">
               {filteredModels.length === 0 ? (
-                <div style={{ padding: "24px 16px", fontSize: 13, color: "var(--text-muted)", textAlign: "center" }}>
+                <div
+                  style={{
+                    padding: "24px 16px",
+                    fontSize: 13,
+                    color: "var(--text-muted)",
+                    textAlign: "center",
+                  }}
+                >
                   No models match your filter.
                 </div>
               ) : (
                 <>
                   <div className="model-category-header">
                     <div className="model-cat-left">
-                      <Sparkles size={11} color="var(--accent-primary, #6366f1)" />
-                      <span>AVAILABLE FREE MODELS ({filteredModels.length})</span>
+                      <Sparkles
+                        size={11}
+                        color="var(--accent-primary, #6366f1)"
+                      />
+                      <span>
+                        AVAILABLE FREE MODELS ({filteredModels.length})
+                      </span>
                     </div>
-                    <span className="model-cat-right">SORTED BY PERFORMANCE & PROMOTIONS</span>
+                    <span className="model-cat-right">
+                      SORTED BY PERFORMANCE & PROMOTIONS
+                    </span>
                   </div>
                   {filteredModels.map((m, index) => renderModelCard(m, index))}
                 </>
@@ -3263,11 +4844,17 @@ function App() {
               <button
                 className="btn-secondary"
                 onClick={async () => {
-                  const res = await window.g1code.refreshModels(settings.provider);
+                  const res = await window.g1code.refreshModels(
+                    settings.provider,
+                  );
                   if (res.success && res.models) {
                     setModels(res.models);
                     setSelectedModel((curr) => {
-                      if (curr && res.models.some((m: ModelItem) => m.id === curr)) return curr;
+                      if (
+                        curr &&
+                        res.models.some((m: ModelItem) => m.id === curr)
+                      )
+                        return curr;
                       return res.models[0]?.id || "";
                     });
                   }
@@ -3344,7 +4931,8 @@ function App() {
                 onChange={(e) => setApiKeyDraft(e.target.value)}
               />
               <small style={{ color: "var(--text-dim)" }}>
-                API keys for Experiential Labs are encrypted securely on disk. Never exposed to renderer.
+                API keys for Experiential Labs are encrypted securely on disk.
+                Never exposed to renderer.
               </small>
             </div>
 
@@ -3400,7 +4988,9 @@ function App() {
                   setSettings(updated as SettingsType);
                   setApiKeyDraft("");
                   setSettingsOpen(false);
-                  const res = await window.g1code.refreshModels(settings.provider);
+                  const res = await window.g1code.refreshModels(
+                    settings.provider,
+                  );
                   if (res.success && res.models) setModels(res.models);
                 }}
               >
@@ -3425,7 +5015,9 @@ function App() {
                 placeholder="/path/to/project"
                 value={workspaceInput}
                 onChange={(e) => setWorkspaceInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && void submitWorkspacePath()}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && void submitWorkspacePath()
+                }
                 autoFocus
               />
             </div>
@@ -3447,7 +5039,9 @@ function App() {
       {resizingPane && (
         <div
           className="resizing-overlay"
-          style={{ cursor: resizingPane === "drawer" ? "row-resize" : "col-resize" }}
+          style={{
+            cursor: resizingPane === "drawer" ? "row-resize" : "col-resize",
+          }}
         />
       )}
     </div>

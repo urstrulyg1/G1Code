@@ -2,8 +2,20 @@ export type PermissionLevel = "safe" | "moderate" | "dangerous";
 export type PermissionDecision = "allow" | "ask" | "deny";
 export type ToolContext = {
   workspace: string;
+  toolCallId?: string;
   approve: (tool: AgentTool, input: unknown) => Promise<boolean>;
-  emit: (event: { type: string; message: string; detail?: string }) => void;
+  emit: (event: {
+    type: string;
+    message: string;
+    detail?: string;
+    toolCallId?: string;
+    command?: string;
+    action?: string;
+    stream?: "stdout" | "stderr";
+    chunk?: string;
+    exitCode?: number;
+    duration?: number;
+  }) => void;
   signal?: AbortSignal;
   changeService?: import("./change-service").ChangeService;
   sessionId?: string;
@@ -26,6 +38,11 @@ export type ToolResult = {
   changeId?: string;
   path?: string;
   diff?: string;
+  duration?: number;
+  stdout?: string;
+  stderr?: string;
+  lineCount?: number;
+  matchesCount?: number;
 };
 export type AgentTool = {
   name: string;

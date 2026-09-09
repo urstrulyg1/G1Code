@@ -33,21 +33,65 @@ export class DatabaseStore {
     if (!this.db || !this.db.open) return;
     try {
       this.db.transaction(() => {
-        try { this.db.prepare("DELETE FROM messages WHERE session_id = ?").run(id); } catch {}
-        try { this.db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run(id); } catch {}
-        try { this.db.prepare("DELETE FROM agent_events WHERE session_id = ?").run(id); } catch {}
-        try { this.db.prepare("DELETE FROM task_summaries WHERE session_id = ?").run(id); } catch {}
-        try { this.db.prepare("DELETE FROM task_memory WHERE session_id = ?").run(id); } catch {}
-        try { this.db.prepare("DELETE FROM execution_checkpoints WHERE session_id = ?").run(id); } catch {}
-        try { this.db.prepare("DELETE FROM test_runs WHERE session_id = ?").run(id); } catch {}
-        try { this.db.prepare("DELETE FROM repair_attempts WHERE session_id = ?").run(id); } catch {}
-        try { this.db.prepare("DELETE FROM git_baselines WHERE session_id = ?").run(id); } catch {}
-        try { this.db.prepare("DELETE FROM file_changes WHERE session_id = ?").run(id); } catch {}
         try {
-          this.db.prepare("DELETE FROM change_batch_items WHERE batch_id IN (SELECT id FROM change_batches WHERE session_id = ?)").run(id);
-          this.db.prepare("DELETE FROM change_batches WHERE session_id = ?").run(id);
+          this.db.prepare("DELETE FROM messages WHERE session_id = ?").run(id);
         } catch {}
-        try { this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id); } catch {}
+        try {
+          this.db
+            .prepare("DELETE FROM tool_calls WHERE session_id = ?")
+            .run(id);
+        } catch {}
+        try {
+          this.db
+            .prepare("DELETE FROM agent_events WHERE session_id = ?")
+            .run(id);
+        } catch {}
+        try {
+          this.db
+            .prepare("DELETE FROM task_summaries WHERE session_id = ?")
+            .run(id);
+        } catch {}
+        try {
+          this.db
+            .prepare("DELETE FROM task_memory WHERE session_id = ?")
+            .run(id);
+        } catch {}
+        try {
+          this.db
+            .prepare("DELETE FROM execution_checkpoints WHERE session_id = ?")
+            .run(id);
+        } catch {}
+        try {
+          this.db.prepare("DELETE FROM test_runs WHERE session_id = ?").run(id);
+        } catch {}
+        try {
+          this.db
+            .prepare("DELETE FROM repair_attempts WHERE session_id = ?")
+            .run(id);
+        } catch {}
+        try {
+          this.db
+            .prepare("DELETE FROM git_baselines WHERE session_id = ?")
+            .run(id);
+        } catch {}
+        try {
+          this.db
+            .prepare("DELETE FROM file_changes WHERE session_id = ?")
+            .run(id);
+        } catch {}
+        try {
+          this.db
+            .prepare(
+              "DELETE FROM change_batch_items WHERE batch_id IN (SELECT id FROM change_batches WHERE session_id = ?)",
+            )
+            .run(id);
+          this.db
+            .prepare("DELETE FROM change_batches WHERE session_id = ?")
+            .run(id);
+        } catch {}
+        try {
+          this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+        } catch {}
       })();
     } catch (err) {
       console.error(`[DatabaseStore] Failed to delete session ${id}:`, err);

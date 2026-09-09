@@ -63,9 +63,30 @@ const approvalWaiters = new Map<
 const permissionWaiters = new Map<
   string,
   {
+    sessionId: string;
     resolve: (allowed: boolean) => void;
   }
 >();
+
+/** Release every waiter that belongs to a session so a stopped agent can unwind. */
+function releaseSessionWaiters(sessionId: string) {
+  for (const [key, waiter] of permissionWaiters) {
+    if (waiter.sessionId === sessionId) {
+      permissionWaiters.delete(key);
+      waiter.resolve(false);
+    }
+  }
+  for (const [changeId, waiter] of approvalWaiters) {
+    if (waiter.sessionId === sessionId) {
+      approvalWaiters.delete(changeId);
+      waiter.resolve({
+        approved: false,
+        status: "REJECTED",
+        message: "Session stopped by user.",
+      });
+    }
+  }
+}
 
 const activeToolCalls = new Map<string, string>();
 const assistantBuffers = new Map<string, string>();
@@ -168,13 +189,11 @@ const server = http.createServer(async (req, res) => {
       const elapsed = Date.now() - startTime;
       const status = res.statusCode;
       const color =
-        status >= 500
-          ? "\x1b[31m"
-          : status >= 400
-            ? "\x1b[33m"
-            : "\x1b[32m";
+        status >= 500 ? "\x1b[31m" : status >= 400 ? "\x1b[33m" : "\x1b[32m";
       const reset = "\x1b[0m";
-      console.log(`[HTTP] ${method} ${pathname} ${color}${status}${reset} (${elapsed}ms)`);
+      console.log(
+        `[HTTP] ${method} ${pathname} ${color}${status}${reset} (${elapsed}ms)`,
+      );
     }
   });
 
@@ -219,6 +238,11 @@ const server = http.createServer(async (req, res) => {
     // Server cwd — lets the browser client build absolute paths from folder-picker results
     if (pathname === "/api/workspace/cwd" && req.method === "GET") {
       return sendJson(res, 200, { cwd: process.cwd() });
+    }
+
+    // Current workspace (read-only — does not mutate server state)
+    if (pathname === "/api/workspace/current" && req.method === "GET") {
+      return sendJson(res, 200, { workspace: selectedWorkspace });
     }
 
     // Workspace choose
@@ -471,8 +495,13 @@ const server = http.createServer(async (req, res) => {
     // Provider verify connection
     if (pathname === "/api/provider/verify" && req.method === "POST") {
       try {
-        const body = await parseJsonBody<{ provider?: string }>(req).catch(() => ({} as any));
-        const { provider } = await configuredProvider(undefined, body?.provider);
+        const body = await parseJsonBody<{ provider?: string }>(req).catch(
+          () => ({}) as any,
+        );
+        const { provider } = await configuredProvider(
+          undefined,
+          body?.provider,
+        );
         if (provider.verifyConnection) {
           const result = await provider.verifyConnection();
           return sendJson(res, 200, result);
@@ -495,8 +524,13 @@ const server = http.createServer(async (req, res) => {
     // Provider test model
     if (pathname === "/api/provider/test" && req.method === "POST") {
       try {
-        const body = await parseJsonBody<{ model?: string; provider?: string }>(req);
-        const { provider, settings } = await configuredProvider(undefined, body.provider);
+        const body = await parseJsonBody<{ model?: string; provider?: string }>(
+          req,
+        );
+        const { provider, settings } = await configuredProvider(
+          undefined,
+          body.provider,
+        );
         const targetModel =
           body.model ||
           settings.model ||
@@ -530,7 +564,9 @@ const server = http.createServer(async (req, res) => {
           output: target
             ? `Model ${targetModel} verified active via non-billable catalog.`
             : "",
-          error: target ? undefined : `Model ${targetModel} not found in catalog.`,
+          error: target
+            ? undefined
+            : `Model ${targetModel} not found in catalog.`,
         });
       } catch (err) {
         return sendJson(res, 400, {
@@ -543,7 +579,7 @@ const server = http.createServer(async (req, res) => {
     // Provider refresh catalog (dynamically fetches, verifies free models, prunes expired)
     if (pathname === "/api/provider/refresh" && req.method === "POST") {
       const body = await parseJsonBody<{ provider?: string }>(req).catch(
-        () => ({} as any),
+        () => ({}) as any,
       );
       try {
         const { provider } = await configuredProvider(
@@ -649,18 +685,16 @@ const server = http.createServer(async (req, res) => {
             status === "APPLIED"
               ? "Change applied successfully."
               : "Change conflicted.";
-          store.addEvent(waiter.sessionId, `CHANGE_${status}`, {
-            changeId: body.id,
-            status,
-            message,
-          });
-          broadcastSSE({
-            type: "approval",
-            sessionId: waiter.sessionId,
+          const resolvedEvent = {
+            type: "approval" as const,
             changeId: body.id,
             message,
             result: { status },
-          });
+          };
+          // Persist under the same `approval` type the UI understands so that
+          // replaying history resolves the card instead of leaving it pending.
+          store.addEvent(waiter.sessionId, "approval", resolvedEvent);
+          broadcastSSE({ ...resolvedEvent, sessionId: waiter.sessionId });
           approvalWaiters.delete(body.id);
           waiter.resolve({ approved: status === "APPLIED", status, message });
           return sendJson(res, 200, applied);
@@ -683,17 +717,14 @@ const server = http.createServer(async (req, res) => {
         const waiter = approvalWaiters.get(body.id);
         if (waiter) {
           const rejected = service.rejectChange(body.id);
-          store.addEvent(waiter.sessionId, "CHANGE_REJECTED", {
-            changeId: body.id,
-            status: "REJECTED",
-          });
-          broadcastSSE({
-            type: "approval",
-            sessionId: waiter.sessionId,
+          const rejectedEvent = {
+            type: "approval" as const,
             changeId: body.id,
             message: "Change rejected.",
             result: { status: "REJECTED" },
-          });
+          };
+          store.addEvent(waiter.sessionId, "approval", rejectedEvent);
+          broadcastSSE({ ...rejectedEvent, sessionId: waiter.sessionId });
           approvalWaiters.delete(body.id);
           waiter.resolve({
             approved: false,
@@ -744,6 +775,14 @@ const server = http.createServer(async (req, res) => {
             message: "Batch applied.",
           });
         }
+        const appliedEvent = {
+          type: "approval" as const,
+          changeId: change.id,
+          message: "Change applied.",
+          result: { status: "APPLIED" },
+        };
+        store.addEvent(body.sessionId, "approval", appliedEvent);
+        broadcastSSE({ ...appliedEvent, sessionId: body.sessionId });
       }
       store.addEvent(body.sessionId, "CHANGE_BATCH_APPLIED", {
         batchId: result.batch?.id,
@@ -770,6 +809,14 @@ const server = http.createServer(async (req, res) => {
             message: "Rejected by user.",
           });
         }
+        const rejectedEvent = {
+          type: "approval" as const,
+          changeId: change.id,
+          message: "Change rejected.",
+          result: { status: "REJECTED" },
+        };
+        store.addEvent(body.sessionId, "approval", rejectedEvent);
+        broadcastSSE({ ...rejectedEvent, sessionId: body.sessionId });
         return service.rejectChange(change.id);
       });
       return sendJson(res, 200, rejected);
@@ -785,13 +832,11 @@ const server = http.createServer(async (req, res) => {
       const service = new ChangeService(store, workspace);
       for (const change of store.pendingChanges(body.sessionId)) {
         if (approvalWaiters.has(change.id)) {
-          approvalWaiters
-            .get(change.id)
-            ?.resolve({
-              approved: false,
-              status: "REJECTED",
-              message: "Session discarded.",
-            });
+          approvalWaiters.get(change.id)?.resolve({
+            approved: false,
+            status: "REJECTED",
+            message: "Session discarded.",
+          });
           approvalWaiters.delete(change.id);
         }
         service.rejectChange(change.id);
@@ -950,12 +995,15 @@ const server = http.createServer(async (req, res) => {
           } else if (agentEvent.result !== undefined) {
             console.log(`[Tool] <- ${agentEvent.toolName} completed`);
           }
-        } else if (agentEvent.type === "model_failover") {
-          console.log(`[Model] Rate limit hit. Switching model to ${agentEvent.message}`);
+        } else if (agentEvent.type === "notice") {
+          console.log(`[Model] ${agentEvent.message}`);
         } else if (agentEvent.type === "done") {
           console.log(`[Agent] Session "${sessionId}" completed successfully.`);
         } else if (agentEvent.type === "error") {
-          console.error(`[Agent Error] Session "${sessionId}":`, agentEvent.message);
+          console.error(
+            `[Agent Error] Session "${sessionId}":`,
+            agentEvent.message,
+          );
         }
 
         if (agentEvent.type === "tool" && agentEvent.toolCallId) {
@@ -990,19 +1038,20 @@ const server = http.createServer(async (req, res) => {
         if (agentEvent.type === "text") {
           const prev = assistantBuffers.get(sessionId) || "";
           assistantBuffers.set(sessionId, prev + (agentEvent.message ?? ""));
-        } else if (agentEvent.type === "done") {
-          const full =
-            agentEvent.message || assistantBuffers.get(sessionId) || "";
-          if (full.trim()) {
-            store.addMessage(sessionId, "assistant", full);
-          }
-          assistantBuffers.delete(sessionId);
-        } else if (agentEvent.type === "tool" || agentEvent.type === "state") {
+        } else if (
+          agentEvent.type === "done" ||
+          agentEvent.type === "tool" ||
+          agentEvent.type === "state" ||
+          agentEvent.type === "command"
+        ) {
+          // Flush any buffered streamed text exactly once. The runtime emits
+          // `state:COMPLETED` immediately before `done`, so relying on the
+          // buffer (rather than `done.message`) prevents a duplicate row.
           const pending = assistantBuffers.get(sessionId);
           if (pending && pending.trim()) {
             store.addMessage(sessionId, "assistant", pending);
-            assistantBuffers.delete(sessionId);
           }
+          assistantBuffers.delete(sessionId);
         }
         if (agentEvent.state === "WAITING_FOR_CHANGE_APPROVAL") {
           store.updateSessionStatus(sessionId, "WAITING_FOR_APPROVAL");
@@ -1084,7 +1133,7 @@ const server = http.createServer(async (req, res) => {
         async (tool, value) => {
           const key = `${sessionId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
           return new Promise<boolean>((resolve) => {
-            permissionWaiters.set(key, { resolve });
+            permissionWaiters.set(key, { sessionId, resolve });
             broadcastSSE({
               type: "permission:request",
               requestId: key,
@@ -1136,7 +1185,10 @@ const server = http.createServer(async (req, res) => {
     // Stop agent
     if (pathname === "/api/agent/stop" && req.method === "POST") {
       const body = await parseJsonBody<{ sessionId: string }>(req);
-      if (body.sessionId) manager.cancelSession(body.sessionId);
+      if (body.sessionId) {
+        releaseSessionWaiters(body.sessionId);
+        manager.cancelSession(body.sessionId);
+      }
       return sendJson(res, 200, { success: true });
     }
 

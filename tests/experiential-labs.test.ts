@@ -94,10 +94,7 @@ test("Experiential Labs Provider: Dynamic model discovery populates live API mod
     );
     const models = await provider.getModels();
 
-    assert.ok(
-      models.length >= 2,
-      "Populated live API models dynamically",
-    );
+    assert.ok(models.length >= 2, "Populated live API models dynamically");
     const custom = models.find((m) => m.id === "custom-claude-3-7-sonnet");
     assert.ok(custom, "Live API model exists");
     assert.equal(custom.name, "Claude 3.7 Sonnet");
@@ -321,7 +318,10 @@ test("Experiential Labs Provider: Dynamically discovers live free models and pru
     assert.equal(freeModels.length, 2);
     assert.ok(freeModels.some((m) => m.id === "model-a-free"));
     assert.ok(freeModels.some((m) => m.id === "model-b-free"));
-    assert.equal(freeModels.some((m) => m.id === "model-paid"), false);
+    assert.equal(
+      freeModels.some((m) => m.id === "model-paid"),
+      false,
+    );
 
     // Next fetch: model-a-free has expired, and model-c-free is newly available
     globalThis.fetch = async () =>
@@ -399,12 +399,21 @@ test("Experiential Labs Provider: Correctly flags live API models with free pric
       "xpl_valid",
     );
     const freeModels = await provider.getFreeModels();
-    const liveFree = freeModels.find((m) => m.id === "new-experimental-free-model");
-    assert.ok(liveFree, "Dynamic live API free model should be included in free models");
+    const liveFree = freeModels.find(
+      (m) => m.id === "new-experimental-free-model",
+    );
+    assert.ok(
+      liveFree,
+      "Dynamic live API free model should be included in free models",
+    );
     assert.equal(liveFree.isPromotional, true);
 
     const livePaid = freeModels.find((m) => m.id === "new-paid-model");
-    assert.equal(livePaid, undefined, "Paid model must not be included in free models");
+    assert.equal(
+      livePaid,
+      undefined,
+      "Paid model must not be included in free models",
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -416,7 +425,11 @@ test("Experiential Labs Provider: Correctly reads API key from ~/.zshrc without 
   assert.ok(key.startsWith("xpl_"), "Key should start with xpl_ prefix");
 
   const resolved = await getApiKey();
-  assert.equal(resolved, key, "getApiKey should resolve the key directly from ~/.zshrc");
+  assert.equal(
+    resolved,
+    key,
+    "getApiKey should resolve the key directly from ~/.zshrc",
+  );
 });
 
 test("Experiential Labs Provider: Automatically fails over to next best available free model based on API ranking", () => {
@@ -451,19 +464,37 @@ test("Experiential Labs Provider: Automatically fails over to next best availabl
   catalog.updateCatalog(models, true);
 
   const freeModels = catalog.getFreeModels();
-  assert.equal(freeModels.length, 3, "Only $0 input / $0 output models are free");
+  assert.equal(
+    freeModels.length,
+    3,
+    "Only $0 input / $0 output models are free",
+  );
   // Verified sorted by apiRank ascending
   assert.equal(freeModels[0].id, "free-model-rank-1");
   assert.equal(freeModels[1].id, "free-model-rank-2");
   assert.equal(freeModels[2].id, "free-model-rank-3");
 
   // When rank 1 becomes restricted or reaches usage limits:
-  const nextBest = catalog.getNextBestFreeModel("free-model-rank-1", new Set(["free-model-rank-1"]));
-  assert.equal(nextBest?.id, "free-model-rank-2", "Failover should pick next best free model");
+  const nextBest = catalog.getNextBestFreeModel(
+    "free-model-rank-1",
+    new Set(["free-model-rank-1"]),
+  );
+  assert.equal(
+    nextBest?.id,
+    "free-model-rank-2",
+    "Failover should pick next best free model",
+  );
 
   // When rank 1 and 2 are restricted:
-  const nextBestAfter2 = catalog.getNextBestFreeModel("free-model-rank-2", new Set(["free-model-rank-1", "free-model-rank-2"]));
-  assert.equal(nextBestAfter2?.id, "free-model-rank-3", "Failover should pick rank 3");
+  const nextBestAfter2 = catalog.getNextBestFreeModel(
+    "free-model-rank-2",
+    new Set(["free-model-rank-1", "free-model-rank-2"]),
+  );
+  assert.equal(
+    nextBestAfter2?.id,
+    "free-model-rank-3",
+    "Failover should pick rank 3",
+  );
 });
 
 test("Experiential Labs Provider: Model discovery, 30s refresh, and verification use strictly non-billable endpoints without credit consumption", async () => {
@@ -545,13 +576,21 @@ test("Experiential Labs Provider: API key extraction cleanly handles trailing se
   try {
     const fakeZshrc = path.join(tmpDir, ".zshrc");
     // Trailing semicolon and quotes
-    fs.writeFileSync(fakeZshrc, 'export EXPLABS_API_KEY="xpl_test_clean_key_123";\n', "utf8");
+    fs.writeFileSync(
+      fakeZshrc,
+      'export EXPLABS_API_KEY="xpl_test_clean_key_123";\n',
+      "utf8",
+    );
 
     const originalHome = process.env.HOME;
     process.env.HOME = tmpDir;
     try {
       const parsed = readApiKeyFromZshrcSync();
-      assert.equal(parsed, "xpl_test_clean_key_123", "Must strip quotes and trailing semicolon");
+      assert.equal(
+        parsed,
+        "xpl_test_clean_key_123",
+        "Must strip quotes and trailing semicolon",
+      );
     } finally {
       process.env.HOME = originalHome;
     }
@@ -564,7 +603,10 @@ test("Cross-Platform Workspace: safePath correctly handles Windows path casing",
   const { safePath } = require("../packages/tools/workspace");
   // Drive letter casing differs: C:\project vs c:\project\src\file.ts
   const resolved = safePath("C:\\project", "src\\file.ts");
-  assert.ok(resolved.toLowerCase().includes("project"), "Resolved path should include project");
+  assert.ok(
+    resolved.toLowerCase().includes("project"),
+    "Resolved path should include project",
+  );
 
   // Rejection outside workspace
   assert.throws(
@@ -603,11 +645,16 @@ test("Experiential Labs Provider: Agent runtime automatically fails over mid-str
       modelsUsed.push(req.model);
       if (req.model === "free-primary-rank-1") {
         primaryAttempts++;
-        throw new RateLimitError("Experiential Labs rate limit reached (429): Rate limit exceeded for primary free model.");
+        throw new RateLimitError(
+          "Experiential Labs rate limit reached (429): Rate limit exceeded for primary free model.",
+        );
       }
       if (req.model === "free-secondary-rank-2") {
         secondaryAttempts++;
-        yield { content: "Successfully recovered via auto-failover to secondary free model!" };
+        yield {
+          content:
+            "Successfully recovered via auto-failover to secondary free model!",
+        };
       }
     },
     supportsTools: () => true,
@@ -633,17 +680,35 @@ test("Experiential Labs Provider: Agent runtime automatically fails over mid-str
 
   await runtime.run("Perform task", "ask");
 
-  assert.equal(primaryAttempts, 1, "Primary model was attempted once and failed with 429");
-  assert.equal(secondaryAttempts, 1, "Secondary model was picked up automatically via failover");
-  assert.deepEqual(modelsUsed, ["free-primary-rank-1", "free-secondary-rank-2"]);
-
-  const failoverEvent = events.find(
-    (e) => e.type === "text" && e.message?.includes("[Failover]"),
+  assert.equal(
+    primaryAttempts,
+    1,
+    "Primary model was attempted once and failed with 429",
   );
+  assert.equal(
+    secondaryAttempts,
+    1,
+    "Secondary model was picked up automatically via failover",
+  );
+  assert.deepEqual(modelsUsed, [
+    "free-primary-rank-1",
+    "free-secondary-rank-2",
+  ]);
+
+  // Failover is surfaced as a dedicated `notice` event — never as a `text`
+  // chunk, which would be merged into the assistant's reply by the UI.
+  const failoverEvent = events.find((e) => e.type === "notice");
   assert.ok(failoverEvent, "Failover notification event was emitted to user");
   assert.ok(
-    failoverEvent.message?.includes("free-secondary-rank-2"),
+    failoverEvent.message?.includes("free-secondary-rank-2") ||
+      failoverEvent.detail === "free-secondary-rank-2",
     "Failover event specifies next best free model",
+  );
+  assert.ok(
+    !events.some(
+      (e) => e.type === "text" && e.message?.includes("Switched automatically"),
+    ),
+    "Failover notice must not leak into the text stream",
   );
 
   const completedEvent = events.find((e) => e.state === "COMPLETED");
@@ -706,7 +771,11 @@ test("Experiential Labs Provider: Correctly promotes free models dynamically fro
     );
     const free = await provider.getFreeModels();
 
-    assert.equal(free.length, 1, "Promotional model with free: true should be parsed as free");
+    assert.equal(
+      free.length,
+      1,
+      "Promotional model with free: true should be parsed as free",
+    );
     const m = free[0];
     assert.equal(m.id, "qwen3.8-27b");
     assert.equal(m.pricingType, "free");
@@ -720,8 +789,3 @@ test("Experiential Labs Provider: Correctly promotes free models dynamically fro
     ExperientialLabsProvider.clearCatalogCache();
   }
 });
-
-
-
-
-
