@@ -5010,12 +5010,15 @@ function App() {
                           {activeModelMeta.name}
                         </span>
                         {usageLimits[selectedModel]?.isLimitReached ? (
-                          <span className="model-limit-badge mini">
+                          <span className="model-limit-badge mini" title="Usage limit reached">
                             LIMIT
                           </span>
-                        ) : activeModelMeta.isPromotional ? (
-                          <span className="model-promo-badge mini">
-                            Free
+                        ) : (activeModelMeta.isPromotional || isTrulyFree(activeModelMeta)) ? (
+                          <span
+                            className="composer-model-free-symbol"
+                            title="Free promotional model (100% Free Tier)"
+                          >
+                            <Zap size={9} fill="currentColor" />
                           </span>
                         ) : null}
                       </button>

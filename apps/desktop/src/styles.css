@@ -1984,20 +1984,22 @@ button {
   color: #ffffff;
 }
 
-/* Mini promo badge inside the model selector button */
-.model-promo-badge.mini {
-  font-size: 8px;
-  font-weight: 600;
-  padding: 0 3px;
-  border-radius: 3px;
-  background: rgba(16, 185, 129, 0.12);
+/* Mini free symbol inside the composer model button (saves horizontal text space) */
+.composer-model-free-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.25);
-  text-transform: uppercase;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
   flex-shrink: 0;
-  line-height: 1.15;
+  line-height: 1;
+  opacity: 0.9;
+  transition: opacity 0.15s, transform 0.15s, color 0.15s;
+}
+
+.composer-model-btn:hover .composer-model-free-symbol {
+  opacity: 1;
+  color: #10b981;
+  transform: scale(1.1);
 }
 
 .model-limit-badge.mini {
@@ -3011,8 +3013,8 @@ button {
 }
 
 /* ── Responsive Composer Toolbar (Antigravity Minimalist Style) ─────── */
-@container composer (max-width: 280px) {
-  .model-promo-badge.mini {
+@container composer (max-width: 260px) {
+  .composer-model-free-symbol {
     display: none;
   }
 }
