@@ -53,6 +53,8 @@ import {
   X,
   Zap,
   Copy,
+  FileText,
+  Square,
 } from "lucide-react";
 import "./styles.css";
 
@@ -4701,34 +4703,32 @@ function App() {
               {/* Change Review Bar — only when there are changes */}
               {changes.length > 0 && (
                 <div className="chat-changes-bar">
-                  <div className="chat-changes-info">
-                    <GitFork size={13} color="var(--accent-warning)" />
+                  <div
+                    className="chat-changes-info"
+                    onClick={() => {
+                      if (changes.length > 0) setActiveDiff(changes[0]);
+                      else void loadChanges();
+                    }}
+                    title="Review changes"
+                  >
+                    <FileText size={13} />
                     <span>
-                      {changes.length} file{changes.length > 1 ? "s" : ""}{" "}
-                      changed
+                      {changes.length} {changes.length === 1 ? "File" : "Files"} With Changes
                     </span>
                   </div>
                   <div className="chat-changes-actions">
                     <button
-                      className="chat-changes-btn chat-changes-btn--neutral"
-                      onClick={() => {
-                        if (changes.length > 0) setActiveDiff(changes[0]);
-                        else void loadChanges();
-                      }}
-                    >
-                      Review
-                    </button>
-                    <button
-                      className="chat-changes-btn chat-changes-btn--approve"
-                      onClick={() => void approveAllChanges()}
-                    >
-                      <Check size={11} /> Apply All
-                    </button>
-                    <button
-                      className="chat-changes-btn chat-changes-btn--reject"
+                      className="chat-changes-btn chat-changes-btn--reject-text"
                       onClick={() => void rejectAllChanges()}
                     >
-                      <X size={11} /> Reject All
+                      Reject all
+                    </button>
+                    <button
+                      className="chat-changes-btn chat-changes-btn--accept-pill"
+                      onClick={() => void approveAllChanges()}
+                    >
+                      Accept all
+                      <ChevronDown size={11} />
                     </button>
                   </div>
                 </div>
@@ -4950,9 +4950,7 @@ function App() {
                     >
                       <Plus size={15} />
                     </button>
-                    <button className="composer-icon-btn" title="Voice Input">
-                      <Mic size={15} />
-                    </button>
+
                     <div style={{ position: "relative" }}>
                       <button
                         className="mode-selector-btn"
@@ -4994,203 +4992,202 @@ function App() {
                         </div>
                       )}
                     </div>
-                  </div>
 
-                  <div className="composer-toolbar-right">
-                    {/* Model Selector Trigger */}
-                    <div
-                      className="model-selector-btn"
-                      onClick={() => setModelPickerOpen(true)}
-                      title={`Select AI Model: ${activeModelMeta.name}`}
-                    >
-                      <span className="model-selector-provider">
-                        Experiential Labs
-                      </span>
-                      <span className="model-selector-name">
-                        <span className="model-selector-name-text">
+                    {/* Unified Model + Reasoning Pill (Simple & Clean Antigravity IDE UI) */}
+                    <div className="composer-model-pill" style={{ position: "relative" }}>
+                      <button
+                        type="button"
+                        className="composer-model-btn"
+                        onClick={() => setModelPickerOpen(true)}
+                        title={`Select AI Model: ${activeModelMeta.name} (Experiential Labs)`}
+                      >
+                        <span className="composer-model-name-text">
                           {activeModelMeta.name}
                         </span>
                         {usageLimits[selectedModel]?.isLimitReached ? (
-                          <span
-                            className="model-limit-badge"
-                            style={{
-                              fontSize: 9,
-                              padding: "1px 5px",
-                              marginLeft: 4,
-                            }}
-                          >
-                            LIMIT REACHED
+                          <span className="model-limit-badge mini">
+                            LIMIT
                           </span>
                         ) : activeModelMeta.isPromotional ? (
                           <span className="model-promo-badge mini">
-                            Free · $0/M
+                            Free
                           </span>
                         ) : null}
-                        <ChevronDown size={10} className="model-selector-chevron" />
-                      </span>
-                    </div>
+                      </button>
 
-                    {/* Quick Reasoning Trigger in Chat Composer */}
-                    {Boolean(
-                      activeModelMeta.reasoningSupported ??
-                        activeModelMeta.capabilities?.reasoningSupported,
-                    ) && (
-                      <div
-                        className="composer-reasoning-wrapper"
-                        style={{ position: "relative" }}
-                      >
+                      {Boolean(
+                        activeModelMeta.reasoningSupported ??
+                          activeModelMeta.capabilities?.reasoningSupported,
+                      ) ? (
                         <button
                           type="button"
-                          className={`composer-reasoning-btn ${composerReasoningOpen ? "active" : ""}`}
-                          onClick={() =>
-                            setComposerReasoningOpen(!composerReasoningOpen)
-                          }
+                          className={`composer-reasoning-inline-btn ${composerReasoningOpen ? "active" : ""}`}
+                          onClick={() => setComposerReasoningOpen(!composerReasoningOpen)}
                           title={getReasoningTooltip(
                             activeModelMeta,
                             getEffectiveModelReasoning(activeModelMeta),
                           )}
-                          aria-label={`Reasoning effort for ${activeModelMeta.name}, currently ${formatReasoningLevelName(getEffectiveModelReasoning(activeModelMeta))}`}
+                          aria-label={`Reasoning effort: ${formatReasoningLevelName(getEffectiveModelReasoning(activeModelMeta))}`}
                           aria-haspopup="listbox"
                           aria-expanded={composerReasoningOpen}
                         >
-                          <span className="composer-brain-icon">🧠</span>
-                          <span className="composer-reasoning-label">
-                            <span className="composer-reasoning-prefix">
-                              Reasoning:{" "}
-                            </span>
-                            <strong className="composer-reasoning-val">
-                              {formatReasoningLevelName(
-                                getEffectiveModelReasoning(activeModelMeta),
-                              )}
-                            </strong>
+                          <span className="composer-reasoning-val">
+                            {formatReasoningLevelName(
+                              getEffectiveModelReasoning(activeModelMeta),
+                            )}
                           </span>
-                          <ChevronDown size={10} className="composer-reasoning-chevron" />
+                          <ChevronUp size={11} className="composer-reasoning-chevron" />
                         </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="composer-model-chevron-btn"
+                          onClick={() => setModelPickerOpen(true)}
+                          title="Select AI Model"
+                        >
+                          <ChevronUp size={11} />
+                        </button>
+                      )}
 
-                        {composerReasoningOpen && (
-                          <div
-                            className="model-reasoning-dropdown composer-reasoning-popover"
-                            role="listbox"
-                          >
-                            <div className="model-reasoning-dropdown-header">
-                              <span>Reasoning Effort</span>
-                              {(() => {
-                                const currentLvl =
-                                  getEffectiveModelReasoning(activeModelMeta);
-                                const rawLevels =
-                                  activeModelMeta.reasoningLevels ||
-                                  activeModelMeta.capabilities
-                                    ?.reasoningLevels ||
-                                  ["auto", "low", "medium", "high"];
-                                const defaultEffort = (
-                                  activeModelMeta.defaultReasoning ||
-                                  activeModelMeta.capabilities
-                                    ?.defaultReasoning ||
-                                  (rawLevels.includes("auto")
-                                    ? "auto"
-                                    : rawLevels[0] || "medium")
-                                )
-                                  .toLowerCase()
-                                  .trim();
-                                return (
-                                  currentLvl !== defaultEffort && (
-                                    <button
-                                      type="button"
-                                      className="model-reasoning-reset-btn"
-                                      onClick={() => {
-                                        setModelReasoning(
-                                          activeModelMeta.id,
-                                          defaultEffort,
-                                        );
-                                        setComposerReasoningOpen(false);
-                                      }}
-                                      title="Reset to model default"
-                                    >
-                                      Reset
-                                    </button>
-                                  )
-                                );
-                              })()}
-                            </div>
-                            {(
-                              activeModelMeta.reasoningLevels ||
-                              activeModelMeta.capabilities
-                                ?.reasoningLevels ||
-                              ["auto", "low", "medium", "high"]
-                            ).map((lvl) => {
+                      {composerReasoningOpen && (
+                        <div
+                          className="model-reasoning-dropdown composer-reasoning-popover"
+                          role="listbox"
+                        >
+                          <div className="model-reasoning-dropdown-header">
+                            <span>Reasoning Effort</span>
+                            {(() => {
                               const currentLvl =
                                 getEffectiveModelReasoning(activeModelMeta);
-                              const isSelected =
-                                currentLvl === lvl.toLowerCase().trim();
+                              const rawLevels =
+                                activeModelMeta.reasoningLevels ||
+                                activeModelMeta.capabilities
+                                  ?.reasoningLevels ||
+                                ["auto", "low", "medium", "high"];
+                              const defaultEffort = (
+                                activeModelMeta.defaultReasoning ||
+                                activeModelMeta.capabilities
+                                  ?.defaultReasoning ||
+                                (rawLevels.includes("auto")
+                                  ? "auto"
+                                  : rawLevels[0] || "medium")
+                              )
+                                .toLowerCase()
+                                .trim();
                               return (
-                                <div
-                                  key={lvl}
-                                  className={`model-reasoning-option ${isSelected ? "selected" : ""}`}
-                                  role="option"
-                                  aria-selected={isSelected}
-                                  onClick={() => {
-                                    setModelReasoning(
-                                      activeModelMeta.id,
-                                      lvl.toLowerCase().trim(),
-                                    );
-                                    setComposerReasoningOpen(false);
-                                  }}
-                                >
-                                  <div className="reasoning-opt-left">
-                                    <div className="reasoning-opt-name">
-                                      {formatReasoningLevelName(lvl)}
-                                    </div>
-                                    <div className="reasoning-opt-desc">
-                                      {getReasoningOptionDesc(lvl)}
-                                    </div>
-                                  </div>
-                                  {isSelected && (
-                                    <Check
-                                      size={12}
-                                      className="reasoning-opt-check"
-                                    />
-                                  )}
-                                </div>
+                                currentLvl !== defaultEffort && (
+                                  <button
+                                    type="button"
+                                    className="model-reasoning-reset-btn"
+                                    onClick={() => {
+                                      setModelReasoning(
+                                        activeModelMeta.id,
+                                        defaultEffort,
+                                      );
+                                      setComposerReasoningOpen(false);
+                                    }}
+                                    title="Reset to model default"
+                                  >
+                                    Reset
+                                  </button>
+                                )
                               );
-                            })}
+                            })()}
                           </div>
-                        )}
-                      </div>
-                    )}
+                          {(
+                            activeModelMeta.reasoningLevels ||
+                            activeModelMeta.capabilities
+                              ?.reasoningLevels ||
+                            ["auto", "low", "medium", "high"]
+                          ).map((lvl) => {
+                            const currentLvl =
+                              getEffectiveModelReasoning(activeModelMeta);
+                            const isSelected =
+                              currentLvl === lvl.toLowerCase().trim();
+                            return (
+                              <div
+                                key={lvl}
+                                className={`model-reasoning-option ${isSelected ? "selected" : ""}`}
+                                role="option"
+                                aria-selected={isSelected}
+                                onClick={() => {
+                                  setModelReasoning(
+                                    activeModelMeta.id,
+                                    lvl.toLowerCase().trim(),
+                                  );
+                                  setComposerReasoningOpen(false);
+                                }}
+                              >
+                                <div className="reasoning-opt-left">
+                                  <div className="reasoning-opt-name">
+                                    {formatReasoningLevelName(lvl)}
+                                  </div>
+                                  <div className="reasoning-opt-desc">
+                                    {getReasoningOptionDesc(lvl)}
+                                  </div>
+                                </div>
+                                {isSelected && (
+                                  <Check
+                                    size={12}
+                                    className="reasoning-opt-check"
+                                  />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-                    {/* Submit Button */}
-                    <button
-                      className="btn-send-agent"
-                      onClick={() => void startAgent()}
-                      disabled={
-                        running ||
-                        !agentPrompt.trim() ||
-                        // Only disable when the selected model is limited AND no other free model is available
-                        (Boolean(usageLimits[selectedModel]?.isLimitReached) &&
-                          !models.some(
-                            (m) =>
-                              m.pricingType === "free" &&
-                              m.pricingDetails?.input === 0 &&
-                              m.pricingDetails?.output === 0 &&
-                              !usageLimits[m.id]?.isLimitReached,
-                          ))
-                      }
-                      title={
-                        usageLimits[selectedModel]?.isLimitReached
-                          ? models.some(
+                  <div className="composer-toolbar-right">
+                    <button className="composer-icon-btn" title="Voice Input">
+                      <Mic size={15} />
+                    </button>
+
+                    {/* Submit or Stop Button */}
+                    {running ? (
+                      <button
+                        className="btn-stop-agent"
+                        onClick={() => {
+                          if (sessionId) window.g1code.stopAgent(sessionId);
+                        }}
+                        title="Stop Agent"
+                      >
+                        <Square size={11} fill="currentColor" stroke="none" />
+                      </button>
+                    ) : (
+                      <button
+                        className="btn-send-agent"
+                        onClick={() => void startAgent()}
+                        disabled={
+                          !agentPrompt.trim() ||
+                          (Boolean(usageLimits[selectedModel]?.isLimitReached) &&
+                            !models.some(
                               (m) =>
                                 m.pricingType === "free" &&
                                 m.pricingDetails?.input === 0 &&
                                 m.pricingDetails?.output === 0 &&
                                 !usageLimits[m.id]?.isLimitReached,
-                            )
-                            ? "Current model limit reached — will auto-switch to next available free model."
-                            : "All free models are usage-limited. Please wait for reset."
-                          : "Send Prompt (Enter)"
-                      }
-                    >
-                      <ArrowRight size={16} />
-                    </button>
+                            ))
+                        }
+                        title={
+                          usageLimits[selectedModel]?.isLimitReached
+                            ? models.some(
+                                (m) =>
+                                  m.pricingType === "free" &&
+                                  m.pricingDetails?.input === 0 &&
+                                  m.pricingDetails?.output === 0 &&
+                                  !usageLimits[m.id]?.isLimitReached,
+                              )
+                              ? "Current model limit reached — will auto-switch to next available free model."
+                              : "All free models are usage-limited. Please wait for reset."
+                            : "Send Prompt (Enter)"
+                        }
+                      >
+                        <ArrowRight size={15} />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

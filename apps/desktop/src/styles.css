@@ -1725,14 +1725,14 @@ button {
 }
 
 .composer-box {
-  background: var(--bg-agent-input);
-  border: 1px solid var(--border-medium);
-  border-radius: 10px;
-  padding: 10px 12px;
+  background: #18191d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px 14px 10px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   transition: border-color 0.15s;
   position: relative;
   container-type: inline-size;
@@ -1741,7 +1741,7 @@ button {
 }
 
 .composer-box:focus-within {
-  border-color: var(--accent-model);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .composer-context-tags {
@@ -1775,14 +1775,15 @@ button {
   width: 100%;
   border: 0;
   background: transparent;
-  color: var(--text-primary);
-  font-size: 13px;
+  color: #f4f4f5;
+  font-size: 13.5px;
   resize: none;
   height: auto;
   min-height: 48px;
-  max-height: 140px;
-  line-height: 1.4;
+  max-height: 160px;
+  line-height: 1.45;
   overflow-y: auto;
+  font-family: inherit;
 }
 
 .composer-textarea:focus {
@@ -1790,18 +1791,17 @@ button {
 }
 
 .composer-textarea::placeholder {
-  color: var(--text-muted);
+  color: #71717a;
 }
 
-/* Composer Toolbar (Bottom Row) */
+/* Composer Toolbar (Bottom Row) - Antigravity Minimalist Style */
 .composer-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  flex-wrap: wrap;
+  padding-top: 4px;
+  border-top: none;
   min-width: 0;
 }
 
@@ -1809,127 +1809,175 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .composer-toolbar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
+  gap: 6px;
   margin-left: auto;
-  flex-shrink: 1;
+  flex-shrink: 0;
 }
 
 .composer-icon-btn {
-  color: var(--text-muted);
-  padding: 5px;
+  color: #a1a1aa;
+  padding: 0;
   border-radius: 6px;
+  border: none;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
   box-sizing: border-box;
+  cursor: pointer;
+  transition: all 0.15s;
   flex-shrink: 0;
 }
 
 .composer-icon-btn:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
+  color: #ffffff;
 }
 
 .mode-selector-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border-subtle);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #e4e4e7;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 0 8px;
   height: 28px;
   box-sizing: border-box;
   border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
   flex-shrink: 0;
 }
 
 .mode-selector-btn:hover {
-  color: var(--text-primary);
-  border-color: var(--border-medium);
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
 }
 
-/* Experiential Labs Model Selector Trigger */
-.model-selector-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  text-align: right;
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px solid rgba(99, 102, 241, 0.25);
-  border-radius: 6px;
-  padding: 2px 8px;
-  height: 32px;
+/* Unified Model & Reasoning Pill (Antigravity Reference UI) */
+.composer-model-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
   box-sizing: border-box;
-  cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
   transition: all 0.15s ease;
   min-width: 0;
-  max-width: 240px;
-  flex: 0 1 auto;
-  overflow: hidden;
+  max-width: 320px;
 }
 
-.model-selector-btn:hover {
-  background: rgba(99, 102, 241, 0.2);
-  border-color: var(--accent-model);
+.composer-model-pill:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
-.model-selector-provider {
-  font-size: 8.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #a5b4fc;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-  line-height: 1.15;
-}
-
-.model-selector-name {
-  font-size: 11px;
-  font-weight: 600;
-  color: #fff;
-  display: flex;
+.composer-model-btn {
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  max-width: 100%;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  padding: 0 4px 0 8px;
+  height: 100%;
+  color: #f4f4f5;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
   min-width: 0;
-  line-height: 1.25;
+  transition: color 0.15s;
 }
 
-.model-selector-name-text {
+.composer-model-btn:hover {
+  color: #ffffff;
+}
+
+.composer-model-name-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
 }
 
-.model-selector-chevron {
+.composer-reasoning-inline-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 0 8px 0 3px;
+  height: 100%;
+  color: #a1a1aa;
+  font-size: 11.5px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: color 0.15s;
+  user-select: none;
   flex-shrink: 0;
-  color: #a5b4fc;
-  opacity: 0.85;
+}
+
+.composer-reasoning-inline-btn:hover,
+.composer-reasoning-inline-btn.active {
+  color: #ffffff;
+}
+
+.composer-reasoning-val {
+  color: #a1a1aa;
+  font-weight: 500;
+  font-size: 11.5px;
+  transition: color 0.15s;
+}
+
+.composer-reasoning-inline-btn:hover .composer-reasoning-val,
+.composer-reasoning-inline-btn.active .composer-reasoning-val {
+  color: #ffffff;
+}
+
+.composer-reasoning-chevron {
+  color: #a1a1aa;
+  transition: transform 0.15s ease;
+}
+
+.composer-reasoning-inline-btn.active .composer-reasoning-chevron {
+  transform: rotate(180deg);
+}
+
+.composer-model-chevron-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0 8px 0 2px;
+  height: 100%;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.composer-model-chevron-btn:hover {
+  color: #ffffff;
 }
 
 /* Mini promo badge inside the model selector button */
 .model-promo-badge.mini {
   font-size: 8.5px;
   font-weight: 700;
-  padding: 1px 5px;
+  padding: 1px 4px;
   border-radius: 4px;
   background: rgba(16, 185, 129, 0.15);
   color: #34d399;
@@ -1938,25 +1986,70 @@ button {
   letter-spacing: 0.3px;
   white-space: nowrap;
   flex-shrink: 0;
+  line-height: 1.2;
 }
 
-.btn-send-agent {
-  width: 32px;
-  height: 32px;
+.model-limit-badge.mini {
+  font-size: 8.5px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+
+/* Stop Agent Button (Red square - matches reference UI) */
+.btn-stop-agent {
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent-model);
-  color: #fff;
-  border-radius: 8px;
+  background: #dc2626;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-stop-agent:hover {
+  background: #b91c1c;
+  transform: scale(1.04);
+}
+
+/* Send Agent Button */
+.btn-send-agent {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #3b82f6;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s;
   flex-shrink: 0;
 }
 
 .btn-send-agent:hover {
-  background: #4f46e5;
-  transform: scale(1.05);
+  background: #2563eb;
+  transform: scale(1.04);
+}
+
+.btn-send-agent:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .btn-send-agent:disabled {
@@ -3758,15 +3851,15 @@ button {
   color: #fff;
 }
 
-/* ── Change review bar (sticky bottom of chat) ───────────────────────────── */
+/* ── Change review bar (sticky bottom of chat) - Antigravity Minimalist Style ── */
 .chat-changes-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  background: rgba(245, 158, 11, 0.07);
-  border: 1px solid rgba(245, 158, 11, 0.2);
-  border-radius: 10px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
   margin-top: 8px;
   flex-shrink: 0;
 }
@@ -3775,50 +3868,49 @@ button {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  font-weight: 600;
-  color: #fbbf24;
+  font-weight: 500;
+  color: #e4e4e7;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.chat-changes-info:hover {
+  color: #ffffff;
 }
 .chat-changes-actions {
   display: flex;
-  gap: 5px;
+  align-items: center;
+  gap: 8px;
 }
-.chat-changes-btn {
+.chat-changes-btn--reject-text {
+  background: transparent;
+  border: none;
+  color: #a1a1aa;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.chat-changes-btn--reject-text:hover {
+  color: #ef4444;
+}
+.chat-changes-btn--accept-pill {
+  background: #3b82f6;
+  border: none;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 6px;
-  cursor: pointer;
   transition: all 0.15s;
 }
-.chat-changes-btn--neutral {
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid var(--border-medium);
-  color: var(--text-secondary);
-}
-.chat-changes-btn--neutral:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--text-primary);
-}
-.chat-changes-btn--approve {
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #34d399;
-}
-.chat-changes-btn--approve:hover {
-  background: rgba(16, 185, 129, 0.22);
-  color: #fff;
-}
-.chat-changes-btn--reject {
-  background: rgba(244, 63, 94, 0.08);
-  border: 1px solid rgba(244, 63, 94, 0.25);
-  color: #fb7185;
-}
-.chat-changes-btn--reject:hover {
-  background: rgba(244, 63, 94, 0.18);
-  color: #fff;
+.chat-changes-btn--accept-pill:hover {
+  background: #2563eb;
 }
 
 /* ── Markdown rendering inside bubbles ───────────────────────────────────── */
