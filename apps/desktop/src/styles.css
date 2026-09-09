@@ -1814,7 +1814,6 @@ button {
   flex-wrap: nowrap;
   min-width: 0;
   flex: 1 1 auto;
-  overflow: hidden;
 }
 
 .composer-toolbar-right {
@@ -1885,7 +1884,7 @@ button {
   min-width: 0;
   max-width: 100%;
   flex: 0 1 auto;
-  overflow: hidden;
+  position: relative;
 }
 
 .composer-model-pill:hover {
@@ -2460,6 +2459,11 @@ button {
   cursor: not-allowed !important;
 }
 
+.model-item-card.has-open-dropdown,
+.model-item-card:has(.model-reasoning-dropdown) {
+  z-index: 300 !important;
+}
+
 /* ── Card Top Row ───────────────────────────────────────────── */
 .model-item-top {
   display: flex;
@@ -2715,22 +2719,22 @@ button {
   position: absolute;
   top: calc(100% + 5px);
   left: 0;
-  z-index: 120;
+  z-index: 99999 !important;
   min-width: 220px;
   max-width: 280px;
-  background: #11141d;
-  border: 1px solid rgba(99, 102, 241, 0.35);
+  background: #141722 !important;
+  border: 1px solid rgba(99, 102, 241, 0.45);
   border-radius: 8px;
   box-shadow:
-    0 12px 36px rgba(0, 0, 0, 0.85),
-    0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 16px 48px rgba(0, 0, 0, 0.95),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 2px;
   animation: scaleUp 0.15s cubic-bezier(0.16, 1, 0.3, 1);
-  backdrop-filter: blur(12px);
+  opacity: 1 !important;
 }
 
 .model-reasoning-dropdown-header {
@@ -3010,6 +3014,11 @@ button {
   left: 0;
   right: auto;
   max-width: min(280px, 90vw);
+  background: #141722 !important;
+  z-index: 99999 !important;
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.95),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 /* ── Responsive Composer Toolbar (Antigravity Minimalist Style) ─────── */

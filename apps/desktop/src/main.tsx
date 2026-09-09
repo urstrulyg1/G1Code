@@ -785,6 +785,7 @@ function App() {
     string | null
   >(null);
 
+
   const formatReasoningLevelName = (level: string) => {
     const l = level.toLowerCase().trim();
     if (l === "auto") return "Auto";
@@ -903,10 +904,31 @@ function App() {
   const [verifying, setVerifying] = useState(false);
   const [testingModel, setTestingModel] = useState(false);
 
-  // Command Palette & Mode Dropdown
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Close dropdown popovers when clicking outside
+  useEffect(() => {
+    if (!composerReasoningOpen && !openReasoningDropdownModelId && !modeMenuOpen)
+      return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest(".model-reasoning-dropdown") ||
+        target?.closest(".composer-reasoning-inline-btn") ||
+        target?.closest(".model-reasoning-btn") ||
+        target?.closest(".mode-selector-btn")
+      ) {
+        return;
+      }
+      setComposerReasoningOpen(false);
+      setOpenReasoningDropdownModelId(null);
+      setModeMenuOpen(false);
+    };
+    window.addEventListener("mousedown", handleOutsideClick);
+    return () => window.removeEventListener("mousedown", handleOutsideClick);
+  }, [composerReasoningOpen, openReasoningDropdownModelId, modeMenuOpen]);
 
   // Dynamic free models & usage limits refresh loop (refreshes every 30s while G1Code is running)
   useEffect(() => {
@@ -1908,7 +1930,7 @@ function App() {
 
     return (
       <div
-        className={`model-item-card ${selectedModel === m.id ? "active" : ""} ${isLimited ? "model-item-card--limited" : ""}`}
+        className={`model-item-card ${selectedModel === m.id ? "active" : ""} ${isLimited ? "model-item-card--limited" : ""} ${openReasoningDropdownModelId === m.id ? "has-open-dropdown" : ""}`}
         key={m.id}
         onClick={() => !isLimited && handleModelChange(m.id)}
         style={isLimited ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
@@ -5030,7 +5052,10 @@ function App() {
                         <button
                           type="button"
                           className={`composer-reasoning-inline-btn ${composerReasoningOpen ? "active" : ""}`}
-                          onClick={() => setComposerReasoningOpen(!composerReasoningOpen)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setComposerReasoningOpen((prev) => !prev);
+                          }}
                           title={getReasoningTooltip(
                             activeModelMeta,
                             getEffectiveModelReasoning(activeModelMeta),
