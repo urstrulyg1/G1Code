@@ -4,9 +4,19 @@ const agentListeners = new Set<(event: unknown) => void>();
 const permissionListeners = new Set<(event: unknown) => void>();
 
 let eventSource: EventSource | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 function ensureEventSource() {
-  if (typeof window === "undefined" || eventSource) return;
+  if (typeof window === "undefined") return;
+  if (eventSource && eventSource.readyState !== EventSource.CLOSED) return;
+
+  if (eventSource) {
+    try {
+      eventSource.close();
+    } catch {}
+    eventSource = null;
+  }
+
   try {
     eventSource = new EventSource("/api/events");
     eventSource.onmessage = (event) => {
@@ -26,7 +36,18 @@ function ensureEventSource() {
       }
     };
     eventSource.onerror = () => {
-      // Reconnect handled automatically by EventSource
+      if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+        try {
+          eventSource.close();
+        } catch {}
+        eventSource = null;
+        if (!reconnectTimer) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            ensureEventSource();
+          }, 1500);
+        }
+      }
     };
   } catch {
     // SSE not supported or network error
@@ -354,6 +375,25 @@ if (typeof window !== "undefined" && !window.g1code) {
       return () => {
         permissionListeners.delete(listener);
       };
+    },
+
+    async getPendingPermissions(sessionId?: string) {
+      const q = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+      return apiRequest<
+        Array<{
+          requestId: string;
+          sessionId: string;
+          tool: string;
+          input: unknown;
+          createdAt: number;
+        }>
+      >(`/api/agent/permissions/pending${q}`);
+    },
+
+    async getSession(workspace: string, sessionId: string) {
+      return apiRequest(
+        `/api/agent/session?workspace=${encodeURIComponent(workspace)}&sessionId=${encodeURIComponent(sessionId)}`,
+      );
     },
 
     // Extended IDE capabilities

@@ -756,6 +756,8 @@ export function registerRuntimeHandlers(
         emit,
         async (tool, value) => {
           if (tool.permission === "safe") return true;
+          if (settings.autoExecution === "always") return true;
+          if (settings.autoExecution === "never") return false;
           return new Promise<boolean>((resolve) => {
             const requestId = `${sessionId}-${Date.now()}`;
             let settled = false;

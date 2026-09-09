@@ -267,6 +267,31 @@ interface Window {
     rejectAllChanges(workspace: string, sessionId: string): Promise<unknown>;
     discardSession(workspace: string, sessionId: string): Promise<unknown>;
     respondPermission(requestId: string, allowed: boolean): void;
+    getPendingPermissions?(sessionId?: string): Promise<
+      Array<{
+        requestId: string;
+        sessionId: string;
+        tool: string;
+        input: unknown;
+        createdAt: number;
+      }>
+    >;
+    getSession?(
+      workspace: string,
+      sessionId: string,
+    ): Promise<{
+      session: unknown;
+      messages: unknown[];
+      events: Event[];
+      changes: unknown[];
+      pendingPermissions?: Array<{
+        requestId: string;
+        sessionId: string;
+        tool: string;
+        input: unknown;
+        createdAt: number;
+      }>;
+    }>;
     onAgentEvent(listener: (event: unknown) => void): () => void;
     onPermissionRequest(listener: (event: unknown) => void): () => void;
   };

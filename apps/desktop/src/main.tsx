@@ -1429,6 +1429,11 @@ function App() {
       )
         return;
 
+      if (req.sessionId && !sessionIdRef.current) {
+        sessionIdRef.current = req.sessionId;
+        setSessionId(req.sessionId);
+      }
+
       const curSettings = settingsRef.current;
       if (curSettings?.autoExecution === "always") {
         // Auto-approve — no card shown
@@ -1449,6 +1454,70 @@ function App() {
       offPermission();
     };
   }, []);
+
+  // Active synchronization while agent is running: poll pending permissions and backfill dropped events
+  useEffect(() => {
+    if (!running) return;
+    const interval = setInterval(async () => {
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+
+      // 1. Sync pending permissions from server
+      try {
+        if (window.g1code.getPendingPermissions) {
+          const pending = await window.g1code.getPendingPermissions(sid);
+          if (pending && pending.length > 0) {
+            const req = pending[0];
+            const curSettings = settingsRef.current;
+            if (curSettings?.autoExecution === "always") {
+              window.g1code.respondPermission(req.requestId, true);
+            } else if (curSettings?.autoExecution === "never") {
+              window.g1code.respondPermission(req.requestId, false);
+            } else {
+              setPermission((prev) =>
+                prev?.requestId === req.requestId ? prev : req,
+              );
+            }
+          } else if (permission) {
+            setPermission(null);
+          }
+        }
+      } catch {
+        // ignore network hiccups
+      }
+
+      // 2. Backfill events if frontend dropped SSE packets
+      try {
+        if (window.g1code.getSession && workspaceRef.current) {
+          const data = await window.g1code.getSession(
+            workspaceRef.current,
+            sid,
+          );
+          if (
+            data?.events &&
+            Array.isArray(data.events) &&
+            data.events.length > 0
+          ) {
+            setEvents((currentEvents) => {
+              if (data.events.length > currentEvents.length) {
+                let merged = [...currentEvents];
+                for (const rawEv of data.events) {
+                  const evObj = (rawEv as any).payload || rawEv;
+                  merged = mergeAgentEvent(merged, evObj);
+                }
+                return merged;
+              }
+              return currentEvents;
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [running]);
 
   const loadGitAndProblems = async (wsPath: string) => {
     try {
@@ -4536,8 +4605,14 @@ function App() {
 
                 // Current action description while working
                 const currentActiveAction = (() => {
+                  if (permission) {
+                    return `Waiting for approval: ${permission.tool}...`;
+                  }
                   for (let idx = events.length - 1; idx >= 0; idx--) {
                     const e = events[idx];
+                    if (e.type === "approval") {
+                      return `Waiting for approval: ${e.toolName || "action"}...`;
+                    }
                     if (e.type === "command" && e.command) {
                       return `Running ${e.command}`;
                     }
@@ -4573,7 +4648,7 @@ function App() {
                       return `${e.state.replace(/_/g, " ").toLowerCase()}...`;
                     }
                   }
-                  return "Inspecting project...";
+                  return "Working...";
                 })();
 
                 return (
@@ -4696,14 +4771,18 @@ function App() {
                                 {filePath}
                               </code>
                             </div>
-                            {changeInput?.diff && (
+                            {changeInput?.diff ? (
                               <pre className="chat-approval-diff">
                                 {changeInput.diff
                                   .split("\n")
                                   .slice(0, 8)
                                   .join("\n")}
                               </pre>
-                            )}
+                            ) : ev.input && typeof ev.input === "object" ? (
+                              <pre className="chat-approval-diff">
+                                {JSON.stringify(ev.input, null, 2)}
+                              </pre>
+                            ) : null}
                             {!isApplied && !isRejected && targetChangeId && (
                               <div className="chat-approval-actions">
                                 <button
@@ -4740,6 +4819,58 @@ function App() {
                                   }
                                 >
                                   <X size={12} /> Reject
+                                </button>
+                              </div>
+                            )}
+                            {!isApplied && !isRejected && !targetChangeId && ev.toolName && (
+                              <div className="chat-approval-actions">
+                                <button
+                                  className="chat-approval-btn chat-approval-btn--approve"
+                                  onClick={() => {
+                                    const reqId = permission?.requestId;
+                                    if (reqId) {
+                                      window.g1code.respondPermission(reqId, true);
+                                      setPermission(null);
+                                    } else if (window.g1code.getPendingPermissions) {
+                                      void window.g1code
+                                        .getPendingPermissions(sessionIdRef.current)
+                                        .then((p) => {
+                                          if (p && p.length > 0) {
+                                            window.g1code.respondPermission(
+                                              p[0].requestId,
+                                              true,
+                                            );
+                                            setPermission(null);
+                                          }
+                                        });
+                                    }
+                                  }}
+                                >
+                                  <Check size={12} /> Allow Once
+                                </button>
+                                <button
+                                  className="chat-approval-btn chat-approval-btn--reject"
+                                  onClick={() => {
+                                    const reqId = permission?.requestId;
+                                    if (reqId) {
+                                      window.g1code.respondPermission(reqId, false);
+                                      setPermission(null);
+                                    } else if (window.g1code.getPendingPermissions) {
+                                      void window.g1code
+                                        .getPendingPermissions(sessionIdRef.current)
+                                        .then((p) => {
+                                          if (p && p.length > 0) {
+                                            window.g1code.respondPermission(
+                                              p[0].requestId,
+                                              false,
+                                            );
+                                            setPermission(null);
+                                          }
+                                        });
+                                    }
+                                  }}
+                                >
+                                  <X size={12} /> Deny
                                 </button>
                               </div>
                             )}

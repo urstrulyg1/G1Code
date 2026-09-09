@@ -339,6 +339,16 @@ function registerApiBridgeHandlers() {
       body: JSON.stringify(input),
     }).catch((err) => console.error("[IPC] permission:response failed:", err));
   });
+  ipcMain.handle("agent:get-pending-permissions", async (_e, sessionId) => {
+    const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+    return api(`/api/agent/permissions/pending${query}`);
+  });
+  ipcMain.handle("agent:get-session", async (_e, input) => {
+    const ws = input?.workspace || selectedWorkspace;
+    return api(
+      `/api/agent/session?workspace=${encodeURIComponent(ws)}&sessionId=${encodeURIComponent(input.sessionId)}`,
+    );
+  });
 
   // Git / search / diagnostics
   ipcMain.handle("git:commit", async (_e, input) =>

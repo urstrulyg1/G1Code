@@ -60,13 +60,16 @@ const approvalWaiters = new Map<
   }
 >();
 
-const permissionWaiters = new Map<
-  string,
-  {
-    sessionId: string;
-    resolve: (allowed: boolean) => void;
-  }
->();
+interface PendingPermission {
+  requestId: string;
+  sessionId: string;
+  tool: string;
+  input: unknown;
+  createdAt: number;
+  resolve: (allowed: boolean) => void;
+}
+
+const permissionWaiters = new Map<string, PendingPermission>();
 
 /** Release every waiter that belongs to a session so a stopped agent can unwind. */
 function releaseSessionWaiters(sessionId: string) {
@@ -634,16 +637,41 @@ const server = http.createServer(async (req, res) => {
         .recentSessions(workspace, 100)
         .find((s) => s.id === sessionId);
       if (!session) return sendError(res, 404, "Session not found");
+      const pendingPerms = Array.from(permissionWaiters.values())
+        .filter((w) => w.sessionId === session.id)
+        .map((w) => ({
+          requestId: w.requestId,
+          sessionId: w.sessionId,
+          tool: w.tool,
+          input: w.input,
+          createdAt: w.createdAt,
+        }));
       return sendJson(res, 200, {
         session,
         messages: store.sessionMessages(session.id),
         events: store.sessionEvents(session.id),
         changes: store.pendingChanges(session.id),
+        pendingPermissions: pendingPerms,
         testRuns: store.sessionTestRuns(session.id),
         repairs: store.sessionRepairHistory(session.id),
         summary: store.taskSummary(session.id),
         checkpoint: store.checkpoint(session.id),
       });
+    }
+
+    // Pending permissions query
+    if (pathname === "/api/agent/permissions/pending" && req.method === "GET") {
+      const sessionId = url.searchParams.get("sessionId");
+      const pending = Array.from(permissionWaiters.values())
+        .filter((w) => !sessionId || w.sessionId === sessionId)
+        .map((w) => ({
+          requestId: w.requestId,
+          sessionId: w.sessionId,
+          tool: w.tool,
+          input: w.input,
+          createdAt: w.createdAt,
+        }));
+      return sendJson(res, 200, pending);
     }
 
     // Session events
@@ -860,7 +888,7 @@ const server = http.createServer(async (req, res) => {
         waiter.resolve(body.allowed === true);
         return sendJson(res, 200, { success: true });
       }
-      return sendError(res, 404, "Permission request not found");
+      return sendJson(res, 200, { success: true, alreadyHandled: true });
     }
 
     // Rebuild index
@@ -1159,9 +1187,21 @@ const server = http.createServer(async (req, res) => {
         workspace,
         emit,
         async (tool, value) => {
+          if (tool.permission === "safe") return true;
+          // Server-side enforcement of user's autoExecution setting
+          if (settings.autoExecution === "always") return true;
+          if (settings.autoExecution === "never") return false;
+
           const key = `${sessionId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
           return new Promise<boolean>((resolve) => {
-            permissionWaiters.set(key, { sessionId, resolve });
+            permissionWaiters.set(key, {
+              requestId: key,
+              sessionId,
+              tool: tool.name,
+              input: value,
+              createdAt: Date.now(),
+              resolve,
+            });
             broadcastSSE({
               type: "permission:request",
               requestId: key,
@@ -1198,14 +1238,18 @@ const server = http.createServer(async (req, res) => {
         selectedModel,
       );
 
-      manager.startSession(sessionId, runtime, (signal) =>
-        runtime.run(
-          `${instructions ? `Project instructions:\n${instructions}\n\n` : ""}${body.prompt}`,
-          body.mode,
-          signal,
-          body.attachedContext ?? [],
-        ),
-      );
+      manager.startSession(sessionId, runtime, async (signal) => {
+        try {
+          await runtime.run(
+            `${instructions ? `Project instructions:\n${instructions}\n\n` : ""}${body.prompt}`,
+            body.mode,
+            signal,
+            body.attachedContext ?? [],
+          );
+        } finally {
+          releaseSessionWaiters(sessionId);
+        }
+      });
 
       return sendJson(res, 200, { sessionId });
     }

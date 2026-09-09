@@ -113,6 +113,10 @@ contextBridge.exposeInMainWorld("g1code", {
     ipcRenderer.on("permission:request", callback);
     return () => ipcRenderer.removeListener("permission:request", callback);
   },
+  getPendingPermissions: (sessionId?: string) =>
+    ipcRenderer.invoke("agent:get-pending-permissions", sessionId),
+  getSession: (workspace: string, sessionId: string) =>
+    ipcRenderer.invoke("agent:get-session", { workspace, sessionId }),
   getGitStatus: (workspace: string) =>
     ipcRenderer.invoke("git:status", workspace),
   getProblems: (workspace: string) =>
