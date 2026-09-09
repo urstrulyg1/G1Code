@@ -21,14 +21,19 @@ export type ModelMetadata = AIModel & {
   provider?: "experiential-labs";
   contextWindowFormatted: string;
   capabilities: ModelCapability;
-  pricingType: "free" | "promotional" | "credits" | "paid";
+  pricingType: "free" | "promotional" | "credits" | "paid" | "unknown";
   pricingFormatted?: string;
   pricingDetails?: {
     input?: number;
     output?: number;
   };
   recommendedRole?:
-    "coding" | "reasoning" | "fast" | "balanced" | "review" | "agent";
+    | "coding"
+    | "reasoning"
+    | "fast"
+    | "balanced"
+    | "review"
+    | "agent";
   apiRank?: number;
 };
 
@@ -38,7 +43,7 @@ export const STANDARD_CATALOG_MODELS: ModelMetadata[] = [];
 export const ALL_DEFAULT_MODELS: ModelMetadata[] = [];
 
 export function formatContextWindow(tokens?: number): string {
-  if (!tokens || tokens <= 0) return "128K";
+  if (!tokens || tokens <= 0) return "Context unavailable";
   if (tokens >= 1_000_000) {
     const millions = tokens / 1_000_000;
     return `${Number.isInteger(millions) ? millions : millions.toFixed(2)}M`;
@@ -59,6 +64,15 @@ export function parseModelMetadata(
     max_output_tokens?: number;
     apiRank?: number;
     input_modalities?: string[];
+    recommendedRole?:
+      | "coding"
+      | "reasoning"
+      | "fast"
+      | "balanced"
+      | "review"
+      | "agent";
+    recommended_role?: string;
+    performance_category?: string;
     capabilities?: {
       tools?: boolean;
       function_calling?: boolean;
@@ -93,25 +107,31 @@ export function parseModelMetadata(
   const rawCaps = (raw.capabilities || {}) as Record<string, any>;
 
   const contextWindow =
-    raw.context_window ?? (id.includes("1m") ? 1_000_000 : 128_000);
-  const supportsTools =
-    rawCaps.tools ??
-    rawCaps.function_calling ??
-    rawCaps.supports_tools ??
-    (!id.includes("embedding") && !id.includes("moderation"));
-  const supportsStreaming =
-    rawCaps.streaming ?? rawCaps.supports_streaming ?? true;
-  const supportsVision =
-    rawCaps.vision ??
-    rawCaps.supports_vision ??
-    Boolean(
-      raw.input_modalities?.includes("image") ||
-        id.includes("vision") ||
-        id.includes("image") ||
-        id.includes("multimodal"),
-    );
+    typeof raw.context_window === "number" && raw.context_window > 0
+      ? raw.context_window
+      : 0;
 
-  // Dynamic reasoning detection & effort levels
+  const supportsTools = Boolean(
+    rawCaps.tools ??
+      rawCaps.function_calling ??
+      rawCaps.supports_tools ??
+      false,
+  );
+
+  const supportsStreaming = Boolean(
+    rawCaps.streaming ??
+      rawCaps.supports_streaming ??
+      false,
+  );
+
+  const supportsVision = Boolean(
+    rawCaps.vision ??
+      rawCaps.supports_vision ??
+      (Array.isArray(raw.input_modalities) &&
+        raw.input_modalities.includes("image")),
+  );
+
+  // Dynamic reasoning detection & effort levels strictly from provider metadata
   const explicitEfforts: string[] = Array.isArray(
     rawCaps.supported_reasoning_efforts,
   )
@@ -123,23 +143,14 @@ export function parseModelMetadata(
   const reasoningSupported = Boolean(
     rawCaps.supports_reasoning === true ||
       rawCaps.reasoning === true ||
-      explicitEfforts.length > 0 ||
-      (id.includes("reasoning") ||
-        id.includes("think") ||
-        id.includes("r1") ||
-        id.includes("agent")),
+      explicitEfforts.length > 0,
   );
 
   let reasoningLevels: string[] = [];
-  if (reasoningSupported) {
-    if (explicitEfforts.length > 0) {
-      reasoningLevels = [...explicitEfforts];
-      // If Auto is not explicitly present, include Auto as first option for adaptive reasoning
-      if (!reasoningLevels.includes("auto") && !reasoningLevels.includes("default")) {
-        reasoningLevels.unshift("auto");
-      }
-    } else {
-      reasoningLevels = ["auto", "low", "medium", "high"];
+  if (reasoningSupported && explicitEfforts.length > 0) {
+    reasoningLevels = [...explicitEfforts];
+    if (!reasoningLevels.includes("auto") && !reasoningLevels.includes("default")) {
+      reasoningLevels.unshift("auto");
     }
   }
 
@@ -148,11 +159,11 @@ export function parseModelMetadata(
     rawCaps.reasoning_default_effort
       ? rawCaps.reasoning_default_effort.toLowerCase()
       : undefined) ||
-    (reasoningLevels.includes("auto")
-      ? "auto"
-      : reasoningLevels.includes("medium")
-        ? "medium"
-        : reasoningLevels[0] || "medium");
+    (reasoningLevels.length > 0
+      ? reasoningLevels.includes("auto")
+        ? "auto"
+        : reasoningLevels[0]
+      : undefined);
 
   const structuredOutput = Boolean(
     rawCaps.structured_output ??
@@ -180,30 +191,27 @@ export function parseModelMetadata(
     ? "Free ($0 input / $0 output)"
     : hasDynamicPricing
       ? `$${raw.pricing!.input}/M input · $${raw.pricing!.output}/M output`
-      : "Credits";
+      : "Pricing unavailable";
 
-  // Inferred recommended role for dynamic models
-  let recommendedRole: ModelMetadata["recommendedRole"];
-  const lower = id.toLowerCase();
-  if (lower.includes("code") || lower.includes("coder")) {
-    recommendedRole = "coding";
-  } else if (
-    reasoningSupported ||
-    lower.includes("r1") ||
-    lower.includes("ultra") ||
-    lower.includes("think")
-  ) {
-    recommendedRole = "reasoning";
-  } else if (
-    lower.includes("flash") ||
-    lower.includes("mini") ||
-    lower.includes("nano") ||
-    lower.includes("lite") ||
-    lower.includes("small")
-  ) {
-    recommendedRole = "fast";
-  } else {
-    recommendedRole = "balanced";
+  const pricingType = isFreeZeroCost
+    ? "free"
+    : hasDynamicPricing
+      ? "credits"
+      : "unknown";
+
+  // Role strictly from provider metadata or verified specialization (coding / verified reasoning capability)
+  let recommendedRole =
+    raw.recommendedRole ||
+    (raw.recommended_role as ModelMetadata["recommendedRole"]) ||
+    (raw.performance_category as ModelMetadata["recommendedRole"]);
+
+  if (!recommendedRole) {
+    const lower = id.toLowerCase();
+    if (lower.includes("code") || lower.includes("coder")) {
+      recommendedRole = "coding";
+    } else if (reasoningSupported) {
+      recommendedRole = "reasoning";
+    }
   }
 
   return {
@@ -222,13 +230,13 @@ export function parseModelMetadata(
     defaultReasoning,
     reasoningLabel: rawCaps.reasoning_label || "Reasoning",
     isPromotional: isFreeZeroCost,
-    pricingType: isFreeZeroCost ? "free" : "credits",
+    pricingType,
     pricingFormatted,
     pricingDetails: hasDynamicPricing
       ? { input: raw.pricing!.input, output: raw.pricing!.output }
       : undefined,
     description: isFreeZeroCost
-      ? `Free ($0 input / $0 output) model on Experiential Labs gateway.`
+      ? `Free ($0 input / $0 output) tier model.`
       : undefined,
     recommendedRole,
     apiRank: raw.apiRank,

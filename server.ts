@@ -1355,23 +1355,35 @@ const server = http.createServer(async (req, res) => {
       const workspace = validWorkspace(url.searchParams.get("workspace"));
       const baseline = await captureGitBaseline(workspace).catch(() => null);
       let logOutput = "";
+      let graphOutput = "";
       try {
-        const { stdout } = await execFileAsync(
-          "git",
-          ["log", "-n", "10", "--oneline"],
-          { cwd: workspace },
-        );
-        logOutput = stdout;
+        const [logRes, graphRes] = await Promise.all([
+          execFileAsync(
+            "git",
+            ["log", "-n", "10", "--oneline"],
+            { cwd: workspace },
+          ).catch(() => ({ stdout: "" })),
+          execFileAsync(
+            "git",
+            ["log", "--graph", "--oneline", "-n", "10"],
+            { cwd: workspace },
+          ).catch(() => ({ stdout: "" })),
+        ]);
+        logOutput = logRes.stdout;
+        graphOutput = graphRes.stdout;
       } catch {
         // Not a git repo or no commits
       }
+      const isRepo = Boolean(baseline && baseline.branch && baseline.branch.trim().length > 0 && baseline.branch !== "unknown");
       return sendJson(res, 200, {
-        branch: baseline?.branch ?? "unknown",
-        head: baseline?.head ?? "unknown",
+        isRepo,
+        branch: isRepo ? baseline!.branch : "",
+        head: isRepo ? baseline!.head : "",
         status: baseline?.status ?? "",
         diff: baseline?.diff ?? "",
         modifiedFiles: baseline?.modifiedFiles ?? [],
-        recentCommits: logOutput ? logOutput.trim().split("\n") : [],
+        recentCommits: logOutput ? logOutput.trim().split("\n").filter(Boolean) : [],
+        graph: graphOutput ? graphOutput.trim() : "",
       });
     }
 

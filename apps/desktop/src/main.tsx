@@ -123,12 +123,14 @@ type Problem = {
   line?: number;
 };
 type GitStatus = {
+  isRepo?: boolean;
   branch: string;
   head: string;
   status: string;
   diff: string;
   modifiedFiles: string[];
   recentCommits: string[];
+  graph?: string;
 };
 type GitSectionId = "changes" | "graph" | "commits";
 type SearchMatch = {
@@ -627,12 +629,14 @@ function App() {
 
   // Source Control / Git State
   const [gitStatus, setGitStatus] = useState<GitStatus>({
-    branch: "main",
+    isRepo: false,
+    branch: "",
     head: "",
     status: "",
     diff: "",
     modifiedFiles: [],
     recentCommits: [],
+    graph: "",
   });
   const [commitMessage, setCommitMessage] = useState("");
   const [generatingCommit, setGeneratingCommit] = useState(false);
@@ -932,6 +936,18 @@ function App() {
     () => new Set(["free"]),
   );
   const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+  const [catalogLastUpdated, setCatalogLastUpdated] = useState<number | null>(
+    null,
+  );
+
+  const formatTimeAgo = (timestamp: number | null): string => {
+    if (!timestamp) return "Syncing...";
+    const elapsedSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (elapsedSec < 3) return "just now";
+    if (elapsedSec < 60) return `${elapsedSec}s ago`;
+    const elapsedMin = Math.floor(elapsedSec / 60);
+    return `${elapsedMin}m ago`;
+  };
 
   const toggleModelFilter = (key: string) => {
     if (key === "all") {
@@ -1174,6 +1190,7 @@ function App() {
 
         if (Array.isArray(fetchedModels) && fetchedModels.length > 0) {
           setModels(fetchedModels);
+          setCatalogLastUpdated(Date.now());
 
           setSelectedModel((current) => {
             const currentLimit = limits ? limits[current] : undefined;
@@ -2211,13 +2228,17 @@ function App() {
       title = "Graph";
       content = (
         <div className="git-section-inner" style={{ padding: "8px 12px" }}>
-          <pre className="git-tree-ascii">
-            {`${gitStatus.branch || "main"}
-│
-├── feature/agent-workspace
-├── style/experiential-ui
-└── Initial commit`}
-          </pre>
+          {gitStatus.isRepo === false && !gitStatus.branch ? (
+            <div className="git-empty-hint">Git repository unavailable.</div>
+          ) : gitStatus.graph ? (
+            <pre className="git-tree-ascii">{gitStatus.graph}</pre>
+          ) : gitStatus.recentCommits?.length > 0 ? (
+            <pre className="git-tree-ascii">
+              {gitStatus.recentCommits.map((c) => `* ${c}`).join("\n")}
+            </pre>
+          ) : (
+            <div className="git-empty-hint">No commits on current branch.</div>
+          )}
         </div>
       );
     } else if (id === "commits") {
@@ -2452,13 +2473,16 @@ function App() {
         {/* Capability row strictly ordered: Context | Tools | Streaming | Reasoning */}
         <div className="model-caps-row">
           <span className="model-cap-tag">
-            {m.contextWindowFormatted || "128K"} Context
+            {m.contextWindowFormatted &&
+            m.contextWindowFormatted !== "Context unavailable"
+              ? `${m.contextWindowFormatted} Context`
+              : "Context unavailable"}
           </span>
           <span className={`model-cap-tag ${m.supportsTools ? "cap-accent" : ""}`}>
             Tools {m.supportsTools ? "✓" : "—"}
           </span>
           <span className="model-cap-tag">
-            Streaming {m.supportsStreaming !== false ? "✓" : "—"}
+            Streaming {m.supportsStreaming ? "✓" : "—"}
           </span>
 
           {/* REASONING SELECTOR ON MODEL CARD - Beside Streaming */}
@@ -2618,7 +2642,7 @@ function App() {
               <div className="model-detail-cell">
                 <span className="detail-label">Context</span>
                 <span className="detail-val">
-                  {m.contextWindowFormatted || "128K"}
+                  {m.contextWindowFormatted || "Context unavailable"}
                 </span>
               </div>
               <div className="model-detail-cell">
@@ -2630,7 +2654,7 @@ function App() {
               <div className="model-detail-cell">
                 <span className="detail-label">Streaming</span>
                 <span className="detail-val">
-                  {m.supportsStreaming !== false
+                  {m.supportsStreaming
                     ? "Supported ✓"
                     : "Not supported"}
                 </span>
@@ -2722,10 +2746,14 @@ function App() {
           <div
             className="provider-status-pill"
             onClick={() => setModelPickerOpen(true)}
-            title="Active AI Provider Gateway"
+            title={`Active AI Provider Gateway: ${activeModelMeta.provider === "experiential-labs" ? "Experiential Labs" : activeModelMeta.provider || "AI Provider"}`}
           >
             <span className="status-dot-pulse" />
-            <span>Experiential Labs</span>
+            <span>
+              {activeModelMeta.provider === "experiential-labs"
+                ? "Experiential Labs"
+                : activeModelMeta.provider || "AI Provider"}
+            </span>
           </div>
           <button
             className="topbar-btn"
@@ -3266,7 +3294,7 @@ function App() {
                   className={`drawer-tab ${bottomTab === "git" ? "active" : ""}`}
                   onClick={() => setBottomTab("git")}
                 >
-                  <GitBranch size={12} /> GIT ({gitStatus.branch || "main"})
+                  <GitBranch size={12} /> GIT ({gitStatus.isRepo && gitStatus.branch ? gitStatus.branch : "Unavailable"})
                 </button>
               </div>
 
@@ -3351,15 +3379,23 @@ function App() {
                   </div>
                 ) : bottomTab === "git" ? (
                   <div>
-                    <div>
-                      Branch: <b>{gitStatus.branch}</b> | HEAD:{" "}
-                      <code>{gitStatus.head.slice(0, 8)}</code>
-                    </div>
-                    <pre
-                      style={{ marginTop: 8, color: "var(--text-secondary)" }}
-                    >
-                      {gitStatus.status || "Working directory clean."}
-                    </pre>
+                    {gitStatus.isRepo ? (
+                      <>
+                        <div>
+                          Branch: <b>{gitStatus.branch}</b> | HEAD:{" "}
+                          <code>{gitStatus.head ? gitStatus.head.slice(0, 8) : "—"}</code>
+                        </div>
+                        <pre
+                          style={{ marginTop: 8, color: "var(--text-secondary)" }}
+                        >
+                          {gitStatus.status || "Working directory clean."}
+                        </pre>
+                      </>
+                    ) : (
+                      <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                        Git repository unavailable. Initialize or clone a Git repository in this workspace to track changes.
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div>
@@ -5463,7 +5499,7 @@ function App() {
                         type="button"
                         className="composer-model-btn"
                         onClick={() => setModelPickerOpen(true)}
-                        title={`Select AI Model: ${activeModelMeta.name} (Experiential Labs)`}
+                        title={`Select AI Model: ${activeModelMeta.name} (${activeModelMeta.provider === "experiential-labs" ? "Experiential Labs" : activeModelMeta.provider || "AI Provider"})`}
                       >
                         <span className="composer-model-name-text">
                           {activeModelMeta.name}
@@ -5475,7 +5511,7 @@ function App() {
                         ) : (activeModelMeta.isPromotional || isTrulyFree(activeModelMeta)) ? (
                           <span
                             className="composer-model-free-symbol"
-                            title="Free promotional model (100% Free Tier)"
+                            title="Verified free tier model ($0 input / $0 output)"
                           >
                             <Zap size={9} fill="currentColor" />
                           </span>
@@ -5680,7 +5716,7 @@ function App() {
         <div className="statusbar-left">
           <div className="statusbar-item">
             <GitBranch size={12} />
-            <span>{gitStatus.branch || "main"}</span>
+            <span>{gitStatus.isRepo && gitStatus.branch ? gitStatus.branch : "No Git Repo"}</span>
           </div>
           <div className="statusbar-item">
             <Check size={12} color="var(--accent-agent)" />
@@ -5703,7 +5739,13 @@ function App() {
             className="statusbar-item model-pill"
             onClick={() => setModelPickerOpen(true)}
           >
-            <span className="statusbar-exp-badge">EXP</span>
+            <span className="statusbar-exp-badge">
+              {activeModelMeta.provider === "experiential-labs"
+                ? "EXP"
+                : activeModelMeta.provider
+                  ? activeModelMeta.provider.slice(0, 3).toUpperCase()
+                  : "AI"}
+            </span>
             <span>{activeModelMeta.name}</span>
           </div>
           <div className="statusbar-item">
@@ -5742,7 +5784,7 @@ function App() {
             <div className="model-free-notice">
               <div className="live-pulse-dot" />
               <div className="live-tier-text">
-                <strong>Live Catalog:</strong> {models.length} Models Loaded · {freeCount} Free Tier Available · Verified Live
+                <strong>Live Catalog:</strong> {models.length} Models Loaded · {freeCount} Free Tier Available · Last updated {formatTimeAgo(catalogLastUpdated)}
               </div>
               <span className="live-badge">{freeCount} Free Tier</span>
             </div>
@@ -5883,6 +5925,7 @@ function App() {
                     );
                     if (res?.success && res.models) {
                       setModels(res.models);
+                      setCatalogLastUpdated(Date.now());
                       setSelectedModel((curr) => {
                         if (
                           curr &&

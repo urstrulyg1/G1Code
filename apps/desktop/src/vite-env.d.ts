@@ -150,12 +150,14 @@ interface Window {
       query: string,
     ): Promise<Array<{ file: string; line: number; content: string }>>;
     getGitStatus(workspace: string): Promise<{
+      isRepo?: boolean;
       branch: string;
       head: string;
       status: string;
       diff: string;
       modifiedFiles: string[];
       recentCommits: string[];
+      graph?: string;
     }>;
     getProblems(workspace: string): Promise<{
       problems: Array<{
