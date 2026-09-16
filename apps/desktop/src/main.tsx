@@ -1339,24 +1339,48 @@ function App() {
       }
     });
 
-    // Auto-initialize active workspace from backend server if available
-    if (window.g1code.getCurrentWorkspace) {
-      void window.g1code.getCurrentWorkspace().then(async (ws) => {
-        if (ws && ws !== "No workspace open") {
-          setWorkspace(ws);
-          setWorkspaceInput(ws);
-          try {
-            const list = await window.g1code.listDirectory(ws);
-            setEntries(list);
-            const sess = await window.g1code.listSessions(ws);
-            setSessions(sess);
-            void loadGitAndProblems(ws);
-          } catch {
-            // ignore
-          }
+    // Auto-initialize active workspace from backend, then last-used path
+    void (async () => {
+      let ws: string | null = null;
+      if (window.g1code.getCurrentWorkspace) {
+        try {
+          ws = await window.g1code.getCurrentWorkspace();
+        } catch {
+          ws = null;
         }
-      });
-    }
+      }
+      if (!ws || ws === "No workspace open") {
+        try {
+          ws = localStorage.getItem("g1code_last_workspace");
+        } catch {
+          ws = null;
+        }
+      }
+      if (!ws || ws === "No workspace open") return;
+      setWorkspace(ws);
+      setWorkspaceInput(ws);
+      try {
+        localStorage.setItem("g1code_last_workspace", ws);
+      } catch {}
+      try {
+        if (typeof window.g1code.setWorkspace === "function") {
+          ws = await window.g1code.setWorkspace(ws);
+          setWorkspace(ws);
+        }
+        const list = await window.g1code.listDirectory(ws);
+        setEntries(list);
+        const sess = await window.g1code.listSessions(ws);
+        setSessions(sess);
+        void loadGitAndProblems(ws);
+        setActiveActivity("explorer");
+      } catch {
+        // Stale or inaccessible path — stay on the open-folder welcome.
+        try {
+          localStorage.removeItem("g1code_last_workspace");
+        } catch {}
+        setWorkspace("No workspace open");
+      }
+    })();
 
     const offEvent = window.g1code.onAgentEvent((value) => {
       const event = value as Event & { sessionId?: string };
@@ -1635,6 +1659,15 @@ function App() {
     }
     setWorkspace(finalWs);
     setWorkspaceInput(finalWs);
+    try {
+      localStorage.setItem("g1code_last_workspace", finalWs);
+    } catch {}
+    // Opening a folder should leave the welcome CTA and show the file tree.
+    setActiveActivity("explorer");
+    setShowSidebar(true);
+    setTabs([]);
+    setActiveTabPath("");
+    setActiveDiff(null);
     setEntries(await window.g1code.listDirectory(finalWs));
     setSessions(await window.g1code.listSessions(finalWs));
     void window.g1code.rebuildIndex(finalWs);
@@ -3850,6 +3883,34 @@ function App() {
                   fontFamily: "var(--font-mono)",
                 }}
               />
+            ) : workspace !== "No workspace open" ? (
+              <div className="editor-welcome">
+                <div className="editor-welcome-icon">
+                  <FolderOpen size={28} />
+                </div>
+                <h2>{workspace.split(/[\\/]/).pop()}</h2>
+                <p>
+                  Folder is open. Pick a file in Explorer to edit, or ask the
+                  agent to inspect this project.
+                </p>
+                <div className="editor-welcome-actions">
+                  <button
+                    className="btn-open-folder"
+                    onClick={() => {
+                      setActiveActivity("explorer");
+                      setShowSidebar(true);
+                    }}
+                  >
+                    <Folder size={14} /> Show Explorer
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => void openWorkspace()}
+                  >
+                    <FolderOpen size={14} /> Switch Folder
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="editor-welcome">
                 <div className="editor-welcome-icon">
