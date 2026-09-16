@@ -459,9 +459,12 @@ dmg_1x = dmg_4k.resize((680, 450), Image.Resampling.LANCZOS)
 dmg_1x_path = os.path.join(build, "dmg-background.png")
 dmg_1x.save(dmg_1x_path)
 
+# Save baseline TIFF for cross-platform packaging
+tiff_out = os.path.join(build, "background.tiff")
+dmg_2x.save(tiff_out)
+
 if sys.platform == "darwin":
     try:
-        tiff_out = os.path.join(build, "background.tiff")
         subprocess.run(["tiffutil", "-cathidpicheck", dmg_1x_path, dmg_2x_path, "-out", tiff_out], check=True)
     except Exception:
         pass
