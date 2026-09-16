@@ -266,20 +266,28 @@ case "$TARGET" in
 esac
 
 # 5. Purge all intermediate updater blockmaps, metadata manifests, and staging folders
-echo -e "${CYAN}🧹 [6/6] Purging intermediate metadata and staging folders...${NC}"
+echo -e "${CYAN}🧹 [6/6] Purging intermediate metadata and mirroring installer to release/...${NC}"
 rm -rf dist-release/*.blockmap dist-release/*.yml dist-release/*.yaml dist-release/mac-* dist-release/win-* dist-release/linux-* dist-release/*-unpacked dist-release/*.zip
+
+# Mirror to release/ folder for seamless compatibility with G1Wiggle structure
+mkdir -p release 2>/dev/null || true
+cp -f dist-release/*.exe dist-release/*.dmg dist-release/*.AppImage dist-release/*.deb release/ 2>/dev/null || true
+# Clean any stale blockmaps or yaml in release as well
+rm -rf release/*.blockmap release/*.yml release/*.yaml release/mac-* release/win-* release/linux-* release/*.zip 2>/dev/null || true
 
 echo ""
 echo -e "${GREEN}${BOLD}======================================================${NC}"
 echo -e "${GREEN}${BOLD}       Packaging Completed Successfully!             ${NC}"
 echo -e "${GREEN}${BOLD}======================================================${NC}"
-echo -e "${BOLD}Generated Native Hardware Installer in dist-release/:${NC}"
+echo -e "${BOLD}Generated Native Hardware Installer (Architecture: ${TARGET_ARCH}):${NC}"
 echo ""
 
-if [ -d "dist-release" ]; then
-  ls -lh dist-release/*.dmg dist-release/*.exe dist-release/*.AppImage dist-release/*.deb 2>/dev/null || ls -lh dist-release/
+if [ -d "release" ]; then
+  ls -lh release/*.dmg release/*.exe release/*.AppImage release/*.deb 2>/dev/null || ls -lh release/
 fi
 
 echo ""
-echo -e "${CYAN}Your native desktop installer is ready in:${NC} ${BOLD}${SCRIPT_DIR}/dist-release/${NC}"
+echo -e "${CYAN}Your native desktop installer is ready in:${NC}"
+echo -e "  📁 ${BOLD}${SCRIPT_DIR}/release/${NC}"
+echo -e "  📁 ${BOLD}${SCRIPT_DIR}/dist-release/${NC}"
 echo ""
