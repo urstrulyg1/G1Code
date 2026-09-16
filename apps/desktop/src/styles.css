@@ -4572,15 +4572,9 @@ button {
   user-select: none;
 }
 .chat-empty-logo {
-  width: 52px;
-  height: 52px;
-  border-radius: 14px;
-  background: linear-gradient(
-    135deg,
-    rgba(99, 102, 241, 0.25) 0%,
-    rgba(99, 102, 241, 0.08) 100%
-  );
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
   display: flex;
   align-items: center;
   justify-content: center;

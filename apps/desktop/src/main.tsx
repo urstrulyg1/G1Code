@@ -3300,11 +3300,11 @@ function App() {
               src="/icon.png"
               alt="G1Code"
               style={{
-                width: 20,
-                height: 20,
-                borderRadius: 5,
-                objectFit: "cover",
+                width: 22,
+                height: 22,
+                objectFit: "contain",
                 display: "block",
+                filter: "drop-shadow(0 1px 4px rgba(56, 189, 248, 0.3))",
               }}
             />
             <span className="brand-badge">G1CODE</span>
@@ -4221,9 +4221,8 @@ function App() {
                       style={{
                         width: 72,
                         height: 72,
-                        borderRadius: 18,
-                        objectFit: "cover",
-                        boxShadow: "0 8px 32px rgba(56, 189, 248, 0.3)",
+                        objectFit: "contain",
+                        filter: "drop-shadow(0 4px 20px rgba(56, 189, 248, 0.35))",
                       }}
                     />
                   </div>
