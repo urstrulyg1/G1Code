@@ -82,10 +82,11 @@ if (typeof window !== "undefined" && !window.g1code) {
   ensureEventSource();
 
   window.g1code = {
-    // In web mode the workspace modal handles folder selection directly;
-    // this method is only used by Electron via the preload IPC bridge.
+    // Browsers cannot show the native OS folder dialog (no Electron IPC
+    // bridge). Throw so the UI falls back to its manual path-entry modal.
+    // (Returning null would mean "user cancelled the dialog".)
     async chooseWorkspace(): Promise<string | null> {
-      return null;
+      throw new Error("Native folder dialog is unavailable outside Electron");
     },
 
     async getCurrentWorkspace(): Promise<string | null> {

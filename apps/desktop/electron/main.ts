@@ -189,11 +189,64 @@ function createWindow() {
   }
 }
 
-ipcMain.handle("workspace:choose", async () => {
-  const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
-  if (result.canceled) return null;
-  selectedWorkspace = path.resolve(result.filePaths[0]);
-  return selectedWorkspace;
+async function applyWorkspace(targetPath: string): Promise<string> {
+  if (
+    typeof targetPath !== "string" ||
+    targetPath.length === 0 ||
+    targetPath.length > 4096
+  ) {
+    throw new Error("Invalid workspace path");
+  }
+  const resolved = path.resolve(targetPath);
+  const stat = await fs.stat(resolved);
+  if (!stat.isDirectory()) {
+    throw new Error(`Selected path is not a folder: ${resolved}`);
+  }
+  selectedWorkspace = resolved;
+  // Keep the backend HTTP server (agent, index, git) on the same workspace.
+  // Best-effort: a temporarily unavailable backend must not block opening.
+  try {
+    await api("/api/workspace/choose", {
+      method: "POST",
+      body: JSON.stringify({ path: resolved }),
+    });
+  } catch (err) {
+    console.error("[Workspace] Failed to sync backend server:", err);
+  }
+  return resolved;
+}
+
+// Programmatic workspace selection (manual path entry from the renderer).
+ipcMain.handle("workspace:set", async (_event, targetPath: string) => {
+  return applyWorkspace(targetPath);
+});
+
+ipcMain.handle("workspace:choose", async (event) => {
+  // Native OS folder picker — the same mechanism VS Code uses.
+  //   macOS   → NSOpenPanel in folder mode: select the folder itself, click "Open"
+  //   Windows → standard open dialog in folder mode: select the folder itself,
+  //             click "Select Folder"
+  // No file selection is required or possible.
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  const options: Electron.OpenDialogOptions = {
+    title: "Open Project Folder",
+    message: "Choose the project folder to open as your workspace",
+    defaultPath:
+      selectedWorkspace && existsSync(selectedWorkspace)
+        ? selectedWorkspace
+        : app.getPath("home"),
+    properties: ["openDirectory"],
+  };
+  const result = parent
+    ? await dialog.showOpenDialog(parent, options)
+    : await dialog.showOpenDialog(options);
+  if (result.canceled || result.filePaths.length === 0) return null;
+  try {
+    return await applyWorkspace(result.filePaths[0]);
+  } catch (err) {
+    console.error("[Workspace] Failed to open selected folder:", err);
+    return null;
+  }
 });
 ipcMain.handle("workspace:get-current", () => {
   return selectedWorkspace || null;

@@ -3,6 +3,7 @@
 interface Window {
   g1code: {
     chooseWorkspace(): Promise<string | null>;
+    setWorkspace?(targetPath: string): Promise<string>;
     getCurrentWorkspace?(): Promise<string | null>;
     openNativeFolder?(
       targetPath?: string,
