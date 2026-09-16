@@ -1615,59 +1615,69 @@ function App() {
     }
   };
 
-  const openWorkspace = async () => {
-    // Use the File System Access API (showDirectoryPicker) for a native VS Code-style
-    // folder picker — opens the OS panel directly with no intermediate dialog.
-    if (typeof (window as any).showDirectoryPicker === "function") {
-      try {
-        const handle = await (window as any).showDirectoryPicker({
-          mode: "read",
-        });
-        const folderName: string = handle.name;
-        // Resolve to absolute path via the server's cwd
-        const { cwd } = (await fetch("/api/workspace/cwd").then((r) =>
-          r.json(),
-        )) as { cwd: string };
-        const absolutePath = cwd.replace(/\/+$/, "") + "/" + folderName;
-        const { workspace: serverWs } = (await fetch("/api/workspace/choose", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: absolutePath }),
-        }).then((r) => r.json())) as { workspace: string };
-        const finalWs = serverWs || absolutePath;
-        setWorkspace(finalWs);
-        setWorkspaceInput(finalWs);
-        setEntries(await window.g1code.listDirectory(finalWs));
-        setSessions(await window.g1code.listSessions(finalWs));
-        void window.g1code.rebuildIndex(finalWs);
-        void loadGitAndProblems(finalWs);
-        return;
-      } catch (err: any) {
-        // User cancelled (AbortError) — do nothing. Any other error falls through to modal.
-        if (err?.name === "AbortError") return;
-      }
-    }
-    // Fallback: show the manual path-entry modal
-    setWorkspaceModal(true);
-  };
-
-  const submitWorkspacePath = async () => {
-    if (!workspaceInput.trim()) return;
-    const chosen = workspaceInput.trim();
-    try {
-      // Tell the server which workspace to use, then load it
+  // Load an already-selected directory as the active workspace: sync the
+  // backend (Electron main process + HTTP server) and refresh explorer state.
+  const loadWorkspace = async (chosen: string) => {
+    let finalWs: string;
+    if (typeof window.g1code.setWorkspace === "function") {
+      // Electron: validate the path, set it in the main process, and sync the
+      // backend HTTP server through the main-process bridge (works even when
+      // the page is loaded via file:// in the packaged app).
+      finalWs = await window.g1code.setWorkspace(chosen);
+    } else {
+      // Browser: talk to the backend HTTP server directly.
       const { workspace: serverWs } = (await fetch("/api/workspace/choose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: chosen }),
       }).then((r) => r.json())) as { workspace: string };
-      const finalWs = serverWs || chosen;
-      setWorkspace(finalWs);
-      setWorkspaceInput(finalWs);
-      setEntries(await window.g1code.listDirectory(finalWs));
-      setSessions(await window.g1code.listSessions(finalWs));
-      void window.g1code.rebuildIndex(finalWs);
-      void loadGitAndProblems(finalWs);
+      finalWs = serverWs || chosen;
+    }
+    setWorkspace(finalWs);
+    setWorkspaceInput(finalWs);
+    setEntries(await window.g1code.listDirectory(finalWs));
+    setSessions(await window.g1code.listSessions(finalWs));
+    void window.g1code.rebuildIndex(finalWs);
+    void loadGitAndProblems(finalWs);
+  };
+
+  const openWorkspace = async () => {
+    // Native OS folder picker (Electron main-process dialog) — the same
+    // mechanism VS Code uses. On macOS it is the standard NSOpenPanel folder
+    // picker; on Windows the standard dialog with a "Select Folder" button.
+    // The user selects the folder itself (no file selection needed) and
+    // confirms with the dialog's Select/Open button.
+    if (typeof window.g1code.chooseWorkspace === "function") {
+      try {
+        const chosen = await window.g1code.chooseWorkspace();
+        if (chosen) {
+          try {
+            await loadWorkspace(chosen);
+          } catch (err) {
+            alert(
+              "Could not open directory: " +
+                (err instanceof Error ? err.message : String(err)),
+            );
+          }
+        }
+        // null → the user cancelled the dialog — do nothing.
+        return;
+      } catch (err) {
+        // No native dialog available in this environment (plain browser),
+        // or the IPC call failed — fall back to manual path entry.
+        console.error(
+          "Native folder picker unavailable, using path entry:",
+          err,
+        );
+      }
+    }
+    setWorkspaceModal(true);
+  };
+
+  const submitWorkspacePath = async () => {
+    if (!workspaceInput.trim()) return;
+    try {
+      await loadWorkspace(workspaceInput.trim());
       setWorkspaceModal(false);
     } catch (err) {
       alert(
@@ -3853,7 +3863,7 @@ function App() {
                 </p>
                 <button
                   className="btn-open-folder"
-                  onClick={() => void openNativeProjectFolder()}
+                  onClick={() => void openWorkspace()}
                 >
                   <FolderOpen size={14} /> Open Project Folder
                 </button>
@@ -7019,7 +7029,8 @@ function App() {
         </div>
       )}
 
-      {/* WORKSPACE DIRECTORY MODAL — fallback for browsers without showDirectoryPicker */}
+      {/* WORKSPACE DIRECTORY MODAL — fallback for plain browsers, where no
+          native OS folder dialog (Electron IPC) is available */}
       {workspaceModal && (
         <div
           className="settings-modal"
