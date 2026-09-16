@@ -3297,7 +3297,7 @@ function App() {
         <div className="topbar-left">
           <div className="brand">
             <img
-              src="/icon.png"
+              src={import.meta.env.BASE_URL + "icon.png"}
               alt="G1Code"
               style={{
                 width: 22,
@@ -4216,7 +4216,7 @@ function App() {
                 <div className="chat-empty-state">
                   <div className="chat-empty-logo">
                     <img
-                      src="/icon.png"
+                      src={import.meta.env.BASE_URL + "icon.png"}
                       alt="G1Code"
                       style={{
                         width: 72,
