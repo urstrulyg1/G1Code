@@ -24,6 +24,12 @@ import {
 } from "../../../packages/settings/storage";
 import { ModelCatalog, globalModelCatalog } from "../../../packages/ai/models";
 import { globalUsageLimitManager } from "../../../packages/ai/usage-limits";
+
+const APPROVAL_TIMEOUT_MS = Math.max(
+  60_000,
+  Number(process.env.G1CODE_APPROVAL_TIMEOUT_MS) || 15 * 60_000,
+);
+
 function validWorkspace(input: unknown) {
   if (typeof input !== "string" || !path.isAbsolute(input))
     throw new Error("A selected absolute workspace path is required");
@@ -66,14 +72,54 @@ export function registerRuntimeHandlers(
     {
       sessionId: string;
       resolve: (result: ChangeApprovalResult) => void;
+      timer?: NodeJS.Timeout;
+    }
+  >();
+  const permissionWaiters = new Map<
+    string,
+    {
+      sessionId: string;
+      timer: NodeJS.Timeout;
+      resolve: (allowed: boolean) => void;
+      listener: (...args: any[]) => void;
     }
   >();
   const activeToolCalls = new Map<string, string>();
   const assistantBuffers = new Map<string, string>();
   const waitForChangeApproval = (sessionId: string, changeId: string) =>
     new Promise<ChangeApprovalResult>((resolve) => {
-      approvalWaiters.set(changeId, { sessionId, resolve });
+      const timer = setTimeout(() => {
+        const waiter = approvalWaiters.get(changeId);
+        if (!waiter) return;
+        approvalWaiters.delete(changeId);
+        waiter.resolve({
+          approved: false,
+          status: "REJECTED",
+          message: "Change approval timed out.",
+        });
+      }, APPROVAL_TIMEOUT_MS);
+      approvalWaiters.set(changeId, { sessionId, resolve, timer });
     });
+
+  const releaseSessionWaiters = (sessionId: string) => {
+    for (const [requestId, waiter] of permissionWaiters) {
+      if (waiter.sessionId !== sessionId) continue;
+      clearTimeout(waiter.timer);
+      ipcMain.removeListener("permission:response", waiter.listener as any);
+      permissionWaiters.delete(requestId);
+      waiter.resolve(false);
+    }
+    for (const [changeId, waiter] of approvalWaiters) {
+      if (waiter.sessionId !== sessionId) continue;
+      if (waiter.timer) clearTimeout(waiter.timer);
+      approvalWaiters.delete(changeId);
+      waiter.resolve({
+        approved: false,
+        status: "REJECTED",
+        message: "Session stopped by user.",
+      });
+    }
+  };
   const finishChangeApproval = async (
     workspace: string,
     changeId: string,
@@ -88,37 +134,58 @@ export function registerRuntimeHandlers(
       !session ||
       change.sessionId !== waiter.sessionId ||
       !matchesWorkspace(session.workspaceId, workspace)
-    )
+    ) {
+      if (waiter.timer) clearTimeout(waiter.timer);
+      approvalWaiters.delete(changeId);
+      waiter.resolve({
+        approved: false,
+        status: "CONFLICT",
+        message: "Change no longer belongs to the active conversation.",
+      });
       throw new Error("Change does not belong to the active session");
-    const service = new ChangeService(store, workspace);
-    const result = approved
-      ? await (async () => {
-          service.approveChange(changeId);
-          return service.applyChange(changeId);
-        })()
-      : service.rejectChange(changeId);
-    const status =
-      result.status === "APPLIED" || result.status === "CONFLICT"
-        ? result.status
-        : "REJECTED";
-    const message =
-      status === "APPLIED"
-        ? "Change applied successfully. Continuing agent."
-        : status === "CONFLICT"
-          ? "Change conflicted with an external edit. The file was not overwritten."
-          : "Change rejected by user.";
-    store.addEvent(
-      waiter.sessionId,
-      approved ? `CHANGE_${status}` : "CHANGE_REJECTED",
-      { changeId, status, message },
-    );
-    getWindow()?.webContents.send("agent:event", {
-      type: "approval",
+    }
+    let result = change;
+    let status: ChangeApprovalResult["status"] = "REJECTED";
+    let message = "Change rejected by user.";
+    try {
+      const service = new ChangeService(store, workspace);
+      result = approved
+        ? await (async () => {
+            service.approveChange(changeId);
+            return service.applyChange(changeId);
+          })()
+        : service.rejectChange(changeId);
+      status =
+        result.status === "APPLIED" || result.status === "CONFLICT"
+          ? result.status
+          : "REJECTED";
+      message =
+        status === "APPLIED"
+          ? "Change applied successfully. Continuing agent."
+          : status === "CONFLICT"
+            ? "Change conflicted with an external edit. The file was not overwritten."
+            : "Change rejected by user.";
+    } catch (error) {
+      status = "CONFLICT";
+      message =
+        error instanceof Error
+          ? `Change could not be applied safely: ${error.message}`
+          : "Change could not be applied safely.";
+      result = store.getChange(changeId) || change;
+    } finally {
+      if (waiter.timer) clearTimeout(waiter.timer);
+      approvalWaiters.delete(changeId);
+    }
+    const resolvedEvent = {
+      type: "approval" as const,
       sessionId: waiter.sessionId,
       changeId,
+      action: "resolved",
       message,
       result: { status },
-    });
+    };
+    store.addEvent(waiter.sessionId, "approval", resolvedEvent);
+    getWindow()?.webContents.send("agent:event", resolvedEvent);
     approvalWaiters.delete(changeId);
     waiter.resolve({ approved: status === "APPLIED", status, message });
     return result;
@@ -544,7 +611,9 @@ export function registerRuntimeHandlers(
         throw new Error("Session does not belong to workspace");
       for (const change of store.pendingChanges(input.sessionId)) {
         if (approvalWaiters.has(change.id)) {
-          approvalWaiters.get(change.id)?.resolve({
+          const waiter = approvalWaiters.get(change.id)!;
+          if (waiter.timer) clearTimeout(waiter.timer);
+          waiter.resolve({
             approved: false,
             status: "REJECTED",
             message: "Session discarded by user.",
@@ -553,6 +622,7 @@ export function registerRuntimeHandlers(
         }
         new ChangeService(store, workspace).rejectChange(change.id);
       }
+      releaseSessionWaiters(input.sessionId);
       manager.cancelSession(input.sessionId);
       store.updateSessionStatus(input.sessionId, "STOPPED");
       store.addEvent(input.sessionId, "SESSION_DISCARDED", {
@@ -771,14 +841,18 @@ export function registerRuntimeHandlers(
           if (settings.autoExecution === "always") return true;
           if (settings.autoExecution === "never") return false;
           return new Promise<boolean>((resolve) => {
-            const requestId = `${sessionId}-${Date.now()}`;
+            const requestId = `${sessionId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
             let settled = false;
+            let timer: NodeJS.Timeout;
             const finish = (allowed: boolean) => {
               if (settled) return;
               settled = true;
+              clearTimeout(timer);
               ipcMain.removeListener("permission:response", listener);
+              permissionWaiters.delete(requestId);
               resolve(allowed);
             };
+            timer = setTimeout(() => finish(false), APPROVAL_TIMEOUT_MS);
             const listener = (
               _event: Electron.IpcMainEvent,
               response: { requestId: string; allowed: boolean },
@@ -786,6 +860,12 @@ export function registerRuntimeHandlers(
               if (response?.requestId === requestId)
                 finish(response.allowed === true);
             };
+            permissionWaiters.set(requestId, {
+              sessionId,
+              timer,
+              resolve: finish,
+              listener,
+            });
             ipcMain.on("permission:response", listener);
             getWindow()?.webContents.send("permission:request", {
               requestId,
@@ -798,7 +878,19 @@ export function registerRuntimeHandlers(
         undefined,
         sessionId,
         changeService,
-        (changeId) => waitForChangeApproval(sessionId, changeId),
+        (changeId) => {
+          const decision = waitForChangeApproval(sessionId, changeId);
+          if (settings.reviewPolicy === "always" || settings.reviewPolicy === "never") {
+            queueMicrotask(() =>
+              void finishChangeApproval(
+                workspace,
+                changeId,
+                settings.reviewPolicy === "always",
+              ).catch(() => undefined),
+            );
+          }
+          return decision;
+        },
         (run) => {
           const testRunId = store.addTestRun(sessionId, run);
           store.addEvent(sessionId, "TEST_RUN_RECORDED", { testRunId, ...run });
@@ -818,19 +910,26 @@ export function registerRuntimeHandlers(
         },
         selectedModel,
       );
-      manager.startSession(sessionId, runtime, (signal) =>
-        runtime.run(
-          `${instructions ? `Project instructions:\n${instructions}\n\n` : ""}${input.prompt}`,
-          input.mode,
-          signal,
-          input.attachedContext ?? [],
-        ),
-      );
+      manager.startSession(sessionId, runtime, async (signal) => {
+        try {
+          await runtime.run(
+            `${instructions ? `Project instructions:\n${instructions}\n\n` : ""}${input.prompt}`,
+            input.mode,
+            signal,
+            input.attachedContext ?? [],
+          );
+        } finally {
+          releaseSessionWaiters(sessionId);
+        }
+      });
       return { sessionId, model: selectedModel };
     },
   );
   ipcMain.on("agent:stop", (_event, sessionId: string) => {
-    if (typeof sessionId === "string") manager.cancelSession(sessionId);
+    if (typeof sessionId === "string") {
+      releaseSessionWaiters(sessionId);
+      manager.cancelSession(sessionId);
+    }
   });
   ipcMain.handle(
     "agent:session-model",

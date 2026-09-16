@@ -131,6 +131,7 @@ interface Window {
       workspace: string;
       prompt: string;
       mode: "ask" | "plan" | "agent";
+      sessionId?: string;
       model?: string;
       reasoning?: string;
       provider?: string;
@@ -269,7 +270,10 @@ interface Window {
     approveAllChanges(workspace: string, sessionId: string): Promise<unknown>;
     rejectAllChanges(workspace: string, sessionId: string): Promise<unknown>;
     discardSession(workspace: string, sessionId: string): Promise<unknown>;
-    respondPermission(requestId: string, allowed: boolean): void;
+    respondPermission(
+      requestId: string,
+      allowed: boolean,
+    ): Promise<{ success: boolean; alreadyHandled?: boolean }>;
     getPendingPermissions?(sessionId?: string): Promise<
       Array<{
         requestId: string;

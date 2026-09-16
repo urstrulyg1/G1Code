@@ -10,7 +10,14 @@ export class AgentRuntimeManager {
   ) {
     const controller = new AbortController();
     this.sessions.set(sessionId, { runtime, controller });
-    void run(controller.signal).finally(() => this.sessions.delete(sessionId));
+    void run(controller.signal)
+      .catch((error) => {
+        // A runtime should normally convert failures into AgentEvents. Keep the
+        // manager from producing an unhandled rejection if an integration
+        // boundary throws unexpectedly, and always release the session handle.
+        console.error(`[AgentRuntimeManager] Session ${sessionId} failed:`, error);
+      })
+      .finally(() => this.sessions.delete(sessionId));
     return sessionId;
   }
   getSession(sessionId: string) {
