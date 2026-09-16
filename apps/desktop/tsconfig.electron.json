@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["node", "electron"]
   },
-  "include": ["electron/**/*.ts", "../../packages/**/*.ts"]
+  "include": ["electron/**/*.ts", "../../packages/**/*.ts", "../../server.ts"]
 }

@@ -13,7 +13,9 @@ export function openDatabase(customDir?: string) {
         electron &&
         typeof electron === "object" &&
         electron.app &&
-        typeof electron.app.getPath === "function"
+        typeof electron.app.getPath === "function" &&
+        typeof electron.app.isReady === "function" &&
+        electron.app.isReady()
       ) {
         directory = electron.app.getPath("userData");
       }
@@ -24,8 +26,13 @@ export function openDatabase(customDir?: string) {
   if (!directory) {
     if (process.env.G1CODE_DATA_DIR) {
       directory = process.env.G1CODE_DATA_DIR;
+    } else if (process.env.APPDATA) {
+      directory = path.join(process.env.APPDATA, "G1Code");
+    } else if (process.platform === "darwin") {
+      directory = path.join(os.homedir(), "Library", "Application Support", "G1Code");
+    } else if (process.env.HOME) {
+      directory = path.join(process.env.HOME, ".config", "G1Code");
     } else {
-      // Store in local system root folder named G1Code
       directory = path.join(process.cwd(), "G1Code");
     }
   }

@@ -20,7 +20,10 @@
     "package.json"
   ],
   "asarUnpack": [
-    "**/*.node"
+    "**/*.node",
+    "dist-electron/server.js",
+    "dist-electron/packages/**/*",
+    "node_modules/better-sqlite3/**/*"
   ],
   "mac": {
     "category": "public.app-category.developer-tools",

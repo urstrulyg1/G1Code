@@ -10,6 +10,86 @@ const root = __dirname;
 let selectedWorkspace: string | undefined;
 let serverProcess: ChildProcess | null = null;
 
+function findNodeExecutable(): string {
+  const isWin = process.platform === "win32";
+  const nodeName = isWin ? "node.exe" : "node";
+
+  if (process.env.NODE_PATH && existsSync(process.env.NODE_PATH)) {
+    return process.env.NODE_PATH;
+  }
+
+  const candidateDirs = isWin
+    ? [
+        process.env.ProgramFiles
+          ? path.join(process.env.ProgramFiles, "nodejs")
+          : "",
+        process.env["ProgramFiles(x86)"]
+          ? path.join(process.env["ProgramFiles(x86)"], "nodejs")
+          : "",
+        process.env.LOCALAPPDATA
+          ? path.join(process.env.LOCALAPPDATA, "Programs", "node")
+          : "",
+        process.env.APPDATA ? path.join(process.env.APPDATA, "npm") : "",
+      ].filter(Boolean)
+    : [
+        "/usr/local/bin",
+        "/opt/homebrew/bin",
+        "/usr/bin",
+        "/bin",
+        path.join(process.env.HOME || "", ".nvm/versions/node"),
+      ];
+
+  for (const dir of candidateDirs) {
+    const candidate = path.join(dir, nodeName);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return isWin ? "node.exe" : "node";
+}
+
+function resolveServerScript(appPath: string): {
+  binary: string;
+  args: string[];
+  workingDir: string;
+} {
+  const nodeBin = findNodeExecutable();
+  const unpackedRoot = appPath.includes("app.asar")
+    ? appPath.replace(/app\.asar$/, "app.asar.unpacked")
+    : appPath;
+
+  const candidateServerScripts = [
+    path.join(unpackedRoot, "dist-electron", "server.js"),
+    path.join(appPath, "dist-electron", "server.js"),
+    path.join(unpackedRoot, "server.js"),
+  ];
+
+  for (const scriptPath of candidateServerScripts) {
+    if (existsSync(scriptPath)) {
+      return {
+        binary: nodeBin,
+        args: [scriptPath],
+        workingDir: path.dirname(scriptPath),
+      };
+    }
+  }
+
+  // Development fallback with tsx
+  const tsxCli = path.join(appPath, "node_modules", "tsx", "dist", "cli.mjs");
+  const tsServer = path.join(appPath, "server.ts");
+  if (existsSync(tsxCli) && existsSync(tsServer)) {
+    return {
+      binary: nodeBin,
+      args: [tsxCli, tsServer],
+      workingDir: appPath,
+    };
+  }
+
+  const fallback = path.join(unpackedRoot, "dist-electron", "server.js");
+  return { binary: nodeBin, args: [fallback], workingDir: unpackedRoot };
+}
+
 async function ensureBackendServer() {
   try {
     const res = await fetch("http://127.0.0.1:3131/api/health").catch(
@@ -19,17 +99,45 @@ async function ensureBackendServer() {
   } catch {
     // not running
   }
+
+  if (serverProcess) return;
+
   const appPath = app.getAppPath();
-  const tsxPath = path.join(appPath, "node_modules", "tsx", "dist", "cli.mjs");
-  const serverScript = path.join(appPath, "server.ts");
+  const { binary, args, workingDir } = resolveServerScript(appPath);
+
   try {
-    serverProcess = spawn(process.execPath, [tsxPath, serverScript], {
-      cwd: appPath,
+    serverProcess = spawn(binary, args, {
+      cwd: workingDir,
       stdio: "ignore",
       env: { ...process.env, PORT: "3131" },
     });
-  } catch {
-    // ignore
+
+    serverProcess.on("error", (err) => {
+      console.error("[Backend Process Error]:", err);
+    });
+
+    serverProcess.on("exit", (code, signal) => {
+      console.log(
+        `[Backend Process] Exited with code ${code}, signal ${signal}`,
+      );
+      serverProcess = null;
+    });
+  } catch (err) {
+    console.error("[Backend Spawn Error]:", err);
+  }
+
+  // Poll briefly for server readiness (up to 4.5 seconds)
+  for (let i = 0; i < 30; i++) {
+    try {
+      const res = await fetch("http://127.0.0.1:3131/api/health").catch(
+        () => null,
+      );
+      if (res && res.ok) {
+        console.log("[Backend] Server active on port 3131");
+        return;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 150));
   }
 }
 
