@@ -89,6 +89,17 @@ if (typeof window !== "undefined" && !window.g1code) {
       throw new Error("Native folder dialog is unavailable outside Electron");
     },
 
+    async setWorkspace(targetPath: string): Promise<string> {
+      const res = await apiRequest<{ workspace: string }>(
+        "/api/workspace/choose",
+        {
+          method: "POST",
+          body: JSON.stringify({ path: targetPath }),
+        },
+      );
+      return res.workspace || targetPath;
+    },
+
     async getCurrentWorkspace(): Promise<string | null> {
       try {
         const res = await apiRequest<{ workspace: string }>(

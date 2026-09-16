@@ -1522,6 +1522,14 @@ button {
   background: var(--accent-primary-hover);
 }
 
+.editor-welcome-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 /* Bottom Panel (Terminal / Problems / Tests / Git) */
 .bottom-drawer {
   min-height: 80px;
