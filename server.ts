@@ -32,7 +32,7 @@ import {
   globalModelCatalog,
 } from "./packages/ai/models";
 import { globalUsageLimitManager } from "./packages/ai/usage-limits";
-import type { ChatRequest } from "./packages/ai/types";
+import type { ChatMessage, ChatRequest } from "./packages/ai/types";
 
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.PORT) || 3131;
@@ -52,11 +52,17 @@ for (const batch of store.activeChangeBatches()) {
 const manager = new AgentRuntimeManager();
 const indexService = new RepositoryIndexService(store);
 
+const APPROVAL_TIMEOUT_MS = Math.max(
+  60_000,
+  Number(process.env.G1CODE_APPROVAL_TIMEOUT_MS) || 15 * 60_000,
+);
+
 const approvalWaiters = new Map<
   string,
   {
     sessionId: string;
     resolve: (result: ChangeApprovalResult) => void;
+    timer?: NodeJS.Timeout;
   }
 >();
 
@@ -64,24 +70,29 @@ interface PendingPermission {
   requestId: string;
   sessionId: string;
   tool: string;
+  toolCallId?: string;
   input: unknown;
   createdAt: number;
   resolve: (allowed: boolean) => void;
+  timer?: NodeJS.Timeout;
 }
 
 const permissionWaiters = new Map<string, PendingPermission>();
+const changeResolutionPromises = new Map<string, Promise<unknown>>();
 
 /** Release every waiter that belongs to a session so a stopped agent can unwind. */
 function releaseSessionWaiters(sessionId: string) {
   for (const [key, waiter] of permissionWaiters) {
     if (waiter.sessionId === sessionId) {
       permissionWaiters.delete(key);
+      if (waiter.timer) clearTimeout(waiter.timer);
       waiter.resolve(false);
     }
   }
   for (const [changeId, waiter] of approvalWaiters) {
     if (waiter.sessionId === sessionId) {
       approvalWaiters.delete(changeId);
+      if (waiter.timer) clearTimeout(waiter.timer);
       waiter.resolve({
         approved: false,
         status: "REJECTED",
@@ -103,6 +114,123 @@ function broadcastSSE(data: unknown) {
     } catch {
       sseClients.delete(client);
     }
+  }
+}
+
+function persistAndBroadcastEvent(
+  sessionId: string,
+  eventType: string,
+  payload: Record<string, unknown>,
+) {
+  const record = store.addEvent(sessionId, eventType, payload);
+  broadcastSSE({
+    ...payload,
+    id: payload.id || record.id,
+    sessionId,
+    at: payload.at || record.timestamp,
+  });
+  return record;
+}
+
+/**
+ * Resolve a persisted file-change decision exactly once. All approval entry
+ * points (single action, approve-all, policy automation, and timeout) use this
+ * function so the runtime waiter, database event, and renderer cannot drift
+ * apart when two UI actions race.
+ */
+async function finishChangeApprovalOnce(
+  workspace: string,
+  changeId: string,
+  approved: boolean,
+) {
+  const waiter = approvalWaiters.get(changeId);
+  if (!waiter) throw new Error("Change is not awaiting approval");
+  const change = store.getChange(changeId);
+  const session = store.getSession(waiter.sessionId);
+  if (
+    !change ||
+    !session ||
+    change.sessionId !== waiter.sessionId ||
+    !matchesWorkspace(session.workspaceId, workspace)
+  ) {
+    if (waiter.timer) clearTimeout(waiter.timer);
+    approvalWaiters.delete(changeId);
+    waiter.resolve({
+      approved: false,
+      status: "CONFLICT",
+      message: "Change no longer belongs to the active conversation.",
+    });
+    throw new Error("Change does not belong to the active session");
+  }
+
+  let applied = change;
+  let status: ChangeApprovalResult["status"] = "REJECTED";
+  let message = "Change rejected by user.";
+  try {
+    if (approved) {
+      const service = new ChangeService(store, workspace);
+      service.approveChange(changeId);
+      applied = await service.applyChange(changeId);
+      status =
+        applied.status === "APPLIED" || applied.status === "CONFLICT"
+          ? applied.status
+          : "CONFLICT";
+      message =
+        status === "APPLIED"
+          ? "Change applied successfully. Continuing agent."
+          : "Change conflicted with an external edit. The file was not overwritten.";
+    } else {
+      applied = new ChangeService(store, workspace).rejectChange(changeId);
+      status = "REJECTED";
+    }
+  } catch (error) {
+    // Never leave the provider suspended because an apply/reject operation
+    // failed. A conflict result is safe to feed back to the model and makes
+    // clear that the filesystem was not silently overwritten.
+    status = "CONFLICT";
+    message =
+      error instanceof Error
+        ? `Change could not be applied safely: ${error.message}`
+        : "Change could not be applied safely.";
+    const current = store.getChange(changeId);
+    if (current) applied = current;
+  } finally {
+    if (waiter.timer) clearTimeout(waiter.timer);
+    approvalWaiters.delete(changeId);
+  }
+
+  const resolvedEvent = {
+    type: "approval" as const,
+    toolCallId: undefined,
+    changeId,
+    action: "resolved",
+    message,
+    result: { status },
+  };
+  persistAndBroadcastEvent(waiter.sessionId, "approval", resolvedEvent);
+  waiter.resolve({ approved: status === "APPLIED", status, message });
+  return applied;
+}
+
+/**
+ * Serialize competing approval clicks for one change. The renderer disables
+ * duplicate buttons, but this server-side guard is the actual safety boundary
+ * for two tabs, approve-all, retries, or a delayed network response.
+ */
+async function finishChangeApproval(
+  workspace: string,
+  changeId: string,
+  approved: boolean,
+) {
+  const active = changeResolutionPromises.get(changeId);
+  if (active) return active;
+  const work = finishChangeApprovalOnce(workspace, changeId, approved);
+  changeResolutionPromises.set(changeId, work);
+  try {
+    return await work;
+  } finally {
+    if (changeResolutionPromises.get(changeId) === work)
+      changeResolutionPromises.delete(changeId);
   }
 }
 
@@ -635,14 +763,14 @@ const server = http.createServer(async (req, res) => {
 
     // Sessions list
     if (pathname === "/api/agent/sessions" && req.method === "GET") {
-      const workspace = validWorkspace(url.searchParams.get("workspace"));
+      const workspace = checkedWorkspace(url.searchParams.get("workspace") || undefined);
       const sessions = store.recentSessions(workspace);
       return sendJson(res, 200, sessions);
     }
 
     // Session details
     if (pathname === "/api/agent/session" && req.method === "GET") {
-      const workspace = validWorkspace(url.searchParams.get("workspace"));
+      const workspace = checkedWorkspace(url.searchParams.get("workspace") || undefined);
       const sessionId = url.searchParams.get("sessionId");
       if (!sessionId) return sendError(res, 400, "sessionId required");
       const session = store
@@ -688,14 +816,24 @@ const server = http.createServer(async (req, res) => {
 
     // Session events
     if (pathname === "/api/agent/events-history" && req.method === "GET") {
+      const workspace = checkedWorkspace(url.searchParams.get("workspace") || undefined);
       const sessionId = url.searchParams.get("sessionId");
       if (!sessionId) return sendError(res, 400, "sessionId required");
+      const session = store.getSession(sessionId);
+      if (!session || !matchesWorkspace(session.workspaceId, workspace))
+        return sendError(res, 404, "Session not found");
       return sendJson(res, 200, store.sessionEvents(sessionId));
     }
 
     // Pending changes
     if (pathname === "/api/agent/changes" && req.method === "GET") {
+      const workspace = checkedWorkspace(url.searchParams.get("workspace") || undefined);
       const sessionId = url.searchParams.get("sessionId") || undefined;
+      if (sessionId) {
+        const session = store.getSession(sessionId);
+        if (!session || !matchesWorkspace(session.workspaceId, workspace))
+          return sendError(res, 403, "Session does not belong to workspace");
+      }
       return sendJson(res, 200, store.pendingChanges(sessionId));
     }
 
@@ -708,73 +846,37 @@ const server = http.createServer(async (req, res) => {
         workspace?: string;
       }>(req);
 
-      const workspace = validWorkspace(body.workspace);
+      const workspace = checkedWorkspace(body.workspace);
       const service = new ChangeService(store, workspace);
       const change = service.authorizeChange(body.id, body.sessionId);
 
       if (body.action === "approve") {
-        const waiter = approvalWaiters.get(body.id);
-        if (waiter) {
-          service.approveChange(body.id);
-          const applied = await service.applyChange(body.id);
-          const status =
-            applied.status === "APPLIED" || applied.status === "CONFLICT"
-              ? applied.status
-              : "REJECTED";
-          const message =
-            status === "APPLIED"
-              ? "Change applied successfully."
-              : "Change conflicted.";
-          const resolvedEvent = {
-            type: "approval" as const,
-            changeId: body.id,
-            message,
-            result: { status },
-          };
-          // Persist under the same `approval` type the UI understands so that
-          // replaying history resolves the card instead of leaving it pending.
-          store.addEvent(waiter.sessionId, "approval", resolvedEvent);
-          broadcastSSE({ ...resolvedEvent, sessionId: waiter.sessionId });
-          approvalWaiters.delete(body.id);
-          waiter.resolve({ approved: status === "APPLIED", status, message });
-          return sendJson(res, 200, applied);
-        } else {
-          service.approveChange(body.id);
-          const applied = await service.applyChange(body.id);
-          store.addEvent(
-            change.sessionId,
-            applied.status === "APPLIED" ? "CHANGE_APPLIED" : "CHANGE_CONFLICT",
-            {
-              changeId: body.id,
-              status: applied.status,
-            },
+        if (approvalWaiters.has(body.id)) {
+          return sendJson(
+            res,
+            200,
+            await finishChangeApproval(workspace, body.id, true),
           );
-          return sendJson(res, 200, applied);
         }
+        service.approveChange(body.id);
+        const applied = await service.applyChange(body.id);
+        store.addEvent(
+          change.sessionId,
+          applied.status === "APPLIED" ? "CHANGE_APPLIED" : "CHANGE_CONFLICT",
+          { changeId: body.id, status: applied.status },
+        );
+        return sendJson(res, 200, applied);
       }
 
       if (body.action === "reject") {
-        const waiter = approvalWaiters.get(body.id);
-        if (waiter) {
-          const rejected = service.rejectChange(body.id);
-          const rejectedEvent = {
-            type: "approval" as const,
-            changeId: body.id,
-            message: "Change rejected.",
-            result: { status: "REJECTED" },
-          };
-          store.addEvent(waiter.sessionId, "approval", rejectedEvent);
-          broadcastSSE({ ...rejectedEvent, sessionId: waiter.sessionId });
-          approvalWaiters.delete(body.id);
-          waiter.resolve({
-            approved: false,
-            status: "REJECTED",
-            message: "Change rejected by user.",
-          });
-          return sendJson(res, 200, rejected);
-        } else {
-          return sendJson(res, 200, service.rejectChange(body.id));
+        if (approvalWaiters.has(body.id)) {
+          return sendJson(
+            res,
+            200,
+            await finishChangeApproval(workspace, body.id, false),
+          );
         }
+        return sendJson(res, 200, service.rejectChange(body.id));
       }
 
       if (body.action === "apply") {
@@ -794,41 +896,77 @@ const server = http.createServer(async (req, res) => {
         workspace?: string;
         sessionId: string;
       }>(req);
-      const workspace = validWorkspace(body.workspace);
-      const changes = store.pendingChanges(body.sessionId);
+      const workspace = checkedWorkspace(body.workspace);
+      const session = store.getSession(body.sessionId);
+      if (!session || !matchesWorkspace(session.workspaceId, workspace))
+        return sendError(res, 403, "Session does not belong to workspace");
+      const changes = store
+        .pendingChanges(body.sessionId)
+        .filter((change) => ["PENDING", "APPROVED"].includes(change.status));
+      if (!changes.length) return sendJson(res, 200, { changes: [] });
       const service = new ChangeService(store, workspace);
 
-      for (const change of changes) {
-        if (change.status === "PENDING") service.approveChange(change.id);
-      }
-      const result = await service.applyBatch(
-        body.sessionId,
-        changes.map((c) => c.id),
-      );
-      for (const change of changes) {
-        const waiter = approvalWaiters.get(change.id);
-        if (waiter) {
-          approvalWaiters.delete(change.id);
-          waiter.resolve({
-            approved: true,
-            status: "APPLIED",
-            message: "Batch applied.",
-          });
+      try {
+        for (const change of changes) {
+          if (change.status === "PENDING") service.approveChange(change.id);
         }
-        const appliedEvent = {
-          type: "approval" as const,
-          changeId: change.id,
-          message: "Change applied.",
-          result: { status: "APPLIED" },
-        };
-        store.addEvent(body.sessionId, "approval", appliedEvent);
-        broadcastSSE({ ...appliedEvent, sessionId: body.sessionId });
+        const result = await service.applyBatch(
+          body.sessionId,
+          changes.map((c) => c.id),
+        );
+        for (const change of changes) {
+          const waiter = approvalWaiters.get(change.id);
+          if (waiter) {
+            if (waiter.timer) clearTimeout(waiter.timer);
+            approvalWaiters.delete(change.id);
+            waiter.resolve({
+              approved: true,
+              status: "APPLIED",
+              message: "Batch applied. Continuing agent.",
+            });
+          }
+          const appliedEvent = {
+            type: "approval" as const,
+            changeId: change.id,
+            action: "resolved",
+            message: "Change applied.",
+            result: { status: "APPLIED" },
+          };
+          persistAndBroadcastEvent(body.sessionId, "approval", appliedEvent);
+        }
+        store.addEvent(body.sessionId, "CHANGE_BATCH_APPLIED", {
+          batchId: result.batch?.id,
+          changeIds: changes.map((c) => c.id),
+        });
+        return sendJson(res, 200, result);
+      } catch (error) {
+        // Resolve every waiter even when a batch fails during preparation or
+        // conflict checking. The runtime must receive a terminal decision.
+        for (const change of changes) {
+          const waiter = approvalWaiters.get(change.id);
+          if (!waiter) continue;
+          if (waiter.timer) clearTimeout(waiter.timer);
+          approvalWaiters.delete(change.id);
+          const message =
+            error instanceof Error
+              ? `Change batch could not be applied safely: ${error.message}`
+              : "Change batch could not be applied safely.";
+          waiter.resolve({
+            approved: false,
+            status: "CONFLICT",
+            message,
+          });
+          const failedEvent = {
+            type: "approval" as const,
+            changeId: change.id,
+            action: "resolved",
+            message,
+            result: { status: "CONFLICT" },
+          };
+          persistAndBroadcastEvent(body.sessionId, "approval", failedEvent);
+        }
+        throw error;
       }
-      store.addEvent(body.sessionId, "CHANGE_BATCH_APPLIED", {
-        batchId: result.batch?.id,
-        changeIds: changes.map((c) => c.id),
-      });
-      return sendJson(res, 200, result);
     }
 
     // Reject all changes
@@ -837,28 +975,46 @@ const server = http.createServer(async (req, res) => {
         workspace?: string;
         sessionId: string;
       }>(req);
-      const workspace = validWorkspace(body.workspace);
+      const workspace = checkedWorkspace(body.workspace);
+      const session = store.getSession(body.sessionId);
+      if (!session || !matchesWorkspace(session.workspaceId, workspace))
+        return sendError(res, 403, "Session does not belong to workspace");
       const service = new ChangeService(store, workspace);
-      const rejected = store.pendingChanges(body.sessionId).map((change) => {
+      const rejected = [];
+      for (const change of store.pendingChanges(body.sessionId)) {
+        if (change.status !== "PENDING") continue;
         const waiter = approvalWaiters.get(change.id);
-        if (waiter) {
-          approvalWaiters.delete(change.id);
-          waiter.resolve({
-            approved: false,
-            status: "REJECTED",
-            message: "Rejected by user.",
-          });
+        try {
+          const value = waiter
+            ? await finishChangeApproval(workspace, change.id, false)
+            : service.rejectChange(change.id);
+          rejected.push(value);
+          if (!waiter) {
+            const rejectedEvent = {
+              type: "approval" as const,
+              changeId: change.id,
+              action: "resolved",
+              message: "Change rejected.",
+              result: { status: "REJECTED" },
+            };
+            persistAndBroadcastEvent(body.sessionId, "approval", rejectedEvent);
+          }
+        } catch (error) {
+          // A concurrent decision is not allowed to strand the runtime. If a
+          // waiter still exists, resolve it as a safe conflict outcome.
+          const current = approvalWaiters.get(change.id);
+          if (current) {
+            if (current.timer) clearTimeout(current.timer);
+            approvalWaiters.delete(change.id);
+            current.resolve({
+              approved: false,
+              status: "CONFLICT",
+              message: "Change could not be rejected safely.",
+            });
+          }
+          if (error instanceof Error) throw error;
         }
-        const rejectedEvent = {
-          type: "approval" as const,
-          changeId: change.id,
-          message: "Change rejected.",
-          result: { status: "REJECTED" },
-        };
-        store.addEvent(body.sessionId, "approval", rejectedEvent);
-        broadcastSSE({ ...rejectedEvent, sessionId: body.sessionId });
-        return service.rejectChange(change.id);
-      });
+      }
       return sendJson(res, 200, rejected);
     }
 
@@ -868,11 +1024,17 @@ const server = http.createServer(async (req, res) => {
         workspace?: string;
         sessionId: string;
       }>(req);
-      const workspace = validWorkspace(body.workspace);
+      const workspace = checkedWorkspace(body.workspace);
+      const session = store.getSession(body.sessionId);
+      if (!session || !matchesWorkspace(session.workspaceId, workspace))
+        return sendError(res, 403, "Session does not belong to workspace");
       const service = new ChangeService(store, workspace);
       for (const change of store.pendingChanges(body.sessionId)) {
+        if (change.status !== "PENDING") continue;
         if (approvalWaiters.has(change.id)) {
-          approvalWaiters.get(change.id)?.resolve({
+          const waiter = approvalWaiters.get(change.id)!;
+          if (waiter.timer) clearTimeout(waiter.timer);
+          waiter.resolve({
             approved: false,
             status: "REJECTED",
             message: "Session discarded.",
@@ -881,6 +1043,7 @@ const server = http.createServer(async (req, res) => {
         }
         service.rejectChange(change.id);
       }
+      releaseSessionWaiters(body.sessionId);
       manager.cancelSession(body.sessionId);
       store.updateSessionStatus(body.sessionId, "STOPPED");
       store.addEvent(body.sessionId, "SESSION_DISCARDED", {
@@ -897,6 +1060,7 @@ const server = http.createServer(async (req, res) => {
       const waiter = permissionWaiters.get(body.requestId);
       if (waiter) {
         permissionWaiters.delete(body.requestId);
+        if (waiter.timer) clearTimeout(waiter.timer);
         waiter.resolve(body.allowed === true);
         return sendJson(res, 200, { success: true });
       }
@@ -930,6 +1094,8 @@ const server = http.createServer(async (req, res) => {
         workspace?: string;
         prompt: string;
         mode: "ask" | "plan" | "agent";
+        /** Continue an existing chat instead of creating a new session. */
+        sessionId?: string;
         model?: string;
         reasoning?: string;
         reasoningEffort?: string;
@@ -1018,7 +1184,7 @@ const server = http.createServer(async (req, res) => {
         );
       }
 
-      const workspace = validWorkspace(body.workspace);
+      const workspace = checkedWorkspace(body.workspace);
       const instructions = await fs
         .readFile(path.join(workspace, ".g1code", "instructions.md"), "utf8")
         .catch(() => "");
@@ -1028,24 +1194,62 @@ const server = http.createServer(async (req, res) => {
         registry.register(tool),
       );
 
-      const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const requestedSessionId =
+        typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      const existingSession = requestedSessionId
+        ? store.getSession(requestedSessionId)
+        : undefined;
+      if (requestedSessionId && !existingSession) {
+        return sendError(res, 404, "Conversation session not found");
+      }
+      if (
+        existingSession &&
+        (!matchesWorkspace(existingSession.workspaceId, workspace) ||
+          manager.getSession(existingSession.id))
+      ) {
+        return sendError(
+          res,
+          manager.getSession(existingSession.id) ? 409 : 403,
+          manager.getSession(existingSession.id)
+            ? "This conversation is already running"
+            : "Conversation does not belong to the selected workspace",
+        );
+      }
+
+      const sessionId =
+        existingSession?.id ||
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const priorMessages: ChatMessage[] = existingSession
+        ? store
+            .sessionMessages(existingSession.id)
+            .filter(
+              (message) => message.role === "user" || message.role === "assistant",
+            )
+            .map((message) => ({
+              role: message.role as ChatMessage["role"],
+              content: message.content,
+            }))
+        : [];
       const changeService = new ChangeService(store, workspace);
 
-      store.createSession({
-        id: sessionId,
-        workspaceId: workspace,
-        title: body.prompt.slice(0, 80),
-        mode: body.mode,
-        model: selectedModel,
-        provider: settings.provider,
-        status: "RUNNING",
-      });
+      if (existingSession) {
+        store.updateSessionStatus(sessionId, "RUNNING");
+      } else {
+        store.createSession({
+          id: sessionId,
+          workspaceId: workspace,
+          title: body.prompt.slice(0, 80),
+          mode: body.mode,
+          model: selectedModel,
+          provider: settings.provider,
+          status: "RUNNING",
+        });
+        const baseline = await captureGitBaseline(workspace).catch(() => null);
+        if (baseline) store.saveGitBaseline(sessionId, baseline);
+      }
       console.log(
-        `[Agent] Task started for session "${sessionId}" | Model: ${selectedModel} | Mode: ${body.mode} | Prompt: "${body.prompt.slice(0, 80)}"`,
+        `[Agent] Task started for session "${sessionId}" | Model: ${selectedModel} | Mode: ${body.mode} | Continuing: ${Boolean(existingSession)} | Prompt: "${body.prompt.slice(0, 80)}"`,
       );
-
-      const baseline = await captureGitBaseline(workspace).catch(() => null);
-      if (baseline) store.saveGitBaseline(sessionId, baseline);
       store.addMessage(sessionId, "user", body.prompt);
 
       const emit = (agentEvent: AgentEvent) => {
@@ -1120,10 +1324,27 @@ const server = http.createServer(async (req, res) => {
           }
           assistantBuffers.delete(sessionId);
         }
-        if (agentEvent.state === "WAITING_FOR_CHANGE_APPROVAL") {
+        if (
+          agentEvent.state === "WAITING_FOR_CHANGE_APPROVAL" ||
+          agentEvent.state === "WAITING_FOR_APPROVAL"
+        ) {
           store.updateSessionStatus(sessionId, "WAITING_FOR_APPROVAL");
         }
-        if (agentEvent.state === "EXECUTING")
+        if (
+          [
+            "UNDERSTANDING",
+            "ANALYZING",
+            "PLANNING",
+            "EXECUTING",
+            "OBSERVING",
+            "VERIFYING",
+            "DIAGNOSING",
+            "TESTING",
+            "REPAIRING",
+            "REPLANNING",
+            "REVIEWING",
+          ].includes(agentEvent.state ?? "")
+        )
           store.updateSessionStatus(sessionId, "RUNNING");
         if (agentEvent.state === "COMPLETED")
           store.updateSessionStatus(sessionId, "COMPLETED");
@@ -1198,21 +1419,42 @@ const server = http.createServer(async (req, res) => {
         registry,
         workspace,
         emit,
-        async (tool, value) => {
+        async (tool, value, toolCallId) => {
           if (tool.permission === "safe") return true;
-          // Server-side enforcement of user's autoExecution setting
+          // Server-side enforcement of the user's execution policy. The
+          // renderer is only a decision surface; it can never bypass this
+          // boundary by calling a tool directly.
           if (settings.autoExecution === "always") return true;
           if (settings.autoExecution === "never") return false;
 
           const key = `${sessionId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
           return new Promise<boolean>((resolve) => {
+            const timer = setTimeout(() => {
+              const waiter = permissionWaiters.get(key);
+              if (!waiter) return;
+              permissionWaiters.delete(key);
+              waiter.resolve(false);
+              const timeoutEvent = {
+                type: "approval" as const,
+                requestId: key,
+                toolCallId: waiter.toolCallId,
+                toolName: tool.name,
+                input: value,
+                action: "timeout",
+                result: { status: "REJECTED", approved: false },
+                message: `Approval timed out for ${tool.name}`,
+              };
+              persistAndBroadcastEvent(sessionId, "approval", timeoutEvent);
+            }, APPROVAL_TIMEOUT_MS);
             permissionWaiters.set(key, {
               requestId: key,
               sessionId,
               tool: tool.name,
+              toolCallId,
               input: value,
               createdAt: Date.now(),
               resolve,
+              timer,
             });
             broadcastSSE({
               type: "permission:request",
@@ -1228,7 +1470,36 @@ const server = http.createServer(async (req, res) => {
         changeService,
         (changeId) =>
           new Promise<ChangeApprovalResult>((resolve) => {
-            approvalWaiters.set(changeId, { sessionId, resolve });
+            const timer = setTimeout(() => {
+              if (!approvalWaiters.has(changeId)) return;
+              void finishChangeApproval(workspace, changeId, false).catch(() => {
+                // The waiter is still resolved by the timeout fallback below if
+                // the persisted change was removed concurrently.
+                const waiter = approvalWaiters.get(changeId);
+                if (waiter) {
+                  if (waiter.timer) clearTimeout(waiter.timer);
+                  approvalWaiters.delete(changeId);
+                  waiter.resolve({
+                    approved: false,
+                    status: "REJECTED",
+                    message: "Change approval timed out.",
+                  });
+                }
+              });
+            }, APPROVAL_TIMEOUT_MS);
+            approvalWaiters.set(changeId, { sessionId, resolve, timer });
+
+            // "Always proceed" is a real policy decision, not a renderer
+            // shortcut. It still goes through the same hash-safe apply path and
+            // emits the same approval event as a manual click.
+            if (settings.reviewPolicy === "always" || settings.reviewPolicy === "never") {
+              const approved = settings.reviewPolicy === "always";
+              queueMicrotask(() => {
+                void finishChangeApproval(workspace, changeId, approved).catch(
+                  () => undefined,
+                );
+              });
+            }
           }),
         (run) => {
           const testRunId = store.addTestRun(sessionId, run);
@@ -1257,6 +1528,7 @@ const server = http.createServer(async (req, res) => {
             body.mode,
             signal,
             body.attachedContext ?? [],
+            priorMessages,
           );
         } finally {
           releaseSessionWaiters(sessionId);
@@ -1576,8 +1848,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[G1Code Backend] Server listening at http://127.0.0.1:${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`[G1Code Backend] Server listening on port ${PORT}`);
   console.log(`[G1Code Backend] Active workspace: ${selectedWorkspace}`);
 });
 

@@ -42,6 +42,7 @@ export type AgentEvent = {
   detail?: string;
   toolCallId?: string;
   toolName?: string;
+  changeId?: string;
   input?: unknown;
   result?: unknown;
   command?: string;
@@ -50,6 +51,8 @@ export type AgentEvent = {
   chunk?: string;
   exitCode?: number;
   duration?: number;
+  /** Stable request identifier for renderer-side event reconciliation. */
+  requestId?: string;
 };
 export type ChangeApprovalResult = {
   approved: boolean;
@@ -152,6 +155,7 @@ export class AgentRuntime {
     private readonly approve: (
       tool: AgentTool,
       input: unknown,
+      toolCallId?: string,
     ) => Promise<boolean>,
     private readonly limits = {
       maxIterations: 50,
@@ -183,9 +187,51 @@ export class AgentRuntime {
     private readonly model: string = "",
   ) {}
   private repairAttempts = 0;
+  /**
+   * Approval callbacks normally live in the main process and are released by
+   * the session manager. Keeping a local wake-up set as well makes the runtime
+   * safe when it is used without that manager (and prevents a cancelled run
+   * from waiting forever on a renderer decision).
+   */
+  private readonly pendingDecisionWakeups = new Set<() => void>();
+
   stop() {
     this.stopped = true;
     this.cancelled = true;
+    for (const wakeup of [...this.pendingDecisionWakeups]) wakeup();
+    this.pendingDecisionWakeups.clear();
+  }
+
+  private async waitForDecision<T>(
+    decision: Promise<T>,
+    signal: AbortSignal | undefined,
+    cancelledValue: T,
+  ): Promise<T> {
+    if (this.stopped || signal?.aborted) return cancelledValue;
+
+    return new Promise<T>((resolve) => {
+      let settled = false;
+      const finish = (value: T) => {
+        if (settled) return;
+        settled = true;
+        this.pendingDecisionWakeups.delete(cancel);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(value);
+      };
+      const cancel = () => finish(cancelledValue);
+      const onAbort = () => finish(cancelledValue);
+
+      this.pendingDecisionWakeups.add(cancel);
+      if (signal) {
+        if (signal.aborted) {
+          finish(cancelledValue);
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      decision.then(finish).catch(() => finish(cancelledValue));
+    });
   }
   private transition(state: AgentState, message: string) {
     this.state = state;
@@ -211,12 +257,14 @@ export class AgentRuntime {
     mode: "ask" | "plan" | "agent",
     signal?: AbortSignal,
     attachedContext: string[] = [],
+    conversationHistory: ChatMessage[] = [],
   ) {
     const started = Date.now();
     this.stopped = false;
     this.cancelled = false;
     this.toolCalls = 0;
     this.repairAttempts = 0;
+    this.pendingDecisionWakeups.clear();
 
     // Capability check: If model explicitly does not support tools in agent mode
     if (
@@ -241,8 +289,21 @@ export class AgentRuntime {
       userContent = `## Attached Context\n${attachedContext.join("\n\n")}\n\n## Task\n${prompt}`;
     }
 
+    // Reuse the durable conversation when a user continues an existing chat.
+    // Only provider-compatible messages are accepted here; persisted chat
+    // history intentionally contains user/assistant turns and never renderer
+    // state or approval metadata.
+    const history = conversationHistory
+      .filter(
+        (message) =>
+          (message.role === "user" || message.role === "assistant") &&
+          typeof message.content === "string" &&
+          message.content.trim().length > 0,
+      )
+      .slice(-40);
     const messages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
+      ...history,
       { role: "user", content: userContent },
     ];
     const definitions: ToolDefinition[] =
@@ -387,10 +448,24 @@ export class AgentRuntime {
       for (const call of toolCalls) {
         const tool = this.tools.get(call.name);
         if (!tool) {
+          const message = `Unknown tool: ${call.name}`;
+          this.event({
+            type: "error",
+            toolCallId: call.id,
+            toolName: call.name,
+            message,
+          });
+          this.event({
+            type: "tool",
+            toolCallId: call.id,
+            toolName: call.name,
+            result: { isError: true, content: message },
+            message: `${call.name} failed`,
+          });
           messages.push({
             role: "tool",
             toolCallId: call.id,
-            content: `Unknown tool: ${call.name}`,
+            content: message,
           });
           continue;
         }
@@ -407,13 +482,56 @@ export class AgentRuntime {
           workspace: this.workspace,
           toolCallId: call.id,
           approve: async (requested, input) => {
+            this.transition(
+              "WAITING_FOR_APPROVAL",
+              `Waiting for approval of ${requested.name}`,
+            );
             this.event({
               type: "approval",
+              toolCallId: call.id,
               toolName: requested.name,
               input: redactObject(input),
+              action: "requested",
               message: `Approval required for ${requested.name}`,
             });
-            return this.approve(requested, input);
+            let approvalPromise: Promise<boolean>;
+            try {
+              approvalPromise = Promise.resolve(
+                this.approve(requested, input, call.id),
+              );
+            } catch {
+              approvalPromise = Promise.resolve(false);
+            }
+            const allowed = await this.waitForDecision(
+              approvalPromise,
+              signal,
+              false,
+            );
+            const cancelled = this.stopped || signal?.aborted;
+            this.event({
+              type: "approval",
+              toolCallId: call.id,
+              toolName: requested.name,
+              input: redactObject(input),
+              action: "resolved",
+              result: {
+                status: allowed && !cancelled ? "APPROVED" : "REJECTED",
+                approved: allowed && !cancelled,
+              },
+              message: cancelled
+                ? `Approval cancelled for ${requested.name}`
+                : allowed
+                  ? `${requested.name} approved`
+                  : `${requested.name} rejected`,
+            });
+            if (!cancelled)
+              this.transition(
+                "EXECUTING",
+                allowed
+                  ? `${requested.name} approved`
+                  : `${requested.name} rejected`,
+              );
+            return allowed && !cancelled;
           },
           emit: (event) =>
             this.event({
@@ -463,13 +581,34 @@ export class AgentRuntime {
               message: "Change requires user approval",
             });
             const decision = this.waitForChangeApproval
-              ? await this.waitForChangeApproval(result.changeId)
+              ? await this.waitForDecision(
+                  this.waitForChangeApproval(result.changeId),
+                  signal,
+                  {
+                    approved: false,
+                    status: "REJECTED" as const,
+                    message: "Change approval cancelled.",
+                  },
+                )
               : {
                   approved: false,
                   status: "REJECTED" as const,
                   message: "No approval channel is available.",
                 };
-            this.transition("EXECUTING", decision.message);
+            const cancelled = this.stopped || signal?.aborted;
+            this.event({
+              type: "approval",
+              toolCallId: call.id,
+              toolName: call.name,
+              changeId: result.changeId,
+              input: result,
+              action: "resolved",
+              result: { status: decision.status },
+              message: cancelled
+                ? "Change approval cancelled."
+                : decision.message,
+            });
+            if (!cancelled) this.transition("EXECUTING", decision.message);
             messages.push({
               role: "tool",
               toolCallId: call.id,
@@ -522,7 +661,19 @@ export class AgentRuntime {
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
-          this.event({ type: "error", toolName: call.name, message });
+          this.event({
+            type: "error",
+            toolCallId: call.id,
+            toolName: call.name,
+            message,
+          });
+          this.event({
+            type: "tool",
+            toolCallId: call.id,
+            toolName: call.name,
+            result: { isError: true, content: message },
+            message: `${call.name} failed`,
+          });
           messages.push({
             role: "tool",
             toolCallId: call.id,

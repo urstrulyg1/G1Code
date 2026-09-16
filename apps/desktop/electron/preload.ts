@@ -102,7 +102,7 @@ contextBridge.exposeInMainWorld("g1code", {
   discardSession: (workspace: string, sessionId: string) =>
     ipcRenderer.invoke("agent:discard-session", { workspace, sessionId }),
   respondPermission: (requestId: string, allowed: boolean) =>
-    ipcRenderer.send("permission:response", { requestId, allowed }),
+    ipcRenderer.invoke("permission:response", { requestId, allowed }),
   onAgentEvent: (listener: (event: unknown) => void) => {
     const callback = (_event: Electron.IpcRendererEvent, value: unknown) =>
       listener(value);

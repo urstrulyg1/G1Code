@@ -4884,6 +4884,11 @@ button {
 .chat-state-pill--stopped {
   color: var(--text-dim);
 }
+.chat-state-pill--waiting {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.07);
+}
 
 /* ── Tool call rows ──────────────────────────────────────────────────────── */
 .chat-tool-row {
@@ -5063,6 +5068,11 @@ button {
 .chat-approval-btn--reject:hover {
   background: rgba(244, 63, 94, 0.2);
   color: #fff;
+}
+.chat-approval-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+  pointer-events: none;
 }
 
 /* ── Error bubble internals ──────────────────────────────────────────────── */
@@ -5929,6 +5939,9 @@ button {
 }
 .file-op-badge--create {
   color: #38bdf8;
+}
+.file-op-badge--waiting {
+  color: #f59e0b;
 }
 .file-op-badge--delete {
   color: #f43f5e;

@@ -494,12 +494,12 @@ function registerApiBridgeHandlers() {
       body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
     }),
   );
-  ipcMain.on("permission:response", (_e, input) => {
+  ipcMain.handle("permission:response", async (_e, input) =>
     api("/api/agent/permission", {
       method: "POST",
       body: JSON.stringify(input),
-    }).catch((err) => console.error("[IPC] permission:response failed:", err));
-  });
+    }),
+  );
   ipcMain.handle("agent:get-pending-permissions", async (_e, sessionId) => {
     const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
     return api(`/api/agent/permissions/pending${query}`);

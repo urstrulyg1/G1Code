@@ -66,6 +66,11 @@ import "./styles.css";
 type Entry = { name: string; kind: "file" | "directory" };
 type Tab = { path: string; content: string; dirty: boolean };
 type Event = {
+  id?: string;
+  /** IDs folded into this visual event when streaming chunks are merged. */
+  eventIds?: string[];
+  sessionId?: string;
+  at?: string;
   type: string;
   state?: string;
   message?: string;
@@ -81,7 +86,6 @@ type Event = {
   chunk?: string;
   exitCode?: number;
   duration?: number;
-  at?: string;
 };
 type Change = {
   id: string;
@@ -393,16 +397,47 @@ function cleanAssistantText(raw: string): string {
  *  - a resolved `approval` (with `result`) updates the pending card in place
  */
 function mergeAgentEvent(old: Event[], event: Event): Event[] {
+  const incomingIds = [
+    ...(event.eventIds || []),
+    ...(event.id ? [event.id] : []),
+  ];
+  // SSE, history replay, and the polling backfill can all deliver the same
+  // durable event. Treat the event id as the source of truth instead of using
+  // array length (text chunks are intentionally folded into fewer rows).
+  if (
+    incomingIds.length > 0 &&
+    old.some((existing) =>
+      incomingIds.some((id) =>
+        id === existing.id || Boolean(existing.eventIds?.includes(id)),
+      ),
+    )
+  ) {
+    return old;
+  }
+
+  const normalized: Event = {
+    ...event,
+    eventIds: incomingIds.length > 0 ? incomingIds : undefined,
+  };
+
   if (event.type === "text") {
     if (!event.message) return old;
     const last = old[old.length - 1];
     if (last && last.type === "text") {
       return [
         ...old.slice(0, -1),
-        { ...last, message: (last.message || "") + event.message },
+        {
+          ...last,
+          message: (last.message || "") + event.message,
+          eventIds: [
+            ...(last.eventIds || (last.id ? [last.id] : [])),
+            ...incomingIds,
+          ],
+          id: undefined,
+        },
       ];
     }
-    return [...old, event];
+    return [...old, normalized];
   }
 
   if (
@@ -420,32 +455,46 @@ function mergeAgentEvent(old: Event[], event: Event): Event[] {
       copy[idx] = {
         ...copy[idx],
         chunk: (copy[idx].chunk || "") + (event.chunk || event.message || ""),
+        eventIds: [
+          ...(copy[idx].eventIds || (copy[idx].id ? [copy[idx].id] : [])),
+          ...incomingIds,
+        ],
+        id: undefined,
       };
       return copy;
     }
   }
 
-  if (event.type === "approval" && event.result && event.changeId) {
+  if (event.type === "approval" && event.result) {
     const idx = old.findIndex((e) => {
       if (e.type !== "approval") return false;
       const inputId =
         e.input && typeof e.input === "object"
           ? (e.input as { changeId?: string }).changeId
           : undefined;
-      return (inputId || e.changeId) === event.changeId;
+      return (
+        (event.changeId && (inputId || e.changeId) === event.changeId) ||
+        (event.toolCallId && e.toolCallId === event.toolCallId)
+      );
     });
     if (idx !== -1) {
       const copy = [...old];
       copy[idx] = {
         ...copy[idx],
         result: event.result,
+        action: event.action || "resolved",
         message: event.message,
+        eventIds: [
+          ...(copy[idx].eventIds || (copy[idx].id ? [copy[idx].id] : [])),
+          ...incomingIds,
+        ],
+        id: undefined,
       };
       return copy;
     }
   }
 
-  return [...old, event];
+  return [...old, normalized];
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -848,6 +897,9 @@ function App() {
   const [sessionId, setSessionId] = useState("");
   const [sessionTitle, setSessionTitle] = useState("");
   const [userTaskPrompt, setUserTaskPrompt] = useState("");
+  const [chatUserMessages, setChatUserMessages] = useState<
+    Array<{ id: string; content: string; mode: string }>
+  >([]);
   const [agentPrompt, setAgentPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<
     "agent" | "ask" | "plan" | "review" | "debug" | "refactor"
@@ -868,6 +920,8 @@ function App() {
     tool: string;
     input: unknown;
   } | null>(null);
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const [busyChangeIds, setBusyChangeIds] = useState<Set<string>>(new Set());
   const [showSessionHistory, setShowSessionHistory] = useState(false);
   // Track which activity groups are expanded (by group index key)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -1401,9 +1455,13 @@ function App() {
 
       if (
         event.type === "done" ||
-        ["COMPLETED", "FAILED", "STOPPED", "CANCELLED"].includes(
-          event.state ?? "",
-        )
+        [
+          "COMPLETED",
+          "FAILED",
+          "STOPPED",
+          "CANCELLED",
+          "INTERRUPTED",
+        ].includes(event.state ?? "")
       ) {
         setRunning(false);
         pendingSessionRef.current = false;
@@ -1418,23 +1476,14 @@ function App() {
             .catch(() => {});
         }
       }
-      if (event.state === "WAITING_FOR_CHANGE_APPROVAL") {
+      if (
+        event.state === "WAITING_FOR_CHANGE_APPROVAL" ||
+        event.state === "WAITING_FOR_APPROVAL"
+      ) {
+        // The backend owns policy automation and emits a resolved approval
+        // event. The renderer only refreshes the persisted proposal here, so a
+        // slow or disconnected UI cannot race an automatic decision.
         void loadChangesRef.current();
-        // Auto-approve all changes if reviewPolicy is "always"
-        const curSettings = settingsRef.current;
-        if (
-          curSettings?.reviewPolicy === "always" &&
-          sessionIdRef.current &&
-          workspaceRef.current
-        ) {
-          void window.g1code
-            .approveAllChanges(workspaceRef.current, sessionIdRef.current)
-            .then(async () => {
-              await loadChangesRef.current();
-              await reloadOpenTabs();
-            })
-            .catch(() => {});
-        }
       }
       if (event.type === "approval" && event.result) {
         // A change was applied/rejected — pending list changed
@@ -1469,13 +1518,16 @@ function App() {
 
       const curSettings = settingsRef.current;
       if (curSettings?.autoExecution === "always") {
-        // Auto-approve — no card shown
-        window.g1code.respondPermission(req.requestId, true);
+        // Auto-approve — no card shown. The server still records the decision.
+        void window.g1code
+          .respondPermission(req.requestId, true)
+          .catch(() => undefined);
         return;
       }
       if (curSettings?.autoExecution === "never") {
-        // Auto-deny
-        window.g1code.respondPermission(req.requestId, false);
+        void window.g1code
+          .respondPermission(req.requestId, false)
+          .catch(() => undefined);
         return;
       }
       // "ask" — show the permission card as before
@@ -1503,16 +1555,23 @@ function App() {
             const req = pending[0];
             const curSettings = settingsRef.current;
             if (curSettings?.autoExecution === "always") {
-              window.g1code.respondPermission(req.requestId, true);
+              void window.g1code
+                .respondPermission(req.requestId, true)
+                .catch(() => undefined);
             } else if (curSettings?.autoExecution === "never") {
-              window.g1code.respondPermission(req.requestId, false);
+              void window.g1code
+                .respondPermission(req.requestId, false)
+                .catch(() => undefined);
             } else {
               setPermission((prev) =>
                 prev?.requestId === req.requestId ? prev : req,
               );
             }
-          } else if (permission) {
-            setPermission(null);
+          } else {
+            // Clear only a permission that is no longer pending. This avoids
+            // closing a newly-arrived request because the polling response was
+            // one tick behind the SSE event.
+            setPermission((prev) => (prev ? null : prev));
           }
         }
       } catch {
@@ -1532,15 +1591,14 @@ function App() {
             data.events.length > 0
           ) {
             setEvents((currentEvents) => {
-              if (data.events.length > currentEvents.length) {
-                let merged = [...currentEvents];
-                for (const rawEv of data.events) {
-                  const evObj = (rawEv as any).payload || rawEv;
-                  merged = mergeAgentEvent(merged, evObj);
+              let merged = [...currentEvents];
+              for (const rawEv of data.events) {
+                const evObj = (rawEv as any).payload || rawEv;
+                if (evObj && typeof evObj === "object") {
+                  merged = mergeAgentEvent(merged, evObj as Event);
                 }
-                return merged;
               }
-              return currentEvents;
+              return merged;
             });
           }
         }
@@ -1668,6 +1726,16 @@ function App() {
     setTabs([]);
     setActiveTabPath("");
     setActiveDiff(null);
+    setSessionId("");
+    sessionIdRef.current = "";
+    pendingSessionRef.current = false;
+    setRunning(false);
+    runningRef.current = false;
+    setPermission(null);
+    setChatUserMessages([]);
+    setUserTaskPrompt("");
+    setEvents([]);
+    setChanges([]);
     setEntries(await window.g1code.listDirectory(finalWs));
     setSessions(await window.g1code.listSessions(finalWs));
     void window.g1code.rebuildIndex(finalWs);
@@ -1759,55 +1827,103 @@ function App() {
     }
   };
 
+  const setChangeBusy = (changeId: string, busy: boolean) => {
+    setBusyChangeIds((current) => {
+      const next = new Set(current);
+      if (busy) next.add(changeId);
+      else next.delete(changeId);
+      return next;
+    });
+  };
+
   const approveChange = async (changeId: string) => {
-    if (!sessionId || workspace === "No workspace open") return;
+    const sid = sessionIdRef.current;
+    if (!sid || workspace === "No workspace open") return;
+    setChangeBusy(changeId, true);
     try {
-      await window.g1code.change(workspace, sessionId, changeId, "approve");
+      await window.g1code.change(workspace, sid, changeId, "approve");
       await loadChanges();
       await reloadOpenTabs();
       void loadGitAndProblems(workspace);
-      if (activeDiff?.id === changeId) {
-        setActiveDiff(null);
-      }
+      if (activeDiff?.id === changeId) setActiveDiff(null);
     } catch (err) {
       console.error("Failed to approve change:", err);
+      // Reconcile after a raced or failed decision; the server may already
+      // have resolved the waiter even when this request lost the race.
+      await loadChanges();
+    } finally {
+      setChangeBusy(changeId, false);
     }
   };
 
   const rejectChange = async (changeId: string) => {
-    if (!sessionId || workspace === "No workspace open") return;
+    const sid = sessionIdRef.current;
+    if (!sid || workspace === "No workspace open") return;
+    setChangeBusy(changeId, true);
     try {
-      await window.g1code.change(workspace, sessionId, changeId, "reject");
+      await window.g1code.change(workspace, sid, changeId, "reject");
       await loadChanges();
-      if (activeDiff?.id === changeId) {
-        setActiveDiff(null);
-      }
+      if (activeDiff?.id === changeId) setActiveDiff(null);
     } catch (err) {
       console.error("Failed to reject change:", err);
+      await loadChanges();
+    } finally {
+      setChangeBusy(changeId, false);
     }
   };
 
   const approveAllChanges = async () => {
-    if (!sessionId || workspace === "No workspace open") return;
+    const sid = sessionIdRef.current;
+    if (!sid || workspace === "No workspace open") return;
     try {
-      await window.g1code.approveAllChanges(workspace, sessionId);
+      await window.g1code.approveAllChanges(workspace, sid);
       await loadChanges();
       await reloadOpenTabs();
       void loadGitAndProblems(workspace);
       setActiveDiff(null);
     } catch (err) {
       console.error("Failed to approve all changes:", err);
+      await loadChanges();
     }
   };
 
   const rejectAllChanges = async () => {
-    if (!sessionId || workspace === "No workspace open") return;
+    const sid = sessionIdRef.current;
+    if (!sid || workspace === "No workspace open") return;
     try {
-      await window.g1code.rejectAllChanges(workspace, sessionId);
+      await window.g1code.rejectAllChanges(workspace, sid);
       await loadChanges();
       setActiveDiff(null);
     } catch (err) {
       console.error("Failed to reject all changes:", err);
+      await loadChanges();
+    }
+  };
+
+  const respondToPermission = async (
+    allowed: boolean,
+    requestId?: string,
+  ) => {
+    if (permissionBusy) return;
+    let id = requestId || permission?.requestId;
+    if (!id && window.g1code.getPendingPermissions) {
+      const pending = await window.g1code
+        .getPendingPermissions(sessionIdRef.current)
+        .catch(() => []);
+      id = pending[0]?.requestId;
+    }
+    if (!id) return;
+    setPermissionBusy(true);
+    try {
+      await window.g1code.respondPermission(id, allowed);
+      setPermission((current) =>
+        current?.requestId === id ? null : current,
+      );
+    } catch (err) {
+      console.error("Failed to respond to permission:", err);
+      // The polling path will reconcile a decision that completed elsewhere.
+    } finally {
+      setPermissionBusy(false);
     }
   };
 
@@ -1822,8 +1938,13 @@ function App() {
       setRunning(false);
       pendingSessionRef.current = false;
       setPermission(null);
+      setPermissionBusy(false);
+      setBusyChangeIds(new Set());
       setSessionId(sessId);
       sessionIdRef.current = sessId;
+      setEvents([]);
+      setChatUserMessages([]);
+      setChanges([]);
       setShowSessionHistory(false);
       const targetSession = sessions.find((s) => s.id === sessId);
       if (targetSession) {
@@ -1843,10 +1964,15 @@ function App() {
         for (const e of sessEvents as any[]) {
           const ev = e?.payload ?? e?.data ?? e;
           if (!ev || typeof ev !== "object") continue;
-          const normalized: Event =
-            !ev.type && e?.eventType
-              ? { ...ev, type: String(e.eventType).toLowerCase() }
-              : (ev as Event);
+          const normalized: Event = {
+            ...(ev as Event),
+            id: (ev as Event).id || e?.id,
+            sessionId: (ev as Event).sessionId || e?.sessionId,
+            at: (ev as Event).at || e?.timestamp,
+            ...(!ev.type && e?.eventType
+              ? { type: String(e.eventType).toLowerCase() }
+              : {}),
+          };
           // Server-side bookkeeping rows aren't renderable timeline events.
           if (
             [
@@ -1867,15 +1993,83 @@ function App() {
           }
           merged = mergeAgentEvent(merged, normalized);
         }
-        setEvents(merged);
-        // Prefer the persisted user message; fall back to the (truncated) title.
+        if (
+          targetSession?.status === "INTERRUPTED" &&
+          !merged.some((event) => event.state === "INTERRUPTED")
+        ) {
+          merged = mergeAgentEvent(merged, {
+            type: "state",
+            state: "INTERRUPTED",
+            message: "This agent run was interrupted before it finished.",
+          });
+        }
+        // Restore every user turn and any in-flight permission from durable
+        // session state. The event timeline is the source for tool activity;
+        // messages preserve the conversational turns across reloads.
         try {
           const full = (await window.g1code.loadSession(workspace, sessId)) as {
-            messages?: Array<{ role: string; content: string }>;
+            messages?: Array<{
+              role: string;
+              content: string;
+              createdAt?: string;
+            }>;
+            pendingPermissions?: Array<{
+              requestId: string;
+              sessionId: string;
+              tool: string;
+              input: unknown;
+              createdAt: number;
+            }>;
           };
-          const firstUser = full?.messages?.find((m) => m.role === "user");
-          setUserTaskPrompt(firstUser?.content || targetSession?.title || "");
+          const userMessages = (full?.messages || [])
+            .filter((message) => message.role === "user")
+            .map((message, index) => ({
+              id: `${sessId}-user-${index}`,
+              content: message.content,
+              mode: targetSession?.mode || "agent",
+              at: message.createdAt,
+            }));
+          const userEvents: Event[] = userMessages.map((message) => ({
+            type: "user",
+            message: message.content,
+            id: message.id,
+            at: message.at,
+          }));
+          const timeline = [...merged, ...userEvents].sort((a, b) => {
+            const at = (a.at || "").localeCompare(b.at || "");
+            if (at !== 0) return at;
+            return a.type === "user" ? -1 : b.type === "user" ? 1 : 0;
+          });
+          setEvents(timeline);
+          setChatUserMessages(
+            userMessages.map(({ id, content, mode }) => ({ id, content, mode })),
+          );
+          setUserTaskPrompt(userMessages[0]?.content || targetSession?.title || "");
+          const pending = full.pendingPermissions?.[0];
+          const executionPolicy = settingsRef.current?.autoExecution;
+          if (pending && (!executionPolicy || executionPolicy === "ask")) {
+            setPermission(pending);
+          } else if (pending) {
+            void window.g1code
+              .respondPermission(
+                pending.requestId,
+                executionPolicy === "always",
+              )
+              .catch(() => undefined);
+          }
         } catch {
+          setEvents(merged);
+          setChatUserMessages(
+            targetSession?.title
+              ? [
+                  {
+                    id: `${sessId}-title`,
+                    content: targetSession.title,
+                    mode: targetSession.mode || "agent",
+                  },
+                ]
+              : [],
+          );
           setUserTaskPrompt(targetSession?.title || "");
         }
         // If this session is still running on the server, resume the live view.
@@ -2005,22 +2199,59 @@ function App() {
       }
     }
 
+    const continuingSessionId =
+      sessionIdRef.current && !pendingSessionRef.current
+        ? sessionIdRef.current
+        : "";
+    const isContinuation = Boolean(continuingSessionId);
     setRunning(true);
     runningRef.current = true;
-    // Start a fresh session: clear the previous id so the SSE listener accepts
-    // the first events of the new session (matched via pendingSessionRef).
-    setSessionId("");
-    sessionIdRef.current = "";
-    pendingSessionRef.current = true;
+    // Keep the current session for follow-up turns. A new session is only
+    // created after the user explicitly starts a new task with the + button.
+    if (!isContinuation) {
+      setSessionId("");
+      sessionIdRef.current = "";
+      pendingSessionRef.current = true;
+      const userEvent = {
+        type: "user",
+        message: task,
+        id: `local-user-${Date.now()}`,
+        at: new Date().toISOString(),
+      } as Event;
+      setEvents(
+        preflightNotice
+          ? [{ type: "notice", message: preflightNotice }, userEvent]
+          : [userEvent],
+      );
+      setChanges([]);
+      setChatUserMessages([
+        { id: `local-${Date.now()}`, content: task, mode: agentMode },
+      ]);
+    } else {
+      pendingSessionRef.current = false;
+      setEvents((old) => [
+        ...old,
+        ...(preflightNotice
+          ? [{ type: "notice", message: preflightNotice } as Event]
+          : []),
+        {
+          type: "user",
+          message: task,
+          id: `local-user-${Date.now()}`,
+          at: new Date().toISOString(),
+        },
+      ]);
+      setChatUserMessages((old) => [
+        ...old,
+        { id: `local-${Date.now()}`, content: task, mode: agentMode },
+      ]);
+      void loadChanges();
+    }
     setPermission(null);
     stickToBottomRef.current = true;
-    // Reset events; re-add any pre-flight notice so it isn't lost
-    setEvents(
-      preflightNotice ? [{ type: "notice", message: preflightNotice }] : [],
-    );
-    setChanges([]);
-    setUserTaskPrompt(task);
-    setSessionTitle(task.length > 50 ? task.slice(0, 50) + "…" : task);
+    setUserTaskPrompt((current) => current || task);
+    if (!isContinuation)
+      setSessionTitle(task.length > 50 ? task.slice(0, 50) + "…" : task);
     lastPromptRef.current = task;
     // Clear the composer immediately so the UI feels responsive
     setAgentPrompt("");
@@ -2051,6 +2282,7 @@ function App() {
         workspace,
         prompt: task,
         mode: effectiveMode,
+        sessionId: continuingSessionId || undefined,
         model: modelToUse,
         reasoning: reasoningParam,
         provider: "experiential-labs",
@@ -4181,6 +4413,7 @@ function App() {
                     sessionIdRef.current = "";
                     setSessionTitle("");
                     setUserTaskPrompt("");
+                    setChatUserMessages([]);
                     setEvents([]);
                     setChanges([]);
                     setPermission(null);
@@ -4324,21 +4557,24 @@ function App() {
                 </div>
               )}
 
-              {/* User bubble — shown when a task is active */}
-              {userTaskPrompt && (
-                <div className="chat-row chat-row--user">
-                  <div className="chat-bubble chat-bubble--user">
-                    <div className="chat-bubble-meta chat-bubble-meta--user">
-                      <span>You</span>
-                      <span className="chat-mode-chip">{agentMode}</span>
+              {/* User turns are durable conversation messages, not a single
+                  transient prompt. This keeps follow-up instructions visible
+                  after reload and while a turn is streaming. */}
+              {!events.some((event) => event.type === "user") &&
+                chatUserMessages.map((message) => (
+                  <div className="chat-row chat-row--user" key={message.id}>
+                    <div className="chat-bubble chat-bubble--user">
+                      <div className="chat-bubble-meta chat-bubble-meta--user">
+                        <span>You</span>
+                        <span className="chat-mode-chip">{message.mode}</span>
+                      </div>
+                      <div className="chat-user-text">{message.content}</div>
                     </div>
-                    <div className="chat-user-text">{userTaskPrompt}</div>
+                    <div className="chat-avatar chat-avatar--user">
+                      <User size={13} />
+                    </div>
                   </div>
-                  <div className="chat-avatar chat-avatar--user">
-                    <User size={13} />
-                  </div>
-                </div>
-              )}
+                ))}
 
               {/* Antigravity + Codex execution timeline */}
               {(() => {
@@ -4348,7 +4584,12 @@ function App() {
                   command?: string;
                   input?: any;
                   result?: any;
-                  status: "running" | "completed" | "failed" | "cancelled";
+                  status:
+                    | "running"
+                    | "waiting"
+                    | "completed"
+                    | "failed"
+                    | "cancelled";
                   exitCode?: number;
                   duration?: number;
                   stdout?: string;
@@ -4361,6 +4602,7 @@ function App() {
                 };
 
                 type TimelineSegment =
+                  | { kind: "user"; message: string; idx: number }
                   | { kind: "text"; message: string; idx: number }
                   | { kind: "tools"; items: ToolItem[]; key: string }
                   | { kind: "approval"; ev: Event; idx: number }
@@ -4379,7 +4621,14 @@ function App() {
                 while (i < events.length) {
                   const ev = events[i];
 
-                  // 1. Approval
+                  // 1. User turn
+                  if (ev.type === "user" && ev.message) {
+                    segments.push({ kind: "user", message: ev.message, idx: i });
+                    i++;
+                    continue;
+                  }
+
+                  // 2. Approval
                   if (ev.type === "approval") {
                     segments.push({ kind: "approval", ev, idx: i });
                     i++;
@@ -4440,17 +4689,7 @@ function App() {
 
                   // 6. Tool or command activities (collect consecutive tool/command events)
                   const isToolOrCommand =
-                    ev.type === "tool" ||
-                    ev.type === "command" ||
-                    (ev.type === "state" &&
-                      ev.state &&
-                      ![
-                        "COMPLETED",
-                        "FAILED",
-                        "CANCELLED",
-                        "STOPPED",
-                        "IDLE",
-                      ].includes(ev.state));
+                    ev.type === "tool" || ev.type === "command";
 
                   if (isToolOrCommand) {
                     const toolEvents: Event[] = [];
@@ -4458,17 +4697,7 @@ function App() {
                     while (i < events.length) {
                       const cur = events[i];
                       const stillToolOrCommand =
-                        cur.type === "tool" ||
-                        cur.type === "command" ||
-                        (cur.type === "state" &&
-                          cur.state &&
-                          ![
-                            "COMPLETED",
-                            "FAILED",
-                            "CANCELLED",
-                            "STOPPED",
-                            "IDLE",
-                          ].includes(cur.state));
+                        cur.type === "tool" || cur.type === "command";
                       if (!stillToolOrCommand) break;
                       toolEvents.push(cur);
                       i++;
@@ -4546,7 +4775,9 @@ function App() {
                         item.result = te.result;
                         const res = te.result as any;
                         if (res && typeof res === "object") {
-                          if (res.exitCode !== undefined) {
+                          if (res.status === "pending_approval") {
+                            item.status = "waiting";
+                          } else if (res.exitCode !== undefined) {
                             item.exitCode = res.exitCode;
                             item.status =
                               res.exitCode === 0 ? "completed" : "failed";
@@ -4581,6 +4812,9 @@ function App() {
                             (item.result as any).content,
                           );
                           if (parsed && typeof parsed === "object") {
+                            if (parsed.status === "pending_approval") {
+                              item.status = "waiting";
+                            }
                             if (
                               parsed.exitCode !== undefined &&
                               item.exitCode === undefined
@@ -4766,7 +5000,28 @@ function App() {
                 return (
                   <div className="activity-timeline">
                     {segments.map((seg, sIdx) => {
-                      // ── 1. Assistant Text Bubble ──────────────────────────────────────────
+                      // ── 1. User turn ─────────────────────────────────────────────────────
+                      if (seg.kind === "user") {
+                        return (
+                          <div
+                            className="chat-row chat-row--user"
+                            key={`user-${seg.idx}`}
+                          >
+                            <div className="chat-bubble chat-bubble--user">
+                              <div className="chat-bubble-meta chat-bubble-meta--user">
+                                <span>You</span>
+                                <span className="chat-mode-chip">{agentMode}</span>
+                              </div>
+                              <div className="chat-user-text">{seg.message}</div>
+                            </div>
+                            <div className="chat-avatar chat-avatar--user">
+                              <User size={13} />
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // ── 2. Assistant Text Bubble ──────────────────────────────────────────
                       if (seg.kind === "text") {
                         const isLastSegment = sIdx === segments.length - 1;
                         const isStreaming =
@@ -4851,23 +5106,26 @@ function App() {
                         const filePath =
                           changeInput?.path ||
                           (ev.toolName ? `${ev.toolName}` : "File change");
-                        const isApplied =
-                          ev.result &&
-                          typeof ev.result === "object" &&
-                          (ev.result as any).status === "APPLIED";
-                        const isRejected =
-                          ev.result &&
-                          typeof ev.result === "object" &&
-                          (ev.result as any).status === "REJECTED";
+                        const approvalStatus =
+                          ev.result && typeof ev.result === "object"
+                            ? String((ev.result as any).status || "")
+                            : "";
+                        const isApplied = approvalStatus === "APPLIED";
+                        const isToolApproved = approvalStatus === "APPROVED";
+                        const isRejected = approvalStatus === "REJECTED";
+                        const isConflict = approvalStatus === "CONFLICT";
+                        const isResolved =
+                          isApplied || isToolApproved || isRejected || isConflict;
+                        const isToolApproval = !targetChangeId && Boolean(ev.toolName);
                         return (
                           <div
-                            className={`chat-approval-card ${isApplied ? "chat-approval-card--applied" : isRejected ? "chat-approval-card--rejected" : ""}`}
+                            className={`chat-approval-card ${isApplied || isToolApproved ? "chat-approval-card--applied" : isRejected || isConflict ? "chat-approval-card--rejected" : ""}`}
                             key={`appr-${seg.idx}`}
                           >
                             <div className="chat-approval-header">
-                              {isApplied ? (
+                              {isApplied || isToolApproved ? (
                                 <CheckCircle2 size={13} />
-                              ) : isRejected ? (
+                              ) : isRejected || isConflict ? (
                                 <X size={13} />
                               ) : (
                                 <GitFork size={13} />
@@ -4875,9 +5133,15 @@ function App() {
                               <span>
                                 {isApplied
                                   ? "Change Applied"
-                                  : isRejected
-                                    ? "Change Rejected"
-                                    : "Approval Required"}
+                                  : isToolApproved
+                                    ? "Tool Approved"
+                                    : isConflict
+                                      ? "Approval Failed Safely"
+                                      : isRejected
+                                        ? isToolApproval
+                                          ? "Tool Rejected"
+                                          : "Change Rejected"
+                                        : "Approval Required"}
                               </span>
                               <code className="chat-approval-file">
                                 {filePath}
@@ -4895,7 +5159,7 @@ function App() {
                                 {JSON.stringify(ev.input, null, 2)}
                               </pre>
                             ) : null}
-                            {!isApplied && !isRejected && targetChangeId && (
+                            {!isResolved && targetChangeId && (
                               <div className="chat-approval-actions">
                                 <button
                                   className="chat-approval-btn chat-approval-btn--neutral"
@@ -4918,14 +5182,16 @@ function App() {
                                 </button>
                                 <button
                                   className="chat-approval-btn chat-approval-btn--approve"
+                                  disabled={busyChangeIds.has(targetChangeId)}
                                   onClick={() =>
                                     void approveChange(targetChangeId)
                                   }
                                 >
-                                  <Check size={12} /> Apply
+                                  <Check size={12} /> Approve
                                 </button>
                                 <button
                                   className="chat-approval-btn chat-approval-btn--reject"
+                                  disabled={busyChangeIds.has(targetChangeId)}
                                   onClick={() =>
                                     void rejectChange(targetChangeId)
                                   }
@@ -4934,55 +5200,21 @@ function App() {
                                 </button>
                               </div>
                             )}
-                            {!isApplied && !isRejected && !targetChangeId && ev.toolName && (
+                            {!isResolved && !targetChangeId && ev.toolName && (
                               <div className="chat-approval-actions">
                                 <button
                                   className="chat-approval-btn chat-approval-btn--approve"
-                                  onClick={() => {
-                                    const reqId = permission?.requestId;
-                                    if (reqId) {
-                                      window.g1code.respondPermission(reqId, true);
-                                      setPermission(null);
-                                    } else if (window.g1code.getPendingPermissions) {
-                                      void window.g1code
-                                        .getPendingPermissions(sessionIdRef.current)
-                                        .then((p) => {
-                                          if (p && p.length > 0) {
-                                            window.g1code.respondPermission(
-                                              p[0].requestId,
-                                              true,
-                                            );
-                                            setPermission(null);
-                                          }
-                                        });
-                                    }
-                                  }}
+                                  disabled={permissionBusy}
+                                  onClick={() => void respondToPermission(true)}
                                 >
-                                  <Check size={12} /> Allow Once
+                                  <Check size={12} /> Approve
                                 </button>
                                 <button
                                   className="chat-approval-btn chat-approval-btn--reject"
-                                  onClick={() => {
-                                    const reqId = permission?.requestId;
-                                    if (reqId) {
-                                      window.g1code.respondPermission(reqId, false);
-                                      setPermission(null);
-                                    } else if (window.g1code.getPendingPermissions) {
-                                      void window.g1code
-                                        .getPendingPermissions(sessionIdRef.current)
-                                        .then((p) => {
-                                          if (p && p.length > 0) {
-                                            window.g1code.respondPermission(
-                                              p[0].requestId,
-                                              false,
-                                            );
-                                            setPermission(null);
-                                          }
-                                        });
-                                    }
-                                  }}
+                                  disabled={permissionBusy}
+                                  onClick={() => void respondToPermission(false)}
                                 >
-                                  <X size={12} /> Deny
+                                  <X size={12} /> Reject
                                 </button>
                               </div>
                             )}
@@ -5060,7 +5292,11 @@ function App() {
                           FAILED: "chat-state-pill--fail",
                           CANCELLED: "chat-state-pill--stopped",
                           STOPPED: "chat-state-pill--stopped",
+                          INTERRUPTED: "chat-state-pill--stopped",
+                          WAITING_FOR_APPROVAL: "chat-state-pill--waiting",
+                          WAITING_FOR_CHANGE_APPROVAL: "chat-state-pill--waiting",
                         };
+                        const isWaitingState = seg.state.includes("WAITING");
                         return (
                           <div
                             className={`chat-state-pill ${stateClass[seg.state] || ""}`}
@@ -5068,8 +5304,12 @@ function App() {
                           >
                             {seg.state === "COMPLETED" ? (
                               <CheckCircle2 size={11} />
-                            ) : (
+                            ) : isWaitingState ? (
+                              <ShieldAlert size={11} />
+                            ) : seg.state === "FAILED" ? (
                               <AlertTriangle size={11} />
+                            ) : (
+                              <Activity size={11} />
                             )}
                             <span>{seg.state.replace(/_/g, " ")}</span>
                             {seg.message && (
@@ -5417,6 +5657,7 @@ function App() {
                                 const isCreated =
                                   (it.input as any)?.search === undefined &&
                                   !it.result?.diff?.includes("@@");
+                                const isWaitingForApproval = it.status === "waiting";
 
                                 return (
                                   <div className="file-op-card" key={it.id}>
@@ -5425,11 +5666,19 @@ function App() {
                                       onClick={() => toggleFile(it.id)}
                                     >
                                       <span
-                                        className={`file-op-badge ${isCreated ? "file-op-badge--create" : "file-op-badge--edit"}`}
+                                        className={`file-op-badge ${isWaitingForApproval ? "file-op-badge--waiting" : isCreated ? "file-op-badge--create" : "file-op-badge--edit"}`}
                                       >
-                                        <Edit3 size={12} />
+                                        {isWaitingForApproval ? (
+                                          <ShieldAlert size={12} />
+                                        ) : (
+                                          <Edit3 size={12} />
+                                        )}
                                         <span>
-                                          {isCreated ? "Created" : "Edited"}
+                                          {isWaitingForApproval
+                                            ? "Awaiting approval"
+                                            : isCreated
+                                              ? "Created"
+                                              : "Edited"}
                                         </span>
                                       </span>
                                       <span
@@ -6019,27 +6268,17 @@ function App() {
                   <div className="chat-permission-actions">
                     <button
                       className="chat-approval-btn chat-approval-btn--reject"
-                      onClick={() => {
-                        window.g1code.respondPermission(
-                          permission.requestId,
-                          false,
-                        );
-                        setPermission(null);
-                      }}
+                      disabled={permissionBusy}
+                      onClick={() => void respondToPermission(false, permission.requestId)}
                     >
-                      <X size={12} /> Deny
+                      <X size={12} /> Reject
                     </button>
                     <button
                       className="chat-approval-btn chat-approval-btn--approve"
-                      onClick={() => {
-                        window.g1code.respondPermission(
-                          permission.requestId,
-                          true,
-                        );
-                        setPermission(null);
-                      }}
+                      disabled={permissionBusy}
+                      onClick={() => void respondToPermission(true, permission.requestId)}
                     >
-                      <Check size={12} /> Allow Once
+                      <Check size={12} /> Approve
                     </button>
                   </div>
                 </div>

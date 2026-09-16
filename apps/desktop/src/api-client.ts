@@ -236,6 +236,7 @@ if (typeof window !== "undefined" && !window.g1code) {
       workspace: string;
       prompt: string;
       mode: "ask" | "plan" | "agent";
+      sessionId?: string;
       model?: string;
       reasoning?: string;
       provider?: string;
@@ -366,11 +367,14 @@ if (typeof window !== "undefined" && !window.g1code) {
       });
     },
 
-    respondPermission(requestId: string, allowed: boolean) {
-      apiRequest("/api/agent/permission", {
-        method: "POST",
-        body: JSON.stringify({ requestId, allowed }),
-      }).catch((err) => console.error("Failed to respond to permission:", err));
+    async respondPermission(requestId: string, allowed: boolean) {
+      return apiRequest<{ success: boolean; alreadyHandled?: boolean }>(
+        "/api/agent/permission",
+        {
+          method: "POST",
+          body: JSON.stringify({ requestId, allowed }),
+        },
+      );
     },
 
     onAgentEvent(listener: (event: unknown) => void): () => void {
