@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 interface Window {
   g1code: {
     chooseWorkspace(): Promise<string | null>;
