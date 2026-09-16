@@ -183,11 +183,14 @@ function spawnSpec(
         !/(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE|AUTH)/i.test(key),
     ),
   );
+  const isCmdOrBat =
+    process.platform === "win32" && /\.(cmd|bat)$/i.test(executable);
   const child = spawn(executable, args, {
     cwd: command.cwd,
     windowsHide: true,
     env: safeEnvironment,
     detached: process.platform !== "win32",
+    shell: isCmdOrBat,
   });
   const started = Date.now();
   let stdoutText = "";

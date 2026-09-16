@@ -24,9 +24,12 @@ test("detects npm projects and ranks related tests", async () => {
     ["src/calculator.js"],
     project ?? undefined,
   );
-  assert.equal(candidates[0]?.path, "tests/calculator.test.js");
   assert.equal(
-    targetedCommand(project!, candidates),
+    candidates[0]?.path?.replace(/\\/g, "/"),
+    "tests/calculator.test.js",
+  );
+  assert.equal(
+    targetedCommand(project!, candidates).replace(/\\/g, "/"),
     "npm run test -- tests/calculator.test.js",
   );
 });

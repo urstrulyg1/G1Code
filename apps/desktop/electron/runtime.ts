@@ -30,6 +30,18 @@ function validWorkspace(input: unknown) {
   return path.resolve(input);
 }
 
+function matchesWorkspace(
+  a: string | undefined,
+  b: string | undefined,
+): boolean {
+  if (!a || !b) return false;
+  const resA = path.resolve(a);
+  const resB = path.resolve(b);
+  return process.platform === "win32"
+    ? resA.toLowerCase() === resB.toLowerCase()
+    : resA === resB;
+}
+
 export function registerRuntimeHandlers(
   getWindow: () => BrowserWindow | undefined,
   getSelectedWorkspace: () => string | undefined,
@@ -75,7 +87,7 @@ export function registerRuntimeHandlers(
       !change ||
       !session ||
       change.sessionId !== waiter.sessionId ||
-      session.workspaceId !== workspace
+      !matchesWorkspace(session.workspaceId, workspace)
     )
       throw new Error("Change does not belong to the active session");
     const service = new ChangeService(store, workspace);
@@ -303,7 +315,7 @@ export function registerRuntimeHandlers(
   );
   ipcMain.handle("agent:sessions", async (_event, workspace: string) => {
     const selected = getSelectedWorkspace();
-    if (!selected || validWorkspace(workspace) !== path.resolve(selected))
+    if (!selected || !matchesWorkspace(validWorkspace(workspace), selected))
       throw new Error("Workspace is not selected");
     return store.recentSessions(validWorkspace(workspace));
   });
@@ -311,7 +323,7 @@ export function registerRuntimeHandlers(
     "index:rebuild",
     async (_event, input: { workspace: string }) => {
       const workspace = validWorkspace(input?.workspace);
-      if (workspace !== getSelectedWorkspace())
+      if (!matchesWorkspace(workspace, getSelectedWorkspace()))
         throw new Error("Workspace is not selected");
       const entries = await indexService.index(workspace);
       return { files: entries.length };
@@ -322,7 +334,7 @@ export function registerRuntimeHandlers(
     async (_event, input: { workspace: string; query: string }) => {
       const workspace = validWorkspace(input?.workspace);
       if (
-        workspace !== getSelectedWorkspace() ||
+        !matchesWorkspace(workspace, getSelectedWorkspace()) ||
         typeof input.query !== "string" ||
         input.query.length === 0 ||
         input.query.length > 500
@@ -336,7 +348,7 @@ export function registerRuntimeHandlers(
     async (_event, input: { sessionId: string; workspace: string }) => {
       const workspace = validWorkspace(input?.workspace);
       if (
-        workspace !== getSelectedWorkspace() ||
+        !matchesWorkspace(workspace, getSelectedWorkspace()) ||
         !input ||
         typeof input.sessionId !== "string" ||
         input.sessionId.length === 0 ||
@@ -344,7 +356,7 @@ export function registerRuntimeHandlers(
       )
         throw new Error("Invalid session event request");
       const session = store.getSession(input.sessionId);
-      if (!session || session.workspaceId !== workspace)
+      if (!session || !matchesWorkspace(session.workspaceId, workspace))
         throw new Error("Session does not belong to workspace");
       return store.sessionEvents(input.sessionId);
     },
@@ -353,7 +365,7 @@ export function registerRuntimeHandlers(
     "agent:session",
     async (_event, input: { sessionId: string; workspace: string }) => {
       const workspace = validWorkspace(input?.workspace);
-      if (workspace !== getSelectedWorkspace())
+      if (!matchesWorkspace(workspace, getSelectedWorkspace()))
         throw new Error("Workspace is not selected");
       if (
         !input ||
@@ -381,7 +393,7 @@ export function registerRuntimeHandlers(
     "agent:changes",
     async (_event, input: { sessionId?: string; workspace: string }) => {
       const workspace = validWorkspace(input?.workspace);
-      if (workspace !== getSelectedWorkspace())
+      if (!matchesWorkspace(workspace, getSelectedWorkspace()))
         throw new Error("Workspace is not selected");
       if (
         input.sessionId !== undefined &&
@@ -403,7 +415,7 @@ export function registerRuntimeHandlers(
       },
     ) => {
       const workspace = validWorkspace(input?.workspace);
-      if (workspace !== getSelectedWorkspace())
+      if (!matchesWorkspace(workspace, getSelectedWorkspace()))
         throw new Error("Workspace is not selected");
       if (
         !input ||
@@ -448,13 +460,13 @@ export function registerRuntimeHandlers(
     async (_event, input: { workspace: string; sessionId: string }) => {
       const workspace = validWorkspace(input?.workspace);
       if (
-        workspace !== getSelectedWorkspace() ||
+        !matchesWorkspace(workspace, getSelectedWorkspace()) ||
         typeof input.sessionId !== "string"
       )
         throw new Error("Invalid approval request");
       const changes = store.pendingChanges(input.sessionId);
       const session = store.getSession(input.sessionId);
-      if (!session || session.workspaceId !== workspace)
+      if (!session || !matchesWorkspace(session.workspaceId, workspace))
         throw new Error("Session does not belong to workspace");
       const conflicts = await Promise.all(
         changes.map((change) =>
@@ -493,12 +505,12 @@ export function registerRuntimeHandlers(
     async (_event, input: { workspace: string; sessionId: string }) => {
       const workspace = validWorkspace(input?.workspace);
       if (
-        workspace !== getSelectedWorkspace() ||
+        !matchesWorkspace(workspace, getSelectedWorkspace()) ||
         typeof input.sessionId !== "string"
       )
         throw new Error("Invalid rejection request");
       const session = store.getSession(input.sessionId);
-      if (!session || session.workspaceId !== workspace)
+      if (!session || !matchesWorkspace(session.workspaceId, workspace))
         throw new Error("Session does not belong to workspace");
       return Promise.all(
         store.pendingChanges(input.sessionId).map((change) => {
@@ -521,14 +533,14 @@ export function registerRuntimeHandlers(
     async (_event, input: { workspace: string; sessionId: string }) => {
       const workspace = validWorkspace(input?.workspace);
       if (
-        workspace !== getSelectedWorkspace() ||
+        !matchesWorkspace(workspace, getSelectedWorkspace()) ||
         typeof input.sessionId !== "string" ||
         input.sessionId.length === 0 ||
         input.sessionId.length > 100
       )
         throw new Error("Invalid discard request");
       const session = store.getSession(input.sessionId);
-      if (!session || session.workspaceId !== workspace)
+      if (!session || !matchesWorkspace(session.workspaceId, workspace))
         throw new Error("Session does not belong to workspace");
       for (const change of store.pendingChanges(input.sessionId)) {
         if (approvalWaiters.has(change.id)) {
@@ -607,7 +619,7 @@ export function registerRuntimeHandlers(
       }
       const workspace = validWorkspace(input.workspace);
       const selectedWorkspace = getSelectedWorkspace();
-      if (!selectedWorkspace || workspace !== path.resolve(selectedWorkspace))
+      if (!selectedWorkspace || !matchesWorkspace(workspace, selectedWorkspace))
         throw new Error("Agent workspace must be the selected workspace");
       const instructions = await fs
         .readFile(path.join(workspace, ".g1code", "instructions.md"), "utf8")

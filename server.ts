@@ -155,12 +155,24 @@ function validWorkspace(input?: unknown): string {
   return selectedWorkspace;
 }
 
+function matchesWorkspace(
+  a: string | undefined,
+  b: string | undefined,
+): boolean {
+  if (!a || !b) return false;
+  const resA = path.resolve(a);
+  const resB = path.resolve(b);
+  return process.platform === "win32"
+    ? resA.toLowerCase() === resB.toLowerCase()
+    : resA === resB;
+}
+
 // A single strict workspace authority for file/index/change operations. The
 // server is the only privileged boundary; the renderer passes the selected
 // workspace, and every handler must agree before touching the filesystem.
 function checkedWorkspace(inputWorkspace: string | undefined): string {
   const candidate = validWorkspace(inputWorkspace);
-  if (path.resolve(candidate) !== path.resolve(selectedWorkspace)) {
+  if (!matchesWorkspace(candidate, selectedWorkspace)) {
     throw new Error("Workspace mismatch; refusing cross-workspace access");
   }
   return candidate;

@@ -630,6 +630,10 @@ function App() {
 
   // Center Monaco Editor State
   const [tabs, setTabs] = useState<Tab[]>([]);
+  const tabsRef = useRef<Tab[]>([]);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
   const [activeTabPath, setActiveTabPath] = useState("");
   const activeTab = tabs.find((t) => t.path === activeTabPath);
   const [activeDiff, setActiveDiff] = useState<Change | null>(null);
@@ -1381,6 +1385,7 @@ function App() {
         pendingSessionRef.current = false;
         setPermission(null);
         void loadChangesRef.current();
+        void reloadOpenTabs();
         void loadGitAndProblems(workspaceRef.current);
         if (workspaceRef.current !== "No workspace open") {
           void window.g1code
@@ -1400,13 +1405,17 @@ function App() {
         ) {
           void window.g1code
             .approveAllChanges(workspaceRef.current, sessionIdRef.current)
-            .then(() => loadChangesRef.current())
+            .then(async () => {
+              await loadChangesRef.current();
+              await reloadOpenTabs();
+            })
             .catch(() => {});
         }
       }
       if (event.type === "approval" && event.result) {
         // A change was applied/rejected — pending list changed
         void loadChangesRef.current();
+        void reloadOpenTabs();
       }
       if (event.type === "command" && event.message) {
         setTerminalOutput(
@@ -1687,23 +1696,24 @@ function App() {
   };
 
   const reloadOpenTabs = async () => {
-    setTabs((oldTabs) => {
-      oldTabs.forEach(async (tab) => {
-        if (!tab.dirty) {
+    const currentTabs = tabsRef.current;
+    if (!currentTabs.length) return;
+    try {
+      const updated = await Promise.all(
+        currentTabs.map(async (tab) => {
+          if (tab.dirty) return tab;
           try {
             const fresh = await window.g1code.readFile(tab.path);
-            setTabs((current) =>
-              current.map((t) =>
-                t.path === tab.path && !t.dirty ? { ...t, content: fresh } : t,
-              ),
-            );
+            return { ...tab, content: fresh };
           } catch {
-            // ignore
+            return tab;
           }
-        }
-      });
-      return oldTabs;
-    });
+        }),
+      );
+      setTabs(updated);
+    } catch {
+      // ignore
+    }
   };
 
   const approveChange = async (changeId: string) => {
@@ -1982,11 +1992,22 @@ function App() {
           ? reasoningEffort
           : undefined;
 
+      let effectiveMode: "agent" | "ask" | "plan" =
+        agentMode === "plan" ? "plan" : agentMode === "ask" ? "ask" : "agent";
+      if (
+        effectiveMode === "ask" &&
+        /\b(create|edit|modify|fix|update|add|write|delete|remove|refactor|implement|replace|change|patch)\b/i.test(
+          task,
+        )
+      ) {
+        effectiveMode = "agent";
+        setAgentMode("agent");
+      }
+
       const res = await window.g1code.startAgent({
         workspace,
         prompt: task,
-        mode:
-          agentMode === "plan" ? "plan" : agentMode === "ask" ? "ask" : "agent",
+        mode: effectiveMode,
         model: modelToUse,
         reasoning: reasoningParam,
         provider: "experiential-labs",

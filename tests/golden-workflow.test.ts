@@ -177,7 +177,10 @@ test("golden workflow proposes, approves, tests, repairs, and retests a real fix
     ),
   ]);
   assert.equal(
-    await readFile(path.join(root, "src/calculator.js"), "utf8"),
+    (await readFile(path.join(root, "src/calculator.js"), "utf8")).replace(
+      /\r\n/g,
+      "\n",
+    ),
     "export function add(a, b) {\n  return a + b;\n}\n",
   );
   assert.ok(events.includes("WAITING_FOR_CHANGE_APPROVAL"));

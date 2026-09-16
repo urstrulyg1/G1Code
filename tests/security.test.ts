@@ -6,11 +6,19 @@ import { test } from "node:test";
 import { safeRealPath } from "../packages/tools/workspace";
 import { scanRepository } from "../packages/indexing/repository";
 
-test("real path validation rejects symlink workspace escapes", async () => {
+test("real path validation rejects symlink workspace escapes", async (t) => {
   const workspace = await mkdtemp(path.join(tmpdir(), "g1code-secure-"));
   const outside = await mkdtemp(path.join(tmpdir(), "g1code-outside-"));
   await writeFile(path.join(outside, "secret.txt"), "secret");
-  await symlink(outside, path.join(workspace, "link"));
+  try {
+    await symlink(outside, path.join(workspace, "link"));
+  } catch (err: any) {
+    if (err?.code === "EPERM" && process.platform === "win32") {
+      t.skip("Windows requires administrator privileges for symlinks");
+      return;
+    }
+    throw err;
+  }
   await assert.rejects(
     () => safeRealPath(workspace, "link/secret.txt"),
     /outside/,
@@ -27,14 +35,22 @@ test("real path validation permits workspace files", async () => {
   );
 });
 
-test("real path validation rejects a final-file symlink replacement", async () => {
+test("real path validation rejects a final-file symlink replacement", async (t) => {
   const workspace = await mkdtemp(path.join(tmpdir(), "g1code-secure-"));
   const outside = await mkdtemp(path.join(tmpdir(), "g1code-outside-"));
   await writeFile(path.join(outside, "secret.txt"), "secret");
-  await symlink(
-    path.join(outside, "secret.txt"),
-    path.join(workspace, "file.txt"),
-  );
+  try {
+    await symlink(
+      path.join(outside, "secret.txt"),
+      path.join(workspace, "file.txt"),
+    );
+  } catch (err: any) {
+    if (err?.code === "EPERM" && process.platform === "win32") {
+      t.skip("Windows requires administrator privileges for symlinks");
+      return;
+    }
+    throw err;
+  }
   await assert.rejects(() => safeRealPath(workspace, "file.txt"), /outside/);
 });
 

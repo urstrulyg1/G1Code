@@ -235,7 +235,7 @@ const SHELL_RC_FILES = [".zshrc", ".zshenv", ".bashrc", ".bash_profile"];
 
 export function readApiKeyFromZshrcSync(): string | null {
   try {
-    const home = os.homedir();
+    const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
     for (const filename of SHELL_RC_FILES) {
       const filePath = path.join(home, filename);
       if (fsSync.existsSync(filePath)) {
@@ -255,7 +255,7 @@ export function readApiKeyFromZshrcSync(): string | null {
 
 export async function readApiKeyFromZshrc(): Promise<string | null> {
   try {
-    const home = os.homedir();
+    const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
     for (const filename of SHELL_RC_FILES) {
       const filePath = path.join(home, filename);
       try {

@@ -77,11 +77,16 @@ test("IPC Matrix: Path security rejects directory traversal and symlink escapes"
 
     // Symlink escape attack
     const linkPath = path.join(workspace, "link_to_secret");
-    await fs.symlink(sensitiveFile, linkPath);
-
-    await assert.rejects(async () => {
-      await safeRealPath(workspace, "link_to_secret");
-    }, /Path (resolves outside|is outside) the selected workspace/);
+    try {
+      await fs.symlink(sensitiveFile, linkPath);
+      await assert.rejects(async () => {
+        await safeRealPath(workspace, "link_to_secret");
+      }, /Path (resolves outside|is outside) the selected workspace/);
+    } catch (err: any) {
+      if (err?.code !== "EPERM" || process.platform !== "win32") {
+        throw err;
+      }
+    }
   } finally {
     await fs
       .rm(workspace, { recursive: true, force: true })

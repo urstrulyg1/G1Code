@@ -257,7 +257,7 @@ export const workspaceTools = (): AgentTool[] => [
           ? [
               "-NoProfile",
               "-Command",
-              `Get-ChildItem -LiteralPath '${directory.replace(/'/g, "''")}' -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules|\\.git\\' } | Select-String -SimpleMatch -Pattern '${query.replace(/'/g, "''")}' | Select-Object -First 100 Path,LineNumber,Line`,
+              `Get-ChildItem -LiteralPath '${directory.replace(/'/g, "''")}' -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'node_modules|[\\\\/]\\.git' } | Select-String -SimpleMatch -Pattern '${query.replace(/'/g, "''")}' | Select-Object -First 100 Path,LineNumber,Line`,
             ]
           : [
               "-lc",
@@ -341,12 +341,25 @@ export const workspaceTools = (): AgentTool[] => [
       const data = value as { path: string; search: string; replace: string };
       const file = await safeRealPath(context.workspace, data.path);
       const original = await fs.readFile(file, "utf8");
-      if (!original.includes(data.search))
-        return {
-          content: "Patch search text was not found; file was not changed.",
-          isError: true,
-        };
-      const proposed = original.replace(data.search, data.replace);
+      let proposed: string;
+      if (original.includes(data.search)) {
+        proposed = original.replace(data.search, data.replace);
+      } else {
+        const normOriginal = original.replace(/\r\n/g, "\n");
+        const normSearch = data.search.replace(/\r\n/g, "\n");
+        const normReplace = data.replace.replace(/\r\n/g, "\n");
+        if (normOriginal.includes(normSearch)) {
+          const replaced = normOriginal.replace(normSearch, normReplace);
+          proposed = original.includes("\r\n")
+            ? replaced.replace(/\n/g, "\r\n")
+            : replaced;
+        } else {
+          return {
+            content: "Patch search text was not found; file was not changed.",
+            isError: true,
+          };
+        }
+      }
       if (!context.changeService || !context.sessionId)
         return {
           content: "Change service is unavailable; file was not changed.",
