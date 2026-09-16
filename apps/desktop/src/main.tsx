@@ -3296,6 +3296,17 @@ function App() {
       <header className="topbar">
         <div className="topbar-left">
           <div className="brand">
+            <img
+              src="/icon.png"
+              alt="G1Code"
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 5,
+                objectFit: "cover",
+                display: "block",
+              }}
+            />
             <span className="brand-badge">G1CODE</span>
             <span>AI IDE</span>
           </div>
@@ -4204,9 +4215,19 @@ function App() {
               {!userTaskPrompt && events.length === 0 && (
                 <div className="chat-empty-state">
                   <div className="chat-empty-logo">
-                    <Bot size={36} />
+                    <img
+                      src="/icon.png"
+                      alt="G1Code"
+                      style={{
+                        width: 72,
+                        height: 72,
+                        borderRadius: 18,
+                        objectFit: "cover",
+                        boxShadow: "0 8px 32px rgba(56, 189, 248, 0.3)",
+                      }}
+                    />
                   </div>
-                  <div className="chat-empty-title">G1Code Agent</div>
+                  <div className="chat-empty-title">G1Code AI IDE</div>
                   <div className="chat-empty-hint">
                     Ask anything. The agent will inspect, plan, edit, and verify
                     autonomously.
