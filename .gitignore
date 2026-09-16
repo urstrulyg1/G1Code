@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-electron/
+dist-release/
 .DS_Store
 *.log
 *.bin
@@ -8,3 +9,6 @@ dist-electron/
 .env
 .env.*
 G1Code/
+release/
+.icon-tmp/
+.icon-gen-tmp/

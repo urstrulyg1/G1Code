@@ -1,0 +1,93 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.urstrulyg1.g1code",
+  "productName": "G1Code",
+  "copyright": "Copyright © 2025-2026 urstrulyg1",
+  "npmRebuild": false,
+  "publish": null,
+  "directories": {
+    "output": "dist-release",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*",
+    "node_modules/better-sqlite3/**/*",
+    "build/icon.png",
+    "build/icon.icns",
+    "build/icon.ico",
+    "build/icons/**/*",
+    "package.json"
+  ],
+  "asarUnpack": [
+    "**/*.node"
+  ],
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "icon": "build/icon.icns",
+    "identity": null,
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "target": [
+      {
+        "target": "dmg"
+      }
+    ]
+  },
+  "dmg": {
+    "title": "${productName} Installer",
+    "icon": "build/icon.icns",
+    "background": "build/background.tiff",
+    "writeUpdateInfo": false,
+    "contents": [
+      {
+        "x": 170,
+        "y": 250
+      },
+      {
+        "x": 510,
+        "y": 250,
+        "type": "link",
+        "path": "/Applications"
+      }
+    ],
+    "window": {
+      "width": 680,
+      "height": 450
+    }
+  },
+  "win": {
+    "icon": "build/icon.ico",
+    "target": [
+      {
+        "target": "nsis"
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "differentialPackage": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "G1Code",
+    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico",
+    "installerHeader": "build/installerHeader.bmp",
+    "installerSidebar": "build/installerSidebar.bmp",
+    "uninstallerSidebar": "build/uninstallerSidebar.bmp"
+  },
+  "linux": {
+    "icon": "build/icons",
+    "category": "Development",
+    "maintainer": "urstrulyg1 <urstrulyg1@gmail.com>",
+    "target": [
+      {
+        "target": "AppImage"
+      }
+    ],
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  }
+}

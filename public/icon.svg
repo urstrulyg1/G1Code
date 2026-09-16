@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g1c-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="50%" stop-color="#090E17"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="g1c-cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#0284C7"/>
+    </linearGradient>
+    <linearGradient id="g1c-purple" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#A855F7"/>
+      <stop offset="100%" stop-color="#6366F1"/>
+    </linearGradient>
+    <linearGradient id="g1c-sparkle" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="50%" stop-color="#C084FC"/>
+      <stop offset="100%" stop-color="#F43F5E"/>
+    </linearGradient>
+    <linearGradient id="g1c-border" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#818CF8" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0.1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Base Squircle -->
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#g1c-bg)"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="14.25" fill="none" stroke="url(#g1c-border)" stroke-width="1.5"/>
+
+  <!-- Subtle ambient glow -->
+  <circle cx="32" cy="32" r="16" fill="#38BDF8" opacity="0.07"/>
+
+  <!-- Code Brackets & Slash -->
+  <!-- Left Bracket < -->
+  <path d="M22 23 L13 32 L22 41" fill="none" stroke="url(#g1c-cyan)" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Right Bracket > -->
+  <path d="M42 23 L51 32 L42 41" fill="none" stroke="url(#g1c-cyan)" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Center Slash / -->
+  <path d="M35 20 L29 44" fill="none" stroke="url(#g1c-purple)" stroke-width="3.6" stroke-linecap="round"/>
+
+  <!-- AI Intelligence Sparkle -->
+  <path d="M47 13 Q47 17 51 17 Q47 17 47 21 Q47 17 43 17 Q47 17 47 13 Z" fill="url(#g1c-sparkle)"/>
+</svg>
