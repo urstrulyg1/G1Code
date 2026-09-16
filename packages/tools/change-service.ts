@@ -110,11 +110,17 @@ export class ChangeService {
       const current = await fs
         .readFile(await safeRealPath(this.workspace, change.path), "utf8")
         .catch(() => null);
-      if (
-        current === null ||
-        contentHash(current) !== change.originalHash ||
-        current !== change.originalContent
-      )
+      // Mirror the single-file apply semantics (applyApprovedChange): a new file
+      // is one whose original content was empty and is not on disk yet. Only a
+      // *non-empty* original that has gone missing, or a content/hash mismatch,
+      // counts as a conflict. The previous check rejected every missing file,
+      // which made "Accept all" fail whenever the batch created a new file.
+      const newFileMissing = current === null && change.originalContent !== "";
+      const diverged =
+        current !== null &&
+        (contentHash(current) !== change.originalHash ||
+          current !== change.originalContent);
+      if (newFileMissing || diverged)
         throw new Error(`Change conflict before batch apply: ${change.path}`);
     }
     FailureInjector.maybeCrash("BEFORE_BATCH_PREPARE");
@@ -167,6 +173,7 @@ export class ChangeService {
           if (i === 0) FailureInjector.maybeCrash("BEFORE_FILE_REPLACE");
           if (i > 0) FailureInjector.maybeCrash("BETWEEN_FILE_REPLACEMENTS");
           const target = await safeRealPath(this.workspace, change.path);
+          await fs.mkdir(path.dirname(target), { recursive: true });
           await fs.rename(temporary.get(change.id)!, target);
           this.store.updateChangeBatchItem(batchId, change.id, "APPLIED");
           this.store.updateAppliedContent(change.id, change.proposedContent);

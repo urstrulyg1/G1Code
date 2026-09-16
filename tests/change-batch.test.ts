@@ -7,6 +7,54 @@ import { test } from "node:test";
 import { DatabaseStore } from "../packages/database/repositories";
 import { ChangeService } from "../packages/tools/change-service";
 
+test("batch applies a newly-created file and a file in a new directory", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "g1code-batch-newfile-"));
+  await writeFile(path.join(workspace, "a.txt"), "a\n");
+  const database = store();
+  database.createSession({
+    id: "session",
+    workspaceId: workspace,
+    title: "batch-new",
+    mode: "agent",
+    model: "test",
+    provider: "test",
+    status: "RUNNING",
+  });
+  const service = new ChangeService(database, workspace);
+  // Edit an existing file.
+  const a = await service.proposeChange("session", "a.txt", "A\n");
+  // Create a brand-new file at the workspace root.
+  const created = await service.proposeChange(
+    "session",
+    "created.ts",
+    "export const x = 1;\n",
+  );
+  // Create a brand-new file inside a brand-new subdirectory.
+  const nested = await service.proposeChange(
+    "session",
+    "src/lib/nested.ts",
+    "export const y = 2;\n",
+  );
+  service.approveChange(a.id);
+  service.approveChange(created.id);
+  service.approveChange(nested.id);
+  const result = await service.applyBatch("session", [
+    a.id,
+    created.id,
+    nested.id,
+  ]);
+  assert.equal(result.batch?.status, "APPLIED");
+  assert.equal(await readFile(path.join(workspace, "a.txt"), "utf8"), "A\n");
+  assert.equal(
+    await readFile(path.join(workspace, "created.ts"), "utf8"),
+    "export const x = 1;\n",
+  );
+  assert.equal(
+    await readFile(path.join(workspace, "src/lib/nested.ts"), "utf8"),
+    "export const y = 2;\n",
+  );
+});
+
 function store() {
   const db = new Database(":memory:");
   db.exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, workspace_id TEXT, title TEXT, mode TEXT, model TEXT, provider TEXT, status TEXT, created_at TEXT, updated_at TEXT);
