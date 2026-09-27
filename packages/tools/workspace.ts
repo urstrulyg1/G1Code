@@ -750,7 +750,7 @@ export const workspaceTools = (): AgentTool[] => [
         !(await context.approve(self, { command: data.command, cwd }))
       )
         return { content: "User denied command execution.", isError: true };
-      const execution = spawnCommand(data.command, cwd, context.signal);
+      const execution = spawnCommand(data.command, cwd, context.signal, context.commandTimeoutMs);
       context.emit({
         type: "command",
         toolCallId: context.toolCallId,
