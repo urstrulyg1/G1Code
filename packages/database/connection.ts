@@ -54,7 +54,7 @@ export function openDatabase(customDir?: string) {
     CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
     CREATE TABLE IF NOT EXISTS tool_calls (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, message_id TEXT, tool_name TEXT NOT NULL, arguments TEXT NOT NULL, result TEXT, status TEXT NOT NULL, started_at TEXT NOT NULL, completed_at TEXT);
     CREATE TABLE IF NOT EXISTS agent_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL, timestamp TEXT NOT NULL);
-     CREATE TABLE IF NOT EXISTS file_changes (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, path TEXT NOT NULL, original_hash TEXT NOT NULL, proposed_hash TEXT NOT NULL, original_content TEXT NOT NULL DEFAULT '', proposed_content TEXT NOT NULL DEFAULT '', applied_content TEXT, patch TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+     CREATE TABLE IF NOT EXISTS file_changes (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, path TEXT NOT NULL, operation TEXT NOT NULL DEFAULT 'write', target_path TEXT, original_hash TEXT NOT NULL, proposed_hash TEXT NOT NULL, original_content TEXT NOT NULL DEFAULT '', proposed_content TEXT NOT NULL DEFAULT '', applied_content TEXT, patch TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS files (workspace_id TEXT NOT NULL, path TEXT NOT NULL, language TEXT NOT NULL, size INTEGER NOT NULL, modified_time TEXT NOT NULL, hash TEXT NOT NULL, indexed_at TEXT NOT NULL, PRIMARY KEY (workspace_id, path));
       CREATE TABLE IF NOT EXISTS symbols (workspace_id TEXT NOT NULL, path TEXT NOT NULL, symbol TEXT NOT NULL, kind TEXT NOT NULL, line INTEGER NOT NULL, column_number INTEGER NOT NULL, parent TEXT, PRIMARY KEY (workspace_id, path, symbol, kind, line));
       CREATE TABLE IF NOT EXISTS repository_indexes (workspace_id TEXT PRIMARY KEY, indexed_at TEXT NOT NULL);`);
@@ -108,6 +108,14 @@ export function openDatabase(customDir?: string) {
         );
       }
       database.prepare("UPDATE schema_version SET version = 2").run();
+    })();
+  }
+  if (version < 3) {
+    database.transaction(() => {
+      const columns = database.prepare("PRAGMA table_info(file_changes)").all() as Array<{ name: string }>;
+      if (!columns.some((column) => column.name === "operation")) database.exec("ALTER TABLE file_changes ADD COLUMN operation TEXT NOT NULL DEFAULT 'write'");
+      if (!columns.some((column) => column.name === "target_path")) database.exec("ALTER TABLE file_changes ADD COLUMN target_path TEXT");
+      database.prepare("UPDATE schema_version SET version = 3").run();
     })();
   }
   return database;
