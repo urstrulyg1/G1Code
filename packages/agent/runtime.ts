@@ -59,6 +59,38 @@ export type ChangeApprovalResult = {
   status: "APPLIED" | "REJECTED" | "CONFLICT";
   message: string;
 };
+function validateToolArguments(tool: AgentTool, value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return "Tool arguments must be a JSON object.";
+
+  const schema = tool.inputSchema as {
+    required?: unknown;
+    properties?: Record<string, { type?: string }>;
+  };
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((key): key is string => typeof key === "string")
+    : [];
+  const object = value as Record<string, unknown>;
+  for (const key of required) {
+    if (!(key in object))
+      return `Missing required tool argument: ${key}`;
+  }
+
+  for (const [key, property] of Object.entries(schema.properties ?? {})) {
+    if (!(key in object) || object[key] === null || object[key] === undefined)
+      continue;
+    if (property?.type === "string" && typeof object[key] !== "string")
+      return `Tool argument '${key}' must be a string.`;
+    if (property?.type === "number" && typeof object[key] !== "number")
+      return `Tool argument '${key}' must be a number.`;
+    if (property?.type === "boolean" && typeof object[key] !== "boolean")
+      return `Tool argument '${key}' must be a boolean.`;
+    if (property?.type === "array" && !Array.isArray(object[key]))
+      return `Tool argument '${key}' must be an array.`;
+  }
+  return null;
+}
+
 const BASE_SYSTEM = `You are G1Code Agent, an elite autonomous coding assistant embedded in an AI IDE (Antigravity-style). You have direct access to the user's local workspace via tools to investigate, edit, test, and deliver working solutions.
 
 ## Core Execution Discipline (Antigravity Standard)
@@ -470,6 +502,21 @@ export class AgentRuntime {
           continue;
         }
         this.toolCalls += 1;
+        const argumentError = validateToolArguments(tool, call.arguments);
+        if (argumentError) {
+          this.event({
+            type: "error",
+            toolCallId: call.id,
+            toolName: call.name,
+            message: argumentError,
+          });
+          messages.push({
+            role: "tool",
+            toolCallId: call.id,
+            content: JSON.stringify({ isError: true, error: argumentError }),
+          });
+          continue;
+        }
         const sanitizedInput = redactObject(call.arguments);
         this.event({
           type: "tool",
