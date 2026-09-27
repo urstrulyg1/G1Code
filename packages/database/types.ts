@@ -32,10 +32,13 @@ export type AgentEventRecord = {
   payload: unknown;
   timestamp: string;
 };
+export type FileChangeOperation = "write" | "delete" | "rename" | "move";
 export type FileChange = {
   id: string;
   sessionId: string;
   path: string;
+  operation?: FileChangeOperation;
+  targetPath?: string | null;
   originalHash: string;
   proposedHash: string;
   originalContent: string;
