@@ -9,10 +9,7 @@ test("repository scan honors gitignore and excludes sensitive files", async () =
   const root = await mkdtemp(path.join(tmpdir(), "g1code-index-"));
   await mkdir(path.join(root, "src"), { recursive: true });
   await mkdir(path.join(root, "ignored"), { recursive: true });
-  await writeFile(
-    path.join(root, ".gitignore"),
-    "ignored/\n*.generated.ts\n",
-  );
+  await writeFile(path.join(root, ".gitignore"), "ignored/\n*.generated.ts\n");
   await writeFile(
     path.join(root, "src", "main.ts"),
     "export function main() {}\n",
@@ -39,7 +36,10 @@ test("repository scan honors gitignore and excludes sensitive files", async () =
 test("repository scan does not follow symlink targets or index binary blobs", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "g1code-index-"));
   const outside = await mkdtemp(path.join(tmpdir(), "g1code-index-outside-"));
-  await writeFile(path.join(outside, "outside.ts"), "export const outside = true;\n");
+  await writeFile(
+    path.join(outside, "outside.ts"),
+    "export const outside = true;\n",
+  );
   await writeFile(path.join(root, "binary.dat"), Buffer.from([0, 1, 2, 3, 4]));
 
   try {
@@ -50,7 +50,9 @@ test("repository scan does not follow symlink targets or index binary blobs", as
     );
   } catch (error) {
     if (process.platform === "win32") {
-      t.skip(`symlink creation is unavailable on this runner: ${String(error)}`);
+      t.skip(
+        `symlink creation is unavailable on this runner: ${String(error)}`,
+      );
     } else {
       throw error;
     }

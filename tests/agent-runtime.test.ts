@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type {
-  AIProvider,
-  ChatChunk,
-  ChatRequest,
-} from "../packages/ai/types";
+import type { AIProvider, ChatChunk, ChatRequest } from "../packages/ai/types";
 import { AgentRuntime } from "../packages/agent/runtime";
 import { ToolRegistry } from "../packages/tools/types";
 
@@ -14,9 +10,7 @@ class FakeProvider implements AIProvider {
   calls: ChatRequest[] = [];
 
   async getModels() {
-    return [
-      { id: "fake-model", name: "Fake Model", supportsTools: true },
-    ];
+    return [{ id: "fake-model", name: "Fake Model", supportsTools: true }];
   }
 
   async chat() {
@@ -99,73 +93,60 @@ test("agent streams ordered chunks and completes exactly once", async () => {
   assert.equal(events.filter((e) => e.state === "COMPLETED").length, 1);
 });
 
-test(
-  "cancelling during a tool execution stops the run and propagates the signal",
-  async () => {
-    const provider = new FakeProvider();
-    let toolStarted = false;
-    let toolCancelled = false;
-    const registry = new ToolRegistry();
+test("cancelling during a tool execution stops the run and propagates the signal", async () => {
+  const provider = new FakeProvider();
+  let toolStarted = false;
+  let toolCancelled = false;
+  const registry = new ToolRegistry();
 
-    registry.register({
-      name: "slow_tool",
-      description: "Waits until cancelled.",
-      permission: "safe",
-      inputSchema: { type: "object" },
-      execute: async (_input, context) => {
-        toolStarted = true;
-        await new Promise<void>((resolve) => {
-          const signal = context.signal;
-          if (!signal) return resolve();
-          if (signal.aborted) return resolve();
-          signal.addEventListener(
-            "abort",
-            () => {
-              toolCancelled = true;
-              resolve();
-            },
-            { once: true },
-          );
-        });
-        return { content: "cancelled" };
-      },
-    });
+  registry.register({
+    name: "slow_tool",
+    description: "Waits until cancelled.",
+    permission: "safe",
+    inputSchema: { type: "object" },
+    execute: async (_input, context) => {
+      toolStarted = true;
+      await new Promise<void>((resolve) => {
+        const signal = context.signal;
+        if (!signal) return resolve();
+        if (signal.aborted) return resolve();
+        signal.addEventListener(
+          "abort",
+          () => {
+            toolCancelled = true;
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { content: "cancelled" };
+    },
+  });
 
-    provider.streamChat = async function* () {
-      yield {
-        toolCalls: [{ id: "tool-1", name: "slow_tool", arguments: {} }],
-      };
+  provider.streamChat = async function* () {
+    yield {
+      toolCalls: [{ id: "tool-1", name: "slow_tool", arguments: {} }],
     };
+  };
 
-    const events: Array<{
-      sessionId: string;
-      type: string;
-      state?: string;
-      message?: string;
-    }> = [];
-    const runtime = runtimeFor(
-      "cancel-session",
-      provider,
-      registry,
-      events,
-    );
-    const controller = new AbortController();
-    const run = runtime.run("cancel me", "agent", controller.signal);
+  const events: Array<{
+    sessionId: string;
+    type: string;
+    state?: string;
+    message?: string;
+  }> = [];
+  const runtime = runtimeFor("cancel-session", provider, registry, events);
+  const controller = new AbortController();
+  const run = runtime.run("cancel me", "agent", controller.signal);
 
-    while (!toolStarted)
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    controller.abort();
-    await run;
+  while (!toolStarted) await new Promise((resolve) => setTimeout(resolve, 1));
+  controller.abort();
+  await run;
 
-    assert.equal(toolCancelled, true);
-    assert(
-      events.some(
-        (e) => e.state === "CANCELLED" || e.state === "STOPPED",
-      ),
-    );
-    assert.equal(events.filter((e) => e.state === "COMPLETED").length, 0);
-  },
-);
+  assert.equal(toolCancelled, true);
+  assert(events.some((e) => e.state === "CANCELLED" || e.state === "STOPPED"));
+  assert.equal(events.filter((e) => e.state === "COMPLETED").length, 0);
+});
 
 test("two concurrent sessions keep their event streams isolated", async () => {
   const providerA = new FakeProvider();
