@@ -129,40 +129,73 @@ function maskApiKey(key: string | null): string | undefined {
 }
 
 function normalizeSettings(raw: unknown, defaults: Settings): Settings {
-  const parsed = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? raw as Record<string, unknown>
-    : {};
+  const parsed =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
   const permissionInput =
     parsed.toolPermissions && typeof parsed.toolPermissions === "object"
-      ? parsed.toolPermissions as Record<string, unknown>
+      ? (parsed.toolPermissions as Record<string, unknown>)
       : {};
   const bool = (key: keyof Settings["toolPermissions"]) =>
     typeof permissionInput[key] === "boolean"
-      ? permissionInput[key] as boolean
+      ? (permissionInput[key] as boolean)
       : defaults.toolPermissions[key];
-  const enumValue = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
-    typeof value === "string" && (allowed as readonly string[]).includes(value) ? value as T : fallback;
-  const numberValue = (value: unknown, min: number, max: number, fallback: number) => {
+  const enumValue = <T extends string>(
+    value: unknown,
+    allowed: readonly T[],
+    fallback: T,
+  ): T =>
+    typeof value === "string" && (allowed as readonly string[]).includes(value)
+      ? (value as T)
+      : fallback;
+  const numberValue = (
+    value: unknown,
+    min: number,
+    max: number,
+    fallback: number,
+  ) => {
     const n = Number(value);
-    return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.floor(n))) : fallback;
+    return Number.isFinite(n)
+      ? Math.min(max, Math.max(min, Math.floor(n)))
+      : fallback;
   };
   const ignored = Array.isArray(parsed.ignoredPaths)
-    ? parsed.ignoredPaths.filter((v): v is string => typeof v === "string").slice(0, 200)
+    ? parsed.ignoredPaths
+        .filter((v): v is string => typeof v === "string")
+        .slice(0, 200)
     : defaults.ignoredPaths;
   return {
     ...defaults,
     provider: "experiential-labs",
     endpoint:
-      typeof parsed.endpoint === "string" && parsed.endpoint.trim() && parsed.endpoint !== "https://api.openai.com/v1"
+      typeof parsed.endpoint === "string" &&
+      parsed.endpoint.trim() &&
+      parsed.endpoint !== "https://api.openai.com/v1"
         ? parsed.endpoint.trim()
         : defaults.endpoint,
     model: typeof parsed.model === "string" ? parsed.model : defaults.model,
     temperature: numberValue(parsed.temperature, 0, 2, defaults.temperature),
     maxTokens: numberValue(parsed.maxTokens, 256, 32768, defaults.maxTokens),
-    agentMode: enumValue(parsed.agentMode, ["review", "auto", "plan", "readonly"] as const, defaults.agentMode),
-    autoExecution: enumValue(parsed.autoExecution, ["always", "ask", "never"] as const, defaults.autoExecution),
-    reviewPolicy: enumValue(parsed.reviewPolicy, ["always", "ask", "never"] as const, defaults.reviewPolicy),
-    autoFixLints: typeof parsed.autoFixLints === "boolean" ? parsed.autoFixLints : defaults.autoFixLints,
+    agentMode: enumValue(
+      parsed.agentMode,
+      ["review", "auto", "plan", "readonly"] as const,
+      defaults.agentMode,
+    ),
+    autoExecution: enumValue(
+      parsed.autoExecution,
+      ["always", "ask", "never"] as const,
+      defaults.autoExecution,
+    ),
+    reviewPolicy: enumValue(
+      parsed.reviewPolicy,
+      ["always", "ask", "never"] as const,
+      defaults.reviewPolicy,
+    ),
+    autoFixLints:
+      typeof parsed.autoFixLints === "boolean"
+        ? parsed.autoFixLints
+        : defaults.autoFixLints,
     toolPermissions: {
       readFiles: bool("readFiles"),
       searchRepository: bool("searchRepository"),
@@ -175,18 +208,59 @@ function normalizeSettings(raw: unknown, defaults: Settings): Settings {
       runCommands: bool("runCommands"),
       networkTools: bool("networkTools"),
     },
-    commandTimeoutMs: numberValue(parsed.commandTimeoutMs, 1000, 10 * 60 * 1000, defaults.commandTimeoutMs),
-    toolTimeoutMs: numberValue(parsed.toolTimeoutMs, 1000, 10 * 60 * 1000, defaults.toolTimeoutMs),
-    maxAgentSteps: numberValue(parsed.maxAgentSteps, 1, 200, defaults.maxAgentSteps),
-    maxConcurrentTools: numberValue(parsed.maxConcurrentTools, 1, 16, defaults.maxConcurrentTools),
+    commandTimeoutMs: numberValue(
+      parsed.commandTimeoutMs,
+      1000,
+      10 * 60 * 1000,
+      defaults.commandTimeoutMs,
+    ),
+    toolTimeoutMs: numberValue(
+      parsed.toolTimeoutMs,
+      1000,
+      10 * 60 * 1000,
+      defaults.toolTimeoutMs,
+    ),
+    maxAgentSteps: numberValue(
+      parsed.maxAgentSteps,
+      1,
+      200,
+      defaults.maxAgentSteps,
+    ),
+    maxConcurrentTools: numberValue(
+      parsed.maxConcurrentTools,
+      1,
+      16,
+      defaults.maxConcurrentTools,
+    ),
     maxRetries: numberValue(parsed.maxRetries, 0, 8, defaults.maxRetries),
-    contextBudgetChars: numberValue(parsed.contextBudgetChars, 4000, 500000, defaults.contextBudgetChars),
+    contextBudgetChars: numberValue(
+      parsed.contextBudgetChars,
+      4000,
+      500000,
+      defaults.contextBudgetChars,
+    ),
     ignoredPaths: ignored,
-    suggestionsInEditor: typeof parsed.suggestionsInEditor === "boolean" ? parsed.suggestionsInEditor : defaults.suggestionsInEditor,
-    tabGitignoreAccess: typeof parsed.tabGitignoreAccess === "boolean" ? parsed.tabGitignoreAccess : defaults.tabGitignoreAccess,
-    tabSpeed: enumValue(parsed.tabSpeed, ["fast", "normal", "slow"] as const, defaults.tabSpeed),
-    tabToImport: typeof parsed.tabToImport === "boolean" ? parsed.tabToImport : defaults.tabToImport,
-    tabToJump: typeof parsed.tabToJump === "boolean" ? parsed.tabToJump : defaults.tabToJump,
+    suggestionsInEditor:
+      typeof parsed.suggestionsInEditor === "boolean"
+        ? parsed.suggestionsInEditor
+        : defaults.suggestionsInEditor,
+    tabGitignoreAccess:
+      typeof parsed.tabGitignoreAccess === "boolean"
+        ? parsed.tabGitignoreAccess
+        : defaults.tabGitignoreAccess,
+    tabSpeed: enumValue(
+      parsed.tabSpeed,
+      ["fast", "normal", "slow"] as const,
+      defaults.tabSpeed,
+    ),
+    tabToImport:
+      typeof parsed.tabToImport === "boolean"
+        ? parsed.tabToImport
+        : defaults.tabToImport,
+    tabToJump:
+      typeof parsed.tabToJump === "boolean"
+        ? parsed.tabToJump
+        : defaults.tabToJump,
     apiKeyConfigured: defaults.apiKeyConfigured,
     apiKeyMasked: defaults.apiKeyMasked,
   };
@@ -266,31 +340,49 @@ export async function saveSettings(
   const allowedModes = new Set(["review", "auto", "plan", "readonly"]);
   const allowedExecution = new Set(["always", "ask", "never"]);
   const allowedSpeeds = new Set(["fast", "normal", "slow"]);
-  const clamp = (value: unknown, min: number, max: number, fallback: number) => {
+  const clamp = (
+    value: unknown,
+    min: number,
+    max: number,
+    fallback: number,
+  ) => {
     const n = Number(value);
-    return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.floor(n))) : fallback;
+    return Number.isFinite(n)
+      ? Math.min(max, Math.max(min, Math.floor(n)))
+      : fallback;
   };
   const rawPermissions =
     input.toolPermissions && typeof input.toolPermissions === "object"
-      ? input.toolPermissions as Record<string, unknown>
+      ? (input.toolPermissions as Record<string, unknown>)
       : current.toolPermissions;
   const bool = (key: keyof Settings["toolPermissions"], fallback: boolean) =>
-    typeof rawPermissions[key] === "boolean" ? rawPermissions[key] as boolean : fallback;
+    typeof rawPermissions[key] === "boolean"
+      ? (rawPermissions[key] as boolean)
+      : fallback;
   const requestedMode = String(input.agentMode ?? current.agentMode);
-  const requestedExecution = String(input.autoExecution ?? current.autoExecution);
+  const requestedExecution = String(
+    input.autoExecution ?? current.autoExecution,
+  );
   const requestedReview = String(input.reviewPolicy ?? current.reviewPolicy);
   const requestedSpeed = String(input.tabSpeed ?? current.tabSpeed);
   if (!allowedModes.has(requestedMode)) throw new Error("Invalid agentMode");
-  if (!allowedExecution.has(requestedExecution)) throw new Error("Invalid autoExecution");
-  if (!allowedExecution.has(requestedReview)) throw new Error("Invalid reviewPolicy");
+  if (!allowedExecution.has(requestedExecution))
+    throw new Error("Invalid autoExecution");
+  if (!allowedExecution.has(requestedReview))
+    throw new Error("Invalid reviewPolicy");
   if (!allowedSpeeds.has(requestedSpeed)) throw new Error("Invalid tabSpeed");
-    const next: Settings = {
+  const next: Settings = {
     ...current,
     provider: "experiential-labs",
     endpoint: String(input.endpoint ?? current.endpoint),
     model: String(input.model ?? current.model),
     temperature: Number(input.temperature ?? current.temperature),
-    maxTokens: clamp(input.maxTokens ?? current.maxTokens, 256, 32768, current.maxTokens),
+    maxTokens: clamp(
+      input.maxTokens ?? current.maxTokens,
+      256,
+      32768,
+      current.maxTokens,
+    ),
     agentMode: requestedMode as Settings["agentMode"],
     autoExecution: requestedExecution as Settings["autoExecution"],
     reviewPolicy: requestedReview as Settings["reviewPolicy"],
@@ -304,7 +396,10 @@ export async function saveSettings(
     tabSpeed: requestedSpeed as Settings["tabSpeed"],
     toolPermissions: {
       readFiles: bool("readFiles", current.toolPermissions.readFiles),
-      searchRepository: bool("searchRepository", current.toolPermissions.searchRepository),
+      searchRepository: bool(
+        "searchRepository",
+        current.toolPermissions.searchRepository,
+      ),
       editFiles: bool("editFiles", current.toolPermissions.editFiles),
       createFiles: bool("createFiles", current.toolPermissions.createFiles),
       deleteFiles: bool("deleteFiles", current.toolPermissions.deleteFiles),
@@ -314,14 +409,41 @@ export async function saveSettings(
       runCommands: bool("runCommands", current.toolPermissions.runCommands),
       networkTools: bool("networkTools", current.toolPermissions.networkTools),
     },
-    commandTimeoutMs: clamp(input.commandTimeoutMs ?? current.commandTimeoutMs, 1000, 10 * 60 * 1000, 120000),
-    toolTimeoutMs: clamp(input.toolTimeoutMs ?? current.toolTimeoutMs, 1000, 10 * 60 * 1000, 120000),
-    maxAgentSteps: clamp(input.maxAgentSteps ?? current.maxAgentSteps, 1, 200, 50),
-    maxConcurrentTools: clamp(input.maxConcurrentTools ?? current.maxConcurrentTools, 1, 16, 4),
+    commandTimeoutMs: clamp(
+      input.commandTimeoutMs ?? current.commandTimeoutMs,
+      1000,
+      10 * 60 * 1000,
+      120000,
+    ),
+    toolTimeoutMs: clamp(
+      input.toolTimeoutMs ?? current.toolTimeoutMs,
+      1000,
+      10 * 60 * 1000,
+      120000,
+    ),
+    maxAgentSteps: clamp(
+      input.maxAgentSteps ?? current.maxAgentSteps,
+      1,
+      200,
+      50,
+    ),
+    maxConcurrentTools: clamp(
+      input.maxConcurrentTools ?? current.maxConcurrentTools,
+      1,
+      16,
+      4,
+    ),
     maxRetries: clamp(input.maxRetries ?? current.maxRetries, 0, 8, 3),
-    contextBudgetChars: clamp(input.contextBudgetChars ?? current.contextBudgetChars, 4000, 500000, 60000),
+    contextBudgetChars: clamp(
+      input.contextBudgetChars ?? current.contextBudgetChars,
+      4000,
+      500000,
+      60000,
+    ),
     ignoredPaths: Array.isArray(input.ignoredPaths)
-      ? input.ignoredPaths.filter((v): v is string => typeof v === "string").slice(0, 200)
+      ? input.ignoredPaths
+          .filter((v): v is string => typeof v === "string")
+          .slice(0, 200)
       : current.ignoredPaths,
     tabToImport: Boolean(input.tabToImport ?? current.tabToImport ?? true),
     tabToJump: Boolean(input.tabToJump ?? current.tabToJump ?? true),

@@ -117,7 +117,9 @@ export function spawnCommand(
         process.kill(-child.pid!, "SIGTERM");
         killTimer = setTimeout(() => {
           if (child.exitCode === null) {
-            try { process.kill(-child.pid!, "SIGKILL"); } catch {}
+            try {
+              process.kill(-child.pid!, "SIGKILL");
+            } catch {}
           }
         }, 1000);
       } else {
@@ -129,7 +131,9 @@ export function spawnCommand(
         });
       }
     } catch {
-      try { child.kill("SIGKILL"); } catch {}
+      try {
+        child.kill("SIGKILL");
+      } catch {}
     }
   };
   const timeout = setTimeout(() => cancel(), timeoutMs);
@@ -244,12 +248,16 @@ function spawnSpec(
         process.kill(-child.pid!, "SIGTERM");
         killTimer = setTimeout(() => {
           if (child.exitCode === null) {
-            try { process.kill(-child.pid!, "SIGKILL"); } catch {}
+            try {
+              process.kill(-child.pid!, "SIGKILL");
+            } catch {}
           }
         }, 1000);
       }
     } catch {
-      try { child.kill("SIGKILL"); } catch {}
+      try {
+        child.kill("SIGKILL");
+      } catch {}
     }
   };
   const timeout = setTimeout(cancel, command.timeoutMs ?? 120_000);

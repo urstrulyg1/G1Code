@@ -235,10 +235,7 @@ async function finishChangeApproval(
   }
 }
 
-function setCorsHeaders(
-  res: http.ServerResponse,
-  origin?: string,
-) {
+function setCorsHeaders(res: http.ServerResponse, origin?: string) {
   const allowedOrigins = new Set([
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -270,7 +267,9 @@ function sendError(res: http.ServerResponse, status: number, message: string) {
 
 function isTrustedOrigin(origin: string | undefined): boolean {
   if (!origin) return true; // Electron/Node clients do not send Origin.
-  return origin === "http://localhost:5173" || origin === "http://127.0.0.1:5173";
+  return (
+    origin === "http://localhost:5173" || origin === "http://127.0.0.1:5173"
+  );
 }
 
 async function parseJsonBody<T = unknown>(
@@ -1558,8 +1557,14 @@ const server = http.createServer(async (req, res) => {
             tool.name === "run_command" && value && typeof value === "object"
               ? String((value as { command?: unknown }).command ?? "")
               : "";
-          const isTestCommand = /(^|\s)(npm\s+(run\s+)?test|npx\s+(jest|vitest)|pytest|go\s+test|cargo\s+test|make\s+test)(\s|$)/i.test(commandText);
-          const isBuildCommand = /(^|\s)(npm\s+(run\s+)?build|tsc(\s|$)|vite\s+build|electron-builder|go\s+build|cargo\s+build|make)(\s|$)/i.test(commandText);
+          const isTestCommand =
+            /(^|\s)(npm\s+(run\s+)?test|npx\s+(jest|vitest)|pytest|go\s+test|cargo\s+test|make\s+test)(\s|$)/i.test(
+              commandText,
+            );
+          const isBuildCommand =
+            /(^|\s)(npm\s+(run\s+)?build|tsc(\s|$)|vite\s+build|electron-builder|go\s+build|cargo\s+build|make)(\s|$)/i.test(
+              commandText,
+            );
           let permissionAllowed =
             tool.name === "run_command"
               ? isTestCommand
@@ -1567,8 +1572,12 @@ const server = http.createServer(async (req, res) => {
                 : isBuildCommand
                   ? permissions.runBuilds
                   : permissions.runCommands
-              : /^(read_file|list_directory|list_files|get_project_info|search_files|search_repository_context|git_status|git_diff|git_branch|git_log)$/.test(tool.name)
-                ? (tool.name.startsWith("search") ? permissions.searchRepository : permissions.readFiles)
+              : /^(read_file|list_directory|list_files|get_project_info|search_files|search_repository_context|git_status|git_diff|git_branch|git_log)$/.test(
+                    tool.name,
+                  )
+                ? tool.name.startsWith("search")
+                  ? permissions.searchRepository
+                  : permissions.readFiles
                 : /^(write_file|apply_patch)$/.test(tool.name)
                   ? permissions.editFiles
                   : tool.name === "delete_file"
@@ -1576,8 +1585,14 @@ const server = http.createServer(async (req, res) => {
                     : tool.name === "rename_file"
                       ? permissions.renameFiles
                       : tool.permission !== "dangerous";
-          if (tool.name === "write_file" && value && typeof value === "object") {
-            const requestedPath = String((value as { path?: unknown }).path ?? "");
+          if (
+            tool.name === "write_file" &&
+            value &&
+            typeof value === "object"
+          ) {
+            const requestedPath = String(
+              (value as { path?: unknown }).path ?? "",
+            );
             if (requestedPath) {
               const safeTarget = await safeRealPath(workspace, requestedPath);
               try {
@@ -1649,7 +1664,10 @@ const server = http.createServer(async (req, res) => {
         {
           maxIterations: settings.maxAgentSteps,
           maxToolCalls: Math.max(settings.maxAgentSteps * 3, 30),
-          maxExecutionTime: Math.max(settings.toolTimeoutMs, settings.maxAgentSteps * settings.toolTimeoutMs),
+          maxExecutionTime: Math.max(
+            settings.toolTimeoutMs,
+            settings.maxAgentSteps * settings.toolTimeoutMs,
+          ),
           maxRepairAttempts: Math.min(settings.maxRetries, 8),
           commandTimeoutMs: settings.commandTimeoutMs,
           toolTimeoutMs: settings.toolTimeoutMs,

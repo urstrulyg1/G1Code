@@ -10,9 +10,15 @@ import { spawnCommand } from "../packages/tools/command";
 test("agent events carry a request id and strict monotonic sequence", async () => {
   const events: any[] = [];
   const provider = {
-    async getModels() { return []; },
-    supportsTools() { return true; },
-    async chat() { throw new Error("not used"); },
+    async getModels() {
+      return [];
+    },
+    supportsTools() {
+      return true;
+    },
+    async chat() {
+      throw new Error("not used");
+    },
     async *streamChat() {
       yield { content: "hello " };
       yield { content: "world" };
@@ -77,7 +83,7 @@ test("settings reject invalid execution modes and clamp dangerous limits", async
 test("command cancellation terminates the spawned process promptly", async () => {
   const controller = new AbortController();
   const execution = spawnCommand(
-    "node -e \"setTimeout(() => {}, 30000)\"",
+    'node -e "setTimeout(() => {}, 30000)"',
     process.cwd(),
     controller.signal,
     10000,

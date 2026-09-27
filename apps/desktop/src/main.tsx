@@ -409,12 +409,14 @@ function mergeAgentEvent(old: Event[], event: Event): Event[] {
   if (
     event.requestId &&
     typeof event.seq === "number" &&
-    old.some((existing) =>
-      existing.requestId === event.requestId &&
-      typeof existing.seq === "number" &&
-      (existing.seq as number) >= (event.seq as number)
+    old.some(
+      (existing) =>
+        existing.requestId === event.requestId &&
+        typeof existing.seq === "number" &&
+        (existing.seq as number) >= (event.seq as number),
     )
-  ) return old;
+  )
+    return old;
 
   const incomingIds = [
     ...(event.eventIds || []),
@@ -925,7 +927,14 @@ function App() {
   >([]);
   const [agentPrompt, setAgentPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<
-    "agent" | "ask" | "plan" | "review" | "debug" | "refactor" | "auto" | "readonly"
+    | "agent"
+    | "ask"
+    | "plan"
+    | "review"
+    | "debug"
+    | "refactor"
+    | "auto"
+    | "readonly"
   >("review");
   const [events, setEvents] = useState<Event[]>([]);
   const [changes, setChanges] = useState<Change[]>([]);
@@ -1492,7 +1501,12 @@ function App() {
       const currentId = sessionIdRef.current;
       const activeRequestId = activeRequestIdRef.current;
       if (event.sessionId && currentId && event.sessionId !== currentId) return;
-      if (event.requestId && activeRequestId && event.requestId !== activeRequestId) return;
+      if (
+        event.requestId &&
+        activeRequestId &&
+        event.requestId !== activeRequestId
+      )
+        return;
       // While POST /api/agent/start is pending we deliberately ignore live
       // events rather than guessing which session they belong to. The SSE
       // channel is shared by every session, so binding the first event here
@@ -2335,13 +2349,21 @@ function App() {
         reasoning: reasoningParam,
         provider: "experiential-labs",
         executionMode:
-          agentMode === "review" || agentMode === "auto" || agentMode === "plan" || agentMode === "readonly"
+          agentMode === "review" ||
+          agentMode === "auto" ||
+          agentMode === "plan" ||
+          agentMode === "readonly"
             ? agentMode
             : undefined,
         attachedContext,
       });
       activeRequestIdRef.current = res.requestId;
-      if (res.executionMode === "review" || res.executionMode === "auto" || res.executionMode === "plan" || res.executionMode === "readonly")
+      if (
+        res.executionMode === "review" ||
+        res.executionMode === "auto" ||
+        res.executionMode === "plan" ||
+        res.executionMode === "readonly"
+      )
         setAgentMode(res.executionMode);
       // Events may already have arrived and set the id; don't overwrite with a
       // different one (would indicate a mismatch — trust the server response).
@@ -7224,16 +7246,19 @@ function App() {
                   <div className="settings-row-label">
                     <span>Execution Mode</span>
                     <small>
-                      Active policy for Agent runs. Dangerous operations always require explicit approval.
+                      Active policy for Agent runs. Dangerous operations always
+                      require explicit approval.
                     </small>
                   </div>
                   <div className="settings-segmented">
-                    {([
-                      ["review", "Ask for Review"],
-                      ["auto", "Always Auto Proceed"],
-                      ["plan", "Plan First"],
-                      ["readonly", "Read Only"],
-                    ] as const).map(([value, label]) => (
+                    {(
+                      [
+                        ["review", "Ask for Review"],
+                        ["auto", "Always Auto Proceed"],
+                        ["plan", "Plan First"],
+                        ["readonly", "Read Only"],
+                      ] as const
+                    ).map(([value, label]) => (
                       <button
                         key={value}
                         className={`settings-seg-btn${settings.agentMode === value ? " settings-seg-btn--active" : ""}`}
@@ -7241,10 +7266,20 @@ function App() {
                           setSettings({
                             ...settings,
                             agentMode: value,
-                            autoExecution: value === "auto" ? "always" : value === "review" ? "ask" : "never",
+                            autoExecution:
+                              value === "auto"
+                                ? "always"
+                                : value === "review"
+                                  ? "ask"
+                                  : "never",
                             reviewPolicy: value === "auto" ? "always" : "ask",
                           });
-                          if (value === "readonly" || value === "plan" || value === "review" || value === "auto")
+                          if (
+                            value === "readonly" ||
+                            value === "plan" ||
+                            value === "review" ||
+                            value === "auto"
+                          )
                             setAgentMode(value);
                         }}
                       >
@@ -7257,22 +7292,42 @@ function App() {
                 <div className="settings-row">
                   <div className="settings-row-label">
                     <span>Tool Permissions</span>
-                    <small>Fine-grained controls applied by the backend, not just the UI.</small>
+                    <small>
+                      Fine-grained controls applied by the backend, not just the
+                      UI.
+                    </small>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8, width: "100%" }}>
-                    {([
-                      ["readFiles", "Read files"],
-                      ["searchRepository", "Search repository"],
-                      ["editFiles", "Edit files"],
-                      ["createFiles", "Create files"],
-                      ["deleteFiles", "Delete files"],
-                      ["renameFiles", "Rename / move files"],
-                      ["runTests", "Run tests"],
-                      ["runBuilds", "Run builds"],
-                      ["runCommands", "Run shell commands"],
-                      ["networkTools", "Network-enabled tools"],
-                    ] as const).map(([key, label]) => (
-                      <label key={key} className="settings-toggle" style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(180px, 1fr))",
+                      gap: 8,
+                      width: "100%",
+                    }}
+                  >
+                    {(
+                      [
+                        ["readFiles", "Read files"],
+                        ["searchRepository", "Search repository"],
+                        ["editFiles", "Edit files"],
+                        ["createFiles", "Create files"],
+                        ["deleteFiles", "Delete files"],
+                        ["renameFiles", "Rename / move files"],
+                        ["runTests", "Run tests"],
+                        ["runBuilds", "Run builds"],
+                        ["runCommands", "Run shell commands"],
+                        ["networkTools", "Network-enabled tools"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <label
+                        key={key}
+                        className="settings-toggle"
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 8,
+                        }}
+                      >
                         <span>{label}</span>
                         <input
                           type="checkbox"
@@ -7298,13 +7353,26 @@ function App() {
                     <span>Agent Limits</span>
                     <small>Bound long-running tasks and retries.</small>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(100px, 1fr))", gap: 8, width: "100%" }}>
-                    {([
-                      ["maxAgentSteps", "Max steps"],
-                      ["maxRetries", "Retries"],
-                      ["commandTimeoutMs", "Command timeout (ms)"],
-                    ] as const).map(([key, label]) => (
-                      <label key={key} className="settings-field" style={{ margin: 0 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(3, minmax(100px, 1fr))",
+                      gap: 8,
+                      width: "100%",
+                    }}
+                  >
+                    {(
+                      [
+                        ["maxAgentSteps", "Max steps"],
+                        ["maxRetries", "Retries"],
+                        ["commandTimeoutMs", "Command timeout (ms)"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <label
+                        key={key}
+                        className="settings-field"
+                        style={{ margin: 0 }}
+                      >
                         <span style={{ fontSize: 11 }}>{label}</span>
                         <input
                           type="number"

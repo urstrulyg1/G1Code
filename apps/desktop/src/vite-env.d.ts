@@ -149,7 +149,12 @@ interface Window {
       provider?: string;
       executionMode?: "review" | "auto" | "plan" | "readonly";
       attachedContext?: string[];
-    }): Promise<{ sessionId: string; requestId: string; executionMode: string; model?: string }>;
+    }): Promise<{
+      sessionId: string;
+      requestId: string;
+      executionMode: string;
+      model?: string;
+    }>;
     setSessionModel(
       sessionId: string,
       model: string,
