@@ -240,6 +240,7 @@ if (typeof window !== "undefined" && !window.g1code) {
       model?: string;
       reasoning?: string;
       provider?: string;
+      executionMode?: "review" | "auto" | "plan" | "readonly";
       attachedContext?: string[];
     }) {
       ensureEventSource();
