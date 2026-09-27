@@ -1212,16 +1212,24 @@ const server = http.createServer(async (req, res) => {
         },
         execute: async (value, context) => {
           const input = value as { query?: unknown; limit?: unknown };
-          const query = typeof input.query === "string" ? input.query.trim() : "";
-          if (!query) return { content: JSON.stringify({ symbols: [], files: [] }) };
+          const query =
+            typeof input.query === "string" ? input.query.trim() : "";
+          if (!query)
+            return {
+              content: JSON.stringify({ symbols: [], files: [] }),
+            };
           const limit =
             typeof input.limit === "number" && Number.isFinite(input.limit)
               ? Math.max(1, Math.min(50, Math.floor(input.limit)))
               : 20;
-          const symbols = store.searchSymbols(context.workspace, query).slice(0, limit);
+          const symbols = store
+            .searchSymbols(context.workspace, query)
+            .slice(0, limit);
           const files = store
             .indexedFiles(context.workspace)
-            .filter((entry) => entry.path.toLowerCase().includes(query.toLowerCase()))
+            .filter((entry) =>
+              entry.path.toLowerCase().includes(query.toLowerCase()),
+            )
             .slice(0, limit);
           return {
             content: JSON.stringify({ query, symbols, files }),
