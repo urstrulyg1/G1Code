@@ -2334,9 +2334,15 @@ function App() {
         model: modelToUse,
         reasoning: reasoningParam,
         provider: "experiential-labs",
+        executionMode:
+          agentMode === "review" || agentMode === "auto" || agentMode === "plan" || agentMode === "readonly"
+            ? agentMode
+            : undefined,
         attachedContext,
       });
       activeRequestIdRef.current = res.requestId;
+      if (res.executionMode === "review" || res.executionMode === "auto" || res.executionMode === "plan" || res.executionMode === "readonly")
+        setAgentMode(res.executionMode);
       // Events may already have arrived and set the id; don't overwrite with a
       // different one (would indicate a mismatch — trust the server response).
       setSessionId(res.sessionId);
