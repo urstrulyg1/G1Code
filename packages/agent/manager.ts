@@ -15,7 +15,10 @@ export class AgentRuntimeManager {
         // A runtime should normally convert failures into AgentEvents. Keep the
         // manager from producing an unhandled rejection if an integration
         // boundary throws unexpectedly, and always release the session handle.
-        console.error(`[AgentRuntimeManager] Session ${sessionId} failed:`, error);
+        console.error(
+          `[AgentRuntimeManager] Session ${sessionId} failed:`,
+          error,
+        );
       })
       .finally(() => this.sessions.delete(sessionId));
     return sessionId;
