@@ -407,8 +407,8 @@ function mergeAgentEvent(old: Event[], event: Event): Event[] {
   if (
     incomingIds.length > 0 &&
     old.some((existing) =>
-      incomingIds.some((id) =>
-        id === existing.id || Boolean(existing.eventIds?.includes(id)),
+      incomingIds.some(
+        (id) => id === existing.id || Boolean(existing.eventIds?.includes(id)),
       ),
     )
   ) {
@@ -1458,13 +1458,9 @@ function App() {
 
       if (
         event.type === "done" ||
-        [
-          "COMPLETED",
-          "FAILED",
-          "STOPPED",
-          "CANCELLED",
-          "INTERRUPTED",
-        ].includes(event.state ?? "")
+        ["COMPLETED", "FAILED", "STOPPED", "CANCELLED", "INTERRUPTED"].includes(
+          event.state ?? "",
+        )
       ) {
         setRunning(false);
         pendingSessionRef.current = false;
@@ -1903,10 +1899,7 @@ function App() {
     }
   };
 
-  const respondToPermission = async (
-    allowed: boolean,
-    requestId?: string,
-  ) => {
+  const respondToPermission = async (allowed: boolean, requestId?: string) => {
     if (permissionBusy) return;
     let id = requestId || permission?.requestId;
     if (!id && window.g1code.getPendingPermissions) {
@@ -1919,9 +1912,7 @@ function App() {
     setPermissionBusy(true);
     try {
       await window.g1code.respondPermission(id, allowed);
-      setPermission((current) =>
-        current?.requestId === id ? null : current,
-      );
+      setPermission((current) => (current?.requestId === id ? null : current));
     } catch (err) {
       console.error("Failed to respond to permission:", err);
       // The polling path will reconcile a decision that completed elsewhere.
@@ -2045,9 +2036,15 @@ function App() {
           });
           setEvents(timeline);
           setChatUserMessages(
-            userMessages.map(({ id, content, mode }) => ({ id, content, mode })),
+            userMessages.map(({ id, content, mode }) => ({
+              id,
+              content,
+              mode,
+            })),
           );
-          setUserTaskPrompt(userMessages[0]?.content || targetSession?.title || "");
+          setUserTaskPrompt(
+            userMessages[0]?.content || targetSession?.title || "",
+          );
           const pending = full.pendingPermissions?.[0];
           const executionPolicy = settingsRef.current?.autoExecution;
           if (pending && (!executionPolicy || executionPolicy === "ask")) {
@@ -4559,7 +4556,8 @@ function App() {
                         width: 72,
                         height: 72,
                         objectFit: "contain",
-                        filter: "drop-shadow(0 4px 20px rgba(56, 189, 248, 0.35))",
+                        filter:
+                          "drop-shadow(0 4px 20px rgba(56, 189, 248, 0.35))",
                       }}
                     />
                   </div>
@@ -4656,7 +4654,11 @@ function App() {
 
                   // 1. User turn
                   if (ev.type === "user" && ev.message) {
-                    segments.push({ kind: "user", message: ev.message, idx: i });
+                    segments.push({
+                      kind: "user",
+                      message: ev.message,
+                      idx: i,
+                    });
                     i++;
                     continue;
                   }
@@ -5030,10 +5032,15 @@ function App() {
                         const p = (e.input as any)?.path || "";
                         return `Deleting ${p || "file"}...`;
                       }
-                      if (e.toolName === "rename_file" || e.toolName === "move_file") {
+                      if (
+                        e.toolName === "rename_file" ||
+                        e.toolName === "move_file"
+                      ) {
                         const p = (e.input as any)?.path || "";
                         const target = (e.input as any)?.newPath || "";
-                        return target ? "Moving " + p + " → " + target + "..." : "Moving " + p + "...";
+                        return target
+                          ? "Moving " + p + " → " + target + "..."
+                          : "Moving " + p + "...";
                       }
                       if (e.toolName === "inspect_file") {
                         const p = (e.input as any)?.path || "";
@@ -5068,9 +5075,13 @@ function App() {
                             <div className="chat-bubble chat-bubble--user">
                               <div className="chat-bubble-meta chat-bubble-meta--user">
                                 <span>You</span>
-                                <span className="chat-mode-chip">{agentMode}</span>
+                                <span className="chat-mode-chip">
+                                  {agentMode}
+                                </span>
                               </div>
-                              <div className="chat-user-text">{seg.message}</div>
+                              <div className="chat-user-text">
+                                {seg.message}
+                              </div>
                             </div>
                             <div className="chat-avatar chat-avatar--user">
                               <User size={13} />
@@ -5173,8 +5184,12 @@ function App() {
                         const isRejected = approvalStatus === "REJECTED";
                         const isConflict = approvalStatus === "CONFLICT";
                         const isResolved =
-                          isApplied || isToolApproved || isRejected || isConflict;
-                        const isToolApproval = !targetChangeId && Boolean(ev.toolName);
+                          isApplied ||
+                          isToolApproved ||
+                          isRejected ||
+                          isConflict;
+                        const isToolApproval =
+                          !targetChangeId && Boolean(ev.toolName);
                         return (
                           <div
                             className={`chat-approval-card ${isApplied || isToolApproved ? "chat-approval-card--applied" : isRejected || isConflict ? "chat-approval-card--rejected" : ""}`}
@@ -5270,7 +5285,9 @@ function App() {
                                 <button
                                   className="chat-approval-btn chat-approval-btn--reject"
                                   disabled={permissionBusy}
-                                  onClick={() => void respondToPermission(false)}
+                                  onClick={() =>
+                                    void respondToPermission(false)
+                                  }
                                 >
                                   <X size={12} /> Reject
                                 </button>
@@ -5352,7 +5369,8 @@ function App() {
                           STOPPED: "chat-state-pill--stopped",
                           INTERRUPTED: "chat-state-pill--stopped",
                           WAITING_FOR_APPROVAL: "chat-state-pill--waiting",
-                          WAITING_FOR_CHANGE_APPROVAL: "chat-state-pill--waiting",
+                          WAITING_FOR_CHANGE_APPROVAL:
+                            "chat-state-pill--waiting",
                         };
                         const isWaitingState = seg.state.includes("WAITING");
                         return (
@@ -5715,7 +5733,8 @@ function App() {
                                 const isCreated =
                                   (it.input as any)?.search === undefined &&
                                   !it.result?.diff?.includes("@@");
-                                const isWaitingForApproval = it.status === "waiting";
+                                const isWaitingForApproval =
+                                  it.status === "waiting";
 
                                 return (
                                   <div className="file-op-card" key={it.id}>
@@ -6327,14 +6346,18 @@ function App() {
                     <button
                       className="chat-approval-btn chat-approval-btn--reject"
                       disabled={permissionBusy}
-                      onClick={() => void respondToPermission(false, permission.requestId)}
+                      onClick={() =>
+                        void respondToPermission(false, permission.requestId)
+                      }
                     >
                       <X size={12} /> Reject
                     </button>
                     <button
                       className="chat-approval-btn chat-approval-btn--approve"
                       disabled={permissionBusy}
-                      onClick={() => void respondToPermission(true, permission.requestId)}
+                      onClick={() =>
+                        void respondToPermission(true, permission.requestId)
+                      }
                     >
                       <Check size={12} /> Approve
                     </button>

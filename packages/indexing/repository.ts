@@ -115,9 +115,12 @@ export async function scanRepository(
     const ignorePatterns = await fs
       .readFile(path.join(root, ".gitignore"), "utf8")
       .then((text) =>
-        text.split(/\r?\n/).map((line) => line.trim()).filter(
-          (line) => line && !line.startsWith("#") && !line.startsWith("!"),
-        ),
+        text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(
+            (line) => line && !line.startsWith("#") && !line.startsWith("!"),
+          ),
       )
       .catch(() => [] as string[]);
 
@@ -138,10 +141,16 @@ export async function scanRepository(
     };
 
     async function visit(directory: string) {
-      for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      for (const entry of await fs.readdir(directory, {
+        withFileTypes: true,
+      })) {
         const absolute = path.join(directory, entry.name);
         const relative = path.relative(root, absolute).replaceAll("\\", "/");
-        if (ignored.has(entry.name) || shouldIgnore(relative + (entry.isDirectory() ? "/" : ""))) continue;
+        if (
+          ignored.has(entry.name) ||
+          shouldIgnore(relative + (entry.isDirectory() ? "/" : ""))
+        )
+          continue;
         if (entry.isDirectory()) await visit(absolute);
         else if (entry.isFile()) files.push(path.relative(root, absolute));
       }
@@ -174,7 +183,8 @@ export async function scanRepository(
 
     // Binary/media/generated blobs do not provide useful symbol context and
     // can be extremely expensive to hash/index.
-    if (content.subarray(0, Math.min(content.length, 8192)).includes(0)) continue;
+    if (content.subarray(0, Math.min(content.length, 8192)).includes(0))
+      continue;
 
     result.push({
       path: path.relative(root, file),

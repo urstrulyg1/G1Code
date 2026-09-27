@@ -29,7 +29,12 @@ export function openDatabase(customDir?: string) {
     } else if (process.env.APPDATA) {
       directory = path.join(process.env.APPDATA, "G1Code");
     } else if (process.platform === "darwin") {
-      directory = path.join(os.homedir(), "Library", "Application Support", "G1Code");
+      directory = path.join(
+        os.homedir(),
+        "Library",
+        "Application Support",
+        "G1Code",
+      );
     } else if (process.env.HOME) {
       directory = path.join(process.env.HOME, ".config", "G1Code");
     } else {
@@ -112,9 +117,15 @@ export function openDatabase(customDir?: string) {
   }
   if (version < 3) {
     database.transaction(() => {
-      const columns = database.prepare("PRAGMA table_info(file_changes)").all() as Array<{ name: string }>;
-      if (!columns.some((column) => column.name === "operation")) database.exec("ALTER TABLE file_changes ADD COLUMN operation TEXT NOT NULL DEFAULT 'write'");
-      if (!columns.some((column) => column.name === "target_path")) database.exec("ALTER TABLE file_changes ADD COLUMN target_path TEXT");
+      const columns = database
+        .prepare("PRAGMA table_info(file_changes)")
+        .all() as Array<{ name: string }>;
+      if (!columns.some((column) => column.name === "operation"))
+        database.exec(
+          "ALTER TABLE file_changes ADD COLUMN operation TEXT NOT NULL DEFAULT 'write'",
+        );
+      if (!columns.some((column) => column.name === "target_path"))
+        database.exec("ALTER TABLE file_changes ADD COLUMN target_path TEXT");
       database.prepare("UPDATE schema_version SET version = 3").run();
     })();
   }

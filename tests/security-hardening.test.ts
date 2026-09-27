@@ -10,9 +10,18 @@ test("workspace path guard rejects traversal and sibling-prefix escapes", async 
   const workspace = await mkdtemp(path.join(tmpdir(), "g1code-security-"));
   const sibling = path.join(workspace, "-sibling");
 
-  assert.equal(safePath(workspace, "src/main.ts"), path.join(workspace, "src/main.ts"));
-  assert.throws(() => safePath(workspace, "../outside"), /outside the selected workspace/);
-  assert.throws(() => safePath(workspace, sibling), /outside the selected workspace/);
+  assert.equal(
+    safePath(workspace, "src/main.ts"),
+    path.join(workspace, "src/main.ts"),
+  );
+  assert.throws(
+    () => safePath(workspace, "../outside"),
+    /outside the selected workspace/,
+  );
+  assert.throws(
+    () => safePath(workspace, sibling),
+    /outside the selected workspace/,
+  );
 });
 
 test("workspace realpath guard rejects symlink escapes", async (t) => {
@@ -22,10 +31,16 @@ test("workspace realpath guard rejects symlink escapes", async (t) => {
   const link = path.join(workspace, "linked");
 
   try {
-    await symlink(outside, link, process.platform === "win32" ? "junction" : "dir");
+    await symlink(
+      outside,
+      link,
+      process.platform === "win32" ? "junction" : "dir",
+    );
   } catch (error) {
     if (process.platform === "win32") {
-      t.skip(`symlink creation is unavailable on this runner: ${String(error)}`);
+      t.skip(
+        `symlink creation is unavailable on this runner: ${String(error)}`,
+      );
       return;
     }
     throw error;
@@ -43,7 +58,10 @@ test("spawned tool commands do not inherit secret-like environment variables", a
 
   const execution = spawnExecutable({
     executable: process.execPath,
-    args: ["-e", "process.stdout.write(process.env.G1CODE_TEST_SECRET || 'MISSING')"],
+    args: [
+      "-e",
+      "process.stdout.write(process.env.G1CODE_TEST_SECRET || 'MISSING')",
+    ],
     cwd: workspace,
     env: { ...process.env, G1CODE_TEST_SECRET: "must-not-leak" },
     timeoutMs: 10_000,
