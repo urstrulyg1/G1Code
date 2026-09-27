@@ -31,7 +31,9 @@
     "electron:win": "electron-builder --win --x64 --ia32",
     "electron:linux": "electron-builder --linux --x64 --arm64",
     "electron:all": "electron-builder --mac --win --linux --x64 --arm64 --ia32",
-    "build:desktop": "node scripts/run-build.cjs"
+    "build:desktop": "node scripts/run-build.cjs",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,html,md}\" \"!package-lock.json\"",
+    "verify": "npm run preflight:electron && npm test && npm run build && npm run e2e"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
