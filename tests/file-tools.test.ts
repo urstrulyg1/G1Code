@@ -33,7 +33,6 @@ function context(workspace: string, store: DatabaseStore, sessionId = "s1") {
 test("file tools create, edit, delete, rename and move through the approval-backed change service", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "g1code-file-tools-"));
   const store = makeStore();
-  store.close = store.close.bind(store);
   const tools = workspaceTools();
   const create = tools.find(t => t.name === "create_file")!;
   const edit = tools.find(t => t.name === "edit_file")!;
