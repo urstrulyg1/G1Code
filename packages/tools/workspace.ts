@@ -267,7 +267,7 @@ export const workspaceTools = (): AgentTool[] => [
             ]
           : [
               "-lc",
-              `rg -n --hidden --glob '!node_modules' --glob '!.git' --glob '!dist' --glob '!dist-electron' --glob '!coverage' --glob '!.env' --glob '!.env.*' --glob '!**/*.pem' --glob '!**/*.key' --glob '!**/*credentials*' --glob '!**/*secret*' --glob '!**/id_rsa*' --glob '!**/*.p12' --glob '!**/*.pfx' --glob '!**/*.der' --glob '!**/*.png' --glob '!**/*.jpg' --glob '!**/*.jpeg' --glob '!**/*.gif' --glob '!**/*.webp' --glob '!**/*.zip' --glob '!**/*.tar' --glob '!**/*.gz' --glob '!**/*.sqlite' --glob '!**/*.db' --glob '!**/*.exe' --glob '!**/*.dll' --glob '!**/*.so' --glob '!**/*.dylib' ${JSON.stringify(query)} ${JSON.stringify(directory)} || true`,
+              `grep -RInI --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=dist-electron --exclude-dir=coverage --exclude='.env' --exclude='.env.*' --exclude='*.pem' --exclude='*.key' --exclude='*credentials*' --exclude='*secret*' --exclude='id_rsa*' --exclude='*.p12' --exclude='*.pfx' --exclude='*.der' --exclude='*.png' --exclude='*.jpg' --exclude='*.jpeg' --exclude='*.gif' --exclude='*.webp' --exclude='*.zip' --exclude='*.tar' --exclude='*.gz' --exclude='*.sqlite' --exclude='*.db' --exclude='*.exe' --exclude='*.dll' --exclude='*.so' --exclude='*.dylib' -F ${JSON.stringify(query)} ${JSON.stringify(directory)} || true`,
             ];
       const result = await exec(
         process.platform === "win32" ? "powershell.exe" : "sh",
