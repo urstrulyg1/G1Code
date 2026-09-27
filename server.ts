@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
 import { openDatabase } from "./packages/database/connection";
 import { DatabaseStore } from "./packages/database/repositories";
 import { ChatStorage } from "./packages/database/chat-storage";
@@ -1605,8 +1606,17 @@ const server = http.createServer(async (req, res) => {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const terminalState = signal.aborted ? "CANCELLED" : "FAILED";
-          emit({ type: "error", message: "Agent execution terminated unexpectedly: " + message });
           emit({
+            id: randomUUID(),
+            sessionId,
+            at: new Date().toISOString(),
+            type: "error",
+            message: "Agent execution terminated unexpectedly: " + message,
+          });
+          emit({
+            id: randomUUID(),
+            sessionId,
+            at: new Date().toISOString(),
             type: "state",
             state: terminalState,
             message: signal.aborted ? "Agent cancelled." : "Agent failed unexpectedly.",
