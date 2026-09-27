@@ -118,9 +118,18 @@ type SettingsType = {
   apiKeyConfigured: boolean;
   apiKeyMasked?: string;
   // Agent Behaviour Settings
+  agentMode: "review" | "auto" | "plan" | "readonly";
   autoExecution: "always" | "ask" | "never";
   reviewPolicy: "always" | "ask" | "never";
   autoFixLints: boolean;
+  toolPermissions: Record<string, boolean>;
+  commandTimeoutMs: number;
+  toolTimeoutMs: number;
+  maxAgentSteps: number;
+  maxConcurrentTools: number;
+  maxRetries: number;
+  contextBudgetChars: number;
+  ignoredPaths: string[];
   // Tab / Inline Suggestion Settings
   suggestionsInEditor: boolean;
   tabGitignoreAccess: boolean;
@@ -397,6 +406,16 @@ function cleanAssistantText(raw: string): string {
  *  - a resolved `approval` (with `result`) updates the pending card in place
  */
 function mergeAgentEvent(old: Event[], event: Event): Event[] {
+  if (
+    event.requestId &&
+    typeof event.seq === "number" &&
+    old.some((existing) =>
+      existing.requestId === event.requestId &&
+      typeof existing.seq === "number" &&
+      (existing.seq as number) >= (event.seq as number)
+    )
+  ) return old;
+
   const incomingIds = [
     ...(event.eventIds || []),
     ...(event.id ? [event.id] : []),
@@ -434,6 +453,8 @@ function mergeAgentEvent(old: Event[], event: Event): Event[] {
             ...incomingIds,
           ],
           id: undefined,
+          seq: event.seq,
+          requestId: event.requestId,
         },
       ];
     }
@@ -460,6 +481,8 @@ function mergeAgentEvent(old: Event[], event: Event): Event[] {
           ...incomingIds,
         ],
         id: undefined,
+        seq: event.seq,
+        requestId: event.requestId,
       };
       return copy;
     }
@@ -902,8 +925,8 @@ function App() {
   >([]);
   const [agentPrompt, setAgentPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<
-    "agent" | "ask" | "plan" | "review" | "debug" | "refactor"
-  >("agent");
+    "agent" | "ask" | "plan" | "review" | "debug" | "refactor" | "auto" | "readonly"
+  >("review");
   const [events, setEvents] = useState<Event[]>([]);
   const [changes, setChanges] = useState<Change[]>([]);
   const [sessions, setSessions] = useState<
@@ -1002,6 +1025,8 @@ function App() {
   const runningRef = useRef<boolean>(false);
   /** True between clicking Send and receiving the sessionId from the server. */
   const pendingSessionRef = useRef<boolean>(false);
+  const activeRequestIdRef = useRef<string>("");
+
   const loadChangesRef = useRef<() => Promise<void>>(async () => {});
   /** Whether the chat body is scrolled to (near) the bottom; gates auto-scroll. */
   const stickToBottomRef = useRef<boolean>(true);
@@ -1023,9 +1048,29 @@ function App() {
     temperature: 0.2,
     maxTokens: 4096,
     apiKeyConfigured: false,
-    autoExecution: "always",
-    reviewPolicy: "always",
+    agentMode: "review",
+    autoExecution: "ask",
+    reviewPolicy: "ask",
     autoFixLints: true,
+    toolPermissions: {
+      readFiles: true,
+      searchRepository: true,
+      editFiles: true,
+      createFiles: true,
+      deleteFiles: false,
+      renameFiles: false,
+      runTests: true,
+      runBuilds: true,
+      runCommands: true,
+      networkTools: false,
+    },
+    commandTimeoutMs: 120000,
+    toolTimeoutMs: 120000,
+    maxAgentSteps: 50,
+    maxConcurrentTools: 4,
+    maxRetries: 3,
+    contextBudgetChars: 60000,
+    ignoredPaths: ["node_modules", ".git", "dist", "dist-electron", "coverage"],
     suggestionsInEditor: true,
     tabGitignoreAccess: true,
     tabSpeed: "fast",
@@ -1388,6 +1433,7 @@ function App() {
       const typed = s as SettingsType;
       settingsRef.current = typed;
       setSettings(typed);
+      if (typed.agentMode) setAgentMode(typed.agentMode);
       if (s.model) {
         setSelectedModel((current) => current || s.model);
       }
@@ -1444,7 +1490,9 @@ function App() {
       // (While the POST /api/agent/start is in flight we don't yet know the
       // id, so `pendingSessionRef` lets the very first events through.)
       const currentId = sessionIdRef.current;
+      const activeRequestId = activeRequestIdRef.current;
       if (event.sessionId && currentId && event.sessionId !== currentId) return;
+      if (event.requestId && activeRequestId && event.requestId !== activeRequestId) return;
       // While POST /api/agent/start is pending we deliberately ignore live
       // events rather than guessing which session they belong to. The SSE
       // channel is shared by every session, so binding the first event here
@@ -2288,6 +2336,7 @@ function App() {
         provider: "experiential-labs",
         attachedContext,
       });
+      activeRequestIdRef.current = res.requestId;
       // Events may already have arrived and set the id; don't overwrite with a
       // different one (would indicate a mismatch — trust the server response).
       setSessionId(res.sessionId);
