@@ -66,8 +66,15 @@ contextBridge.exposeInMainWorld("g1code", {
     model?: string;
     reasoning?: string;
     provider?: string;
+    executionMode?: "review" | "auto" | "plan" | "readonly";
     attachedContext?: string[];
-  }) => ipcRenderer.invoke("agent:start", input),
+  }) =>
+    ipcRenderer.invoke("agent:start", input) as Promise<{
+      sessionId: string;
+      requestId: string;
+      executionMode: string;
+      model?: string;
+    }>,
   setSessionModel: (sessionId: string, model: string, workspace?: string) =>
     ipcRenderer.invoke("agent:session-model", { sessionId, model, workspace }),
   stopAgent: (sessionId: string) => ipcRenderer.send("agent:stop", sessionId),

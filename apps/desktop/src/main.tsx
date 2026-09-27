@@ -86,6 +86,8 @@ type Event = {
   chunk?: string;
   exitCode?: number;
   duration?: number;
+  requestId?: string;
+  seq?: number;
 };
 type Change = {
   id: string;
@@ -118,9 +120,18 @@ type SettingsType = {
   apiKeyConfigured: boolean;
   apiKeyMasked?: string;
   // Agent Behaviour Settings
+  agentMode: "review" | "auto" | "plan" | "readonly";
   autoExecution: "always" | "ask" | "never";
   reviewPolicy: "always" | "ask" | "never";
   autoFixLints: boolean;
+  toolPermissions: Record<string, boolean>;
+  commandTimeoutMs: number;
+  toolTimeoutMs: number;
+  maxAgentSteps: number;
+  maxConcurrentTools: number;
+  maxRetries: number;
+  contextBudgetChars: number;
+  ignoredPaths: string[];
   // Tab / Inline Suggestion Settings
   suggestionsInEditor: boolean;
   tabGitignoreAccess: boolean;
@@ -397,6 +408,18 @@ function cleanAssistantText(raw: string): string {
  *  - a resolved `approval` (with `result`) updates the pending card in place
  */
 function mergeAgentEvent(old: Event[], event: Event): Event[] {
+  if (
+    event.requestId &&
+    typeof event.seq === "number" &&
+    old.some(
+      (existing) =>
+        existing.requestId === event.requestId &&
+        typeof existing.seq === "number" &&
+        (existing.seq as number) >= (event.seq as number),
+    )
+  )
+    return old;
+
   const incomingIds = [
     ...(event.eventIds || []),
     ...(event.id ? [event.id] : []),
@@ -434,6 +457,8 @@ function mergeAgentEvent(old: Event[], event: Event): Event[] {
             ...incomingIds,
           ],
           id: undefined,
+          seq: event.seq,
+          requestId: event.requestId,
         },
       ];
     }
@@ -460,6 +485,8 @@ function mergeAgentEvent(old: Event[], event: Event): Event[] {
           ...incomingIds,
         ],
         id: undefined,
+        seq: event.seq,
+        requestId: event.requestId,
       };
       return copy;
     }
@@ -902,8 +929,15 @@ function App() {
   >([]);
   const [agentPrompt, setAgentPrompt] = useState("");
   const [agentMode, setAgentMode] = useState<
-    "agent" | "ask" | "plan" | "review" | "debug" | "refactor"
-  >("agent");
+    | "agent"
+    | "ask"
+    | "plan"
+    | "review"
+    | "debug"
+    | "refactor"
+    | "auto"
+    | "readonly"
+  >("review");
   const [events, setEvents] = useState<Event[]>([]);
   const [changes, setChanges] = useState<Change[]>([]);
   const [sessions, setSessions] = useState<
@@ -1002,6 +1036,8 @@ function App() {
   const runningRef = useRef<boolean>(false);
   /** True between clicking Send and receiving the sessionId from the server. */
   const pendingSessionRef = useRef<boolean>(false);
+  const activeRequestIdRef = useRef<string>("");
+
   const loadChangesRef = useRef<() => Promise<void>>(async () => {});
   /** Whether the chat body is scrolled to (near) the bottom; gates auto-scroll. */
   const stickToBottomRef = useRef<boolean>(true);
@@ -1023,9 +1059,29 @@ function App() {
     temperature: 0.2,
     maxTokens: 4096,
     apiKeyConfigured: false,
-    autoExecution: "always",
-    reviewPolicy: "always",
+    agentMode: "review",
+    autoExecution: "ask",
+    reviewPolicy: "ask",
     autoFixLints: true,
+    toolPermissions: {
+      readFiles: true,
+      searchRepository: true,
+      editFiles: true,
+      createFiles: true,
+      deleteFiles: false,
+      renameFiles: false,
+      runTests: true,
+      runBuilds: true,
+      runCommands: true,
+      networkTools: false,
+    },
+    commandTimeoutMs: 120000,
+    toolTimeoutMs: 120000,
+    maxAgentSteps: 50,
+    maxConcurrentTools: 4,
+    maxRetries: 3,
+    contextBudgetChars: 60000,
+    ignoredPaths: ["node_modules", ".git", "dist", "dist-electron", "coverage"],
     suggestionsInEditor: true,
     tabGitignoreAccess: true,
     tabSpeed: "fast",
@@ -1388,6 +1444,7 @@ function App() {
       const typed = s as SettingsType;
       settingsRef.current = typed;
       setSettings(typed);
+      if (typed.agentMode) setAgentMode(typed.agentMode);
       if (s.model) {
         setSelectedModel((current) => current || s.model);
       }
@@ -1444,7 +1501,14 @@ function App() {
       // (While the POST /api/agent/start is in flight we don't yet know the
       // id, so `pendingSessionRef` lets the very first events through.)
       const currentId = sessionIdRef.current;
+      const activeRequestId = activeRequestIdRef.current;
       if (event.sessionId && currentId && event.sessionId !== currentId) return;
+      if (
+        event.requestId &&
+        activeRequestId &&
+        event.requestId !== activeRequestId
+      )
+        return;
       // While POST /api/agent/start is pending we deliberately ignore live
       // events rather than guessing which session they belong to. The SSE
       // channel is shared by every session, so binding the first event here
@@ -2286,8 +2350,23 @@ function App() {
         model: modelToUse,
         reasoning: reasoningParam,
         provider: "experiential-labs",
+        executionMode:
+          agentMode === "review" ||
+          agentMode === "auto" ||
+          agentMode === "plan" ||
+          agentMode === "readonly"
+            ? agentMode
+            : undefined,
         attachedContext,
       });
+      activeRequestIdRef.current = res.requestId;
+      if (
+        res.executionMode === "review" ||
+        res.executionMode === "auto" ||
+        res.executionMode === "plan" ||
+        res.executionMode === "readonly"
+      )
+        setAgentMode(res.executionMode);
       // Events may already have arrived and set the id; don't overwrite with a
       // different one (would indicate a mismatch — trust the server response).
       setSessionId(res.sessionId);
@@ -7164,6 +7243,154 @@ function App() {
                 <p className="settings-section-desc">
                   Control how the agent executes tools and applies file changes.
                 </p>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Execution Mode</span>
+                    <small>
+                      Active policy for Agent runs. Dangerous operations always
+                      require explicit approval.
+                    </small>
+                  </div>
+                  <div className="settings-segmented">
+                    {(
+                      [
+                        ["review", "Ask for Review"],
+                        ["auto", "Always Auto Proceed"],
+                        ["plan", "Plan First"],
+                        ["readonly", "Read Only"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        className={`settings-seg-btn${settings.agentMode === value ? " settings-seg-btn--active" : ""}`}
+                        onClick={() => {
+                          setSettings({
+                            ...settings,
+                            agentMode: value,
+                            autoExecution:
+                              value === "auto"
+                                ? "always"
+                                : value === "review"
+                                  ? "ask"
+                                  : "never",
+                            reviewPolicy: value === "auto" ? "always" : "ask",
+                          });
+                          if (
+                            value === "readonly" ||
+                            value === "plan" ||
+                            value === "review" ||
+                            value === "auto"
+                          )
+                            setAgentMode(value);
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Tool Permissions</span>
+                    <small>
+                      Fine-grained controls applied by the backend, not just the
+                      UI.
+                    </small>
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(180px, 1fr))",
+                      gap: 8,
+                      width: "100%",
+                    }}
+                  >
+                    {(
+                      [
+                        ["readFiles", "Read files"],
+                        ["searchRepository", "Search repository"],
+                        ["editFiles", "Edit files"],
+                        ["createFiles", "Create files"],
+                        ["deleteFiles", "Delete files"],
+                        ["renameFiles", "Rename / move files"],
+                        ["runTests", "Run tests"],
+                        ["runBuilds", "Run builds"],
+                        ["runCommands", "Run shell commands"],
+                        ["networkTools", "Network-enabled tools"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <label
+                        key={key}
+                        className="settings-toggle"
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 8,
+                        }}
+                      >
+                        <span>{label}</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(settings.toolPermissions?.[key])}
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              toolPermissions: {
+                                ...settings.toolPermissions,
+                                [key]: e.target.checked,
+                              },
+                            })
+                          }
+                        />
+                        <span className="settings-toggle-track" />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Agent Limits</span>
+                    <small>Bound long-running tasks and retries.</small>
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(3, minmax(100px, 1fr))",
+                      gap: 8,
+                      width: "100%",
+                    }}
+                  >
+                    {(
+                      [
+                        ["maxAgentSteps", "Max steps"],
+                        ["maxRetries", "Retries"],
+                        ["commandTimeoutMs", "Command timeout (ms)"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <label
+                        key={key}
+                        className="settings-field"
+                        style={{ margin: 0 }}
+                      >
+                        <span style={{ fontSize: 11 }}>{label}</span>
+                        <input
+                          type="number"
+                          min={key === "maxRetries" ? 0 : 1}
+                          value={Number(settings[key])}
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              [key]: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="settings-row">
                   <div className="settings-row-label">

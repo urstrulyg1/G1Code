@@ -17,6 +17,8 @@ export type ToolContext = {
     duration?: number;
   }) => void;
   signal?: AbortSignal;
+  commandTimeoutMs?: number;
+  toolTimeoutMs?: number;
   changeService?: import("./change-service").ChangeService;
   sessionId?: string;
   recordTestRun?: (run: {

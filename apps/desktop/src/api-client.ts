@@ -240,16 +240,19 @@ if (typeof window !== "undefined" && !window.g1code) {
       model?: string;
       reasoning?: string;
       provider?: string;
+      executionMode?: "review" | "auto" | "plan" | "readonly";
       attachedContext?: string[];
     }) {
       ensureEventSource();
-      return apiRequest<{ sessionId: string; model?: string }>(
-        "/api/agent/start",
-        {
-          method: "POST",
-          body: JSON.stringify(input),
-        },
-      );
+      return apiRequest<{
+        sessionId: string;
+        requestId: string;
+        executionMode: string;
+        model?: string;
+      }>("/api/agent/start", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
     },
 
     async setSessionModel(

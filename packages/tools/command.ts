@@ -68,6 +68,7 @@ export function spawnCommand(
   command: string,
   cwd: string,
   signal?: AbortSignal,
+  timeoutMs = 120_000,
 ): CommandExecution {
   const safeEnvironment = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -104,17 +105,38 @@ export function spawnCommand(
   };
   const stdout = streamQueue(child.stdout, collect("stdout"));
   const stderr = streamQueue(child.stderr, collect("stderr"));
+  let cancelled = false;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
   const cancel = () => {
-    if (!child.killed) {
-      try {
-        if (process.platform !== "win32") process.kill(-child.pid!, "SIGTERM");
-        else child.kill();
-      } catch {
-        // The process may have exited between the check and signal delivery.
+    if (cancelled || child.exitCode !== null) return;
+    cancelled = true;
+    try {
+      if (process.platform !== "win32") {
+        // Kill the entire process group first so shell-spawned children cannot
+        // survive an Agent cancellation.
+        process.kill(-child.pid!, "SIGTERM");
+        killTimer = setTimeout(() => {
+          if (child.exitCode === null) {
+            try {
+              process.kill(-child.pid!, "SIGKILL");
+            } catch {}
+          }
+        }, 1000);
+      } else {
+        // Windows has no portable process-group signal equivalent; taskkill
+        // with /T terminates the complete descendant tree.
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          windowsHide: true,
+          stdio: "ignore",
+        });
       }
+    } catch {
+      try {
+        child.kill("SIGKILL");
+      } catch {}
     }
   };
-  const timeout = setTimeout(() => cancel(), 120_000);
+  const timeout = setTimeout(() => cancel(), timeoutMs);
   if (signal) {
     if (signal.aborted) cancel();
     else signal.addEventListener("abort", cancel, { once: true });
@@ -123,6 +145,8 @@ export function spawnCommand(
     new Promise<CommandResult>((resolve) =>
       child.once("close", (code) => {
         clearTimeout(timeout);
+        if (killTimer) clearTimeout(killTimer);
+        if (signal) signal.removeEventListener("abort", cancel);
         resolve({
           stdout: collectedStdout,
           stderr: collectedStderr,
@@ -209,15 +233,31 @@ function spawnSpec(
   };
   const stdout = streamQueue(child.stdout, collect("stdout"));
   const stderr = streamQueue(child.stderr, collect("stderr"));
+  let cancelled = false;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
   const cancel = () => {
-    if (!child.killed) {
-      try {
-        process.platform === "win32"
-          ? child.kill()
-          : process.kill(-child.pid!, "SIGTERM");
-      } catch {
-        /* exited */
+    if (cancelled || child.exitCode !== null) return;
+    cancelled = true;
+    try {
+      if (process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          windowsHide: true,
+          stdio: "ignore",
+        });
+      } else {
+        process.kill(-child.pid!, "SIGTERM");
+        killTimer = setTimeout(() => {
+          if (child.exitCode === null) {
+            try {
+              process.kill(-child.pid!, "SIGKILL");
+            } catch {}
+          }
+        }, 1000);
       }
+    } catch {
+      try {
+        child.kill("SIGKILL");
+      } catch {}
     }
   };
   const timeout = setTimeout(cancel, command.timeoutMs ?? 120_000);
@@ -229,6 +269,8 @@ function spawnSpec(
     new Promise<CommandResult>((resolve) =>
       child.once("close", (code) => {
         clearTimeout(timeout);
+        if (killTimer) clearTimeout(killTimer);
+        if (signal) signal.removeEventListener("abort", cancel);
         resolve({
           stdout: stdoutText,
           stderr: stderrText,

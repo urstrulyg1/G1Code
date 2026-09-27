@@ -47,6 +47,18 @@ interface Window {
       maxTokens: number;
       apiKeyConfigured: boolean;
       apiKeyMasked?: string;
+      agentMode: "review" | "auto" | "plan" | "readonly";
+      autoExecution: "always" | "ask" | "never";
+      reviewPolicy: "always" | "ask" | "never";
+      autoFixLints: boolean;
+      toolPermissions: Record<string, boolean>;
+      commandTimeoutMs: number;
+      toolTimeoutMs: number;
+      maxAgentSteps: number;
+      maxConcurrentTools: number;
+      maxRetries: number;
+      contextBudgetChars: number;
+      ignoredPaths: string[];
     }>;
     saveSettings(settings: Record<string, unknown>): Promise<unknown>;
     getModels(provider?: string): Promise<
@@ -135,8 +147,14 @@ interface Window {
       model?: string;
       reasoning?: string;
       provider?: string;
+      executionMode?: "review" | "auto" | "plan" | "readonly";
       attachedContext?: string[];
-    }): Promise<{ sessionId: string; model?: string }>;
+    }): Promise<{
+      sessionId: string;
+      requestId: string;
+      executionMode: string;
+      model?: string;
+    }>;
     setSessionModel(
       sessionId: string,
       model: string,
