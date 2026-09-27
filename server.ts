@@ -764,14 +764,18 @@ const server = http.createServer(async (req, res) => {
 
     // Sessions list
     if (pathname === "/api/agent/sessions" && req.method === "GET") {
-      const workspace = checkedWorkspace(url.searchParams.get("workspace") || undefined);
+      const workspace = checkedWorkspace(
+        url.searchParams.get("workspace") || undefined,
+      );
       const sessions = store.recentSessions(workspace);
       return sendJson(res, 200, sessions);
     }
 
     // Session details
     if (pathname === "/api/agent/session" && req.method === "GET") {
-      const workspace = checkedWorkspace(url.searchParams.get("workspace") || undefined);
+      const workspace = checkedWorkspace(
+        url.searchParams.get("workspace") || undefined,
+      );
       const sessionId = url.searchParams.get("sessionId");
       if (!sessionId) return sendError(res, 400, "sessionId required");
       const session = store
@@ -817,7 +821,9 @@ const server = http.createServer(async (req, res) => {
 
     // Session events
     if (pathname === "/api/agent/events-history" && req.method === "GET") {
-      const workspace = checkedWorkspace(url.searchParams.get("workspace") || undefined);
+      const workspace = checkedWorkspace(
+        url.searchParams.get("workspace") || undefined,
+      );
       const sessionId = url.searchParams.get("sessionId");
       if (!sessionId) return sendError(res, 400, "sessionId required");
       const session = store.getSession(sessionId);
@@ -828,7 +834,9 @@ const server = http.createServer(async (req, res) => {
 
     // Pending changes
     if (pathname === "/api/agent/changes" && req.method === "GET") {
-      const workspace = checkedWorkspace(url.searchParams.get("workspace") || undefined);
+      const workspace = checkedWorkspace(
+        url.searchParams.get("workspace") || undefined,
+      );
       const sessionId = url.searchParams.get("sessionId") || undefined;
       if (sessionId) {
         const session = store.getSession(sessionId);
@@ -914,7 +922,11 @@ const server = http.createServer(async (req, res) => {
         // File renames/deletes have different filesystem semantics than a
         // content batch. Resolve those through the normal guarded path; keep
         // write-only batches transactional.
-        if (changes.some((change) => change.operation && change.operation !== "write")) {
+        if (
+          changes.some(
+            (change) => change.operation && change.operation !== "write",
+          )
+        ) {
           const resolved = [];
           for (const change of changes) {
             const value = await service.applyChange(change.id);
@@ -926,15 +938,23 @@ const server = http.createServer(async (req, res) => {
               waiter.resolve({
                 approved: value.status === "APPLIED",
                 status: value.status === "APPLIED" ? "APPLIED" : "CONFLICT",
-                message: value.status === "APPLIED" ? "Change applied. Continuing agent." : "Change conflicted safely.",
+                message:
+                  value.status === "APPLIED"
+                    ? "Change applied. Continuing agent."
+                    : "Change conflicted safely.",
               });
             }
             persistAndBroadcastEvent(body.sessionId, "approval", {
               type: "approval",
               changeId: change.id,
               action: "resolved",
-              message: value.status === "APPLIED" ? "Change applied." : "Change conflicted safely.",
-              result: { status: value.status === "APPLIED" ? "APPLIED" : "CONFLICT" },
+              message:
+                value.status === "APPLIED"
+                  ? "Change applied."
+                  : "Change conflicted safely.",
+              result: {
+                status: value.status === "APPLIED" ? "APPLIED" : "CONFLICT",
+              },
             });
           }
           return sendJson(res, 200, { changes: resolved });
@@ -1296,7 +1316,8 @@ const server = http.createServer(async (req, res) => {
         ? store
             .sessionMessages(existingSession.id)
             .filter(
-              (message) => message.role === "user" || message.role === "assistant",
+              (message) =>
+                message.role === "user" || message.role === "assistant",
             )
             .map((message) => ({
               role: message.role as ChatMessage["role"],
@@ -1545,27 +1566,32 @@ const server = http.createServer(async (req, res) => {
           new Promise<ChangeApprovalResult>((resolve) => {
             const timer = setTimeout(() => {
               if (!approvalWaiters.has(changeId)) return;
-              void finishChangeApproval(workspace, changeId, false).catch(() => {
-                // The waiter is still resolved by the timeout fallback below if
-                // the persisted change was removed concurrently.
-                const waiter = approvalWaiters.get(changeId);
-                if (waiter) {
-                  if (waiter.timer) clearTimeout(waiter.timer);
-                  approvalWaiters.delete(changeId);
-                  waiter.resolve({
-                    approved: false,
-                    status: "REJECTED",
-                    message: "Change approval timed out.",
-                  });
-                }
-              });
+              void finishChangeApproval(workspace, changeId, false).catch(
+                () => {
+                  // The waiter is still resolved by the timeout fallback below if
+                  // the persisted change was removed concurrently.
+                  const waiter = approvalWaiters.get(changeId);
+                  if (waiter) {
+                    if (waiter.timer) clearTimeout(waiter.timer);
+                    approvalWaiters.delete(changeId);
+                    waiter.resolve({
+                      approved: false,
+                      status: "REJECTED",
+                      message: "Change approval timed out.",
+                    });
+                  }
+                },
+              );
             }, APPROVAL_TIMEOUT_MS);
             approvalWaiters.set(changeId, { sessionId, resolve, timer });
 
             // "Always proceed" is a real policy decision, not a renderer
             // shortcut. It still goes through the same hash-safe apply path and
             // emits the same approval event as a manual click.
-            if (settings.reviewPolicy === "always" || settings.reviewPolicy === "never") {
+            if (
+              settings.reviewPolicy === "always" ||
+              settings.reviewPolicy === "never"
+            ) {
               const approved = settings.reviewPolicy === "always";
               queueMicrotask(() => {
                 void finishChangeApproval(workspace, changeId, approved).catch(
@@ -1604,7 +1630,8 @@ const server = http.createServer(async (req, res) => {
             priorMessages,
           );
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           const terminalState = signal.aborted ? "CANCELLED" : "FAILED";
           persistAndBroadcastEvent(sessionId, "ERROR", {
             type: "error",
@@ -1613,7 +1640,9 @@ const server = http.createServer(async (req, res) => {
           persistAndBroadcastEvent(sessionId, "STATE", {
             type: "state",
             state: terminalState,
-            message: signal.aborted ? "Agent cancelled." : "Agent failed unexpectedly.",
+            message: signal.aborted
+              ? "Agent cancelled."
+              : "Agent failed unexpectedly.",
           });
         } finally {
           releaseSessionWaiters(sessionId);
@@ -1646,9 +1675,14 @@ const server = http.createServer(async (req, res) => {
       try {
         const workspace = checkedWorkspace(body.workspace);
         const session = store.getSession(body.sessionId);
-        if (!session) return sendError(res, 404, "Conversation session not found");
+        if (!session)
+          return sendError(res, 404, "Conversation session not found");
         if (!matchesWorkspace(session.workspaceId, workspace))
-          return sendError(res, 403, "Conversation does not belong to the selected workspace");
+          return sendError(
+            res,
+            403,
+            "Conversation does not belong to the selected workspace",
+          );
         store.updateSessionModel(body.sessionId, body.model);
         store.addEvent(body.sessionId, "MODEL_CHANGED", {
           message: `Model switched to ${body.model}`,
