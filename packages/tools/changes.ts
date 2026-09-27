@@ -104,7 +104,7 @@ export async function revertAppliedChange(
   proposedHash: string,
   original: string,
   applied: string,
-  operation: "write" | "delete" = "write",
+  operation: "write" | "delete" | "rename" = "write",
   targetPath?: string,
 ) {
   const filePath = await safeRealPath(workspace, requestedPath);
