@@ -128,6 +128,70 @@ function maskApiKey(key: string | null): string | undefined {
   return "•".repeat(Math.max(20, trimmed.length));
 }
 
+function normalizeSettings(raw: unknown, defaults: Settings): Settings {
+  const parsed = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {};
+  const permissionInput =
+    parsed.toolPermissions && typeof parsed.toolPermissions === "object"
+      ? parsed.toolPermissions as Record<string, unknown>
+      : {};
+  const bool = (key: keyof Settings["toolPermissions"]) =>
+    typeof permissionInput[key] === "boolean"
+      ? permissionInput[key] as boolean
+      : defaults.toolPermissions[key];
+  const enumValue = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+    typeof value === "string" && (allowed as readonly string[]).includes(value) ? value as T : fallback;
+  const numberValue = (value: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.floor(n))) : fallback;
+  };
+  const ignored = Array.isArray(parsed.ignoredPaths)
+    ? parsed.ignoredPaths.filter((v): v is string => typeof v === "string").slice(0, 200)
+    : defaults.ignoredPaths;
+  return {
+    ...defaults,
+    provider: "experiential-labs",
+    endpoint:
+      typeof parsed.endpoint === "string" && parsed.endpoint.trim() && parsed.endpoint !== "https://api.openai.com/v1"
+        ? parsed.endpoint.trim()
+        : defaults.endpoint,
+    model: typeof parsed.model === "string" ? parsed.model : defaults.model,
+    temperature: numberValue(parsed.temperature, 0, 2, defaults.temperature),
+    maxTokens: numberValue(parsed.maxTokens, 256, 32768, defaults.maxTokens),
+    agentMode: enumValue(parsed.agentMode, ["review", "auto", "plan", "readonly"] as const, defaults.agentMode),
+    autoExecution: enumValue(parsed.autoExecution, ["always", "ask", "never"] as const, defaults.autoExecution),
+    reviewPolicy: enumValue(parsed.reviewPolicy, ["always", "ask", "never"] as const, defaults.reviewPolicy),
+    autoFixLints: typeof parsed.autoFixLints === "boolean" ? parsed.autoFixLints : defaults.autoFixLints,
+    toolPermissions: {
+      readFiles: bool("readFiles"),
+      searchRepository: bool("searchRepository"),
+      editFiles: bool("editFiles"),
+      createFiles: bool("createFiles"),
+      deleteFiles: bool("deleteFiles"),
+      renameFiles: bool("renameFiles"),
+      runTests: bool("runTests"),
+      runBuilds: bool("runBuilds"),
+      runCommands: bool("runCommands"),
+      networkTools: bool("networkTools"),
+    },
+    commandTimeoutMs: numberValue(parsed.commandTimeoutMs, 1000, 10 * 60 * 1000, defaults.commandTimeoutMs),
+    toolTimeoutMs: numberValue(parsed.toolTimeoutMs, 1000, 10 * 60 * 1000, defaults.toolTimeoutMs),
+    maxAgentSteps: numberValue(parsed.maxAgentSteps, 1, 200, defaults.maxAgentSteps),
+    maxConcurrentTools: numberValue(parsed.maxConcurrentTools, 1, 16, defaults.maxConcurrentTools),
+    maxRetries: numberValue(parsed.maxRetries, 0, 8, defaults.maxRetries),
+    contextBudgetChars: numberValue(parsed.contextBudgetChars, 4000, 500000, defaults.contextBudgetChars),
+    ignoredPaths: ignored,
+    suggestionsInEditor: typeof parsed.suggestionsInEditor === "boolean" ? parsed.suggestionsInEditor : defaults.suggestionsInEditor,
+    tabGitignoreAccess: typeof parsed.tabGitignoreAccess === "boolean" ? parsed.tabGitignoreAccess : defaults.tabGitignoreAccess,
+    tabSpeed: enumValue(parsed.tabSpeed, ["fast", "normal", "slow"] as const, defaults.tabSpeed),
+    tabToImport: typeof parsed.tabToImport === "boolean" ? parsed.tabToImport : defaults.tabToImport,
+    tabToJump: typeof parsed.tabToJump === "boolean" ? parsed.tabToJump : defaults.tabToJump,
+    apiKeyConfigured: defaults.apiKeyConfigured,
+    apiKeyMasked: defaults.apiKeyMasked,
+  };
+}
+
 export async function readSettings(customDir?: string): Promise<Settings> {
   const dir = getAppDataDir(customDir);
   const defaults: Settings = {
@@ -172,15 +236,9 @@ export async function readSettings(customDir?: string): Promise<Settings> {
 
     const key = await getApiKey(dir);
     const keyExists = Boolean(key);
+    const normalized = normalizeSettings(parsed, defaults);
     return {
-      ...defaults,
-      ...parsed,
-      provider: "experiential-labs",
-      endpoint:
-        parsed.endpoint === "https://api.openai.com/v1" || !parsed.endpoint
-          ? EXPERIENTIAL_LABS_DEFAULT_ENDPOINT
-          : parsed.endpoint,
-      model: parsed.model || "",
+      ...normalized,
       apiKeyConfigured: keyExists,
       apiKeyMasked: maskApiKey(key),
     };
