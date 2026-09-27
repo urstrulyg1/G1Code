@@ -14,6 +14,20 @@ export class DatabaseStore {
   private readonly unsubscribeEviction?: () => void;
 
   constructor(private readonly db: Database.Database) {
+    // Keep lightweight/in-memory test databases and older persisted stores
+    // compatible with the current file-operation journal schema.
+    try {
+      const columns = this.db
+        .prepare("PRAGMA table_info(file_changes)")
+        .all() as Array<{ name: string }>;
+      if (columns.length > 0 && !columns.some((column) => column.name === "operation"))
+        this.db.exec("ALTER TABLE file_changes ADD COLUMN operation TEXT NOT NULL DEFAULT 'write'");
+      if (columns.length > 0 && !columns.some((column) => column.name === "target_path"))
+        this.db.exec("ALTER TABLE file_changes ADD COLUMN target_path TEXT");
+    } catch {
+      // The production connection owns full schema migration; keep construction
+      // tolerant for isolated stores that do not include file_changes at all.
+    }
     this.unsubscribeEviction = ChatStorage.onSessionEvicted((sessionId) => {
       try {
         if (this.db?.open) {
