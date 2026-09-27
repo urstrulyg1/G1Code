@@ -7216,6 +7216,108 @@ function App() {
 
                 <div className="settings-row">
                   <div className="settings-row-label">
+                    <span>Execution Mode</span>
+                    <small>
+                      Active policy for Agent runs. Dangerous operations always require explicit approval.
+                    </small>
+                  </div>
+                  <div className="settings-segmented">
+                    {([
+                      ["review", "Ask for Review"],
+                      ["auto", "Always Auto Proceed"],
+                      ["plan", "Plan First"],
+                      ["readonly", "Read Only"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        className={`settings-seg-btn${settings.agentMode === value ? " settings-seg-btn--active" : ""}`}
+                        onClick={() => {
+                          setSettings({
+                            ...settings,
+                            agentMode: value,
+                            autoExecution: value === "auto" ? "always" : value === "review" ? "ask" : "never",
+                            reviewPolicy: value === "auto" ? "always" : "ask",
+                          });
+                          if (value === "readonly" || value === "plan" || value === "review" || value === "auto")
+                            setAgentMode(value);
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Tool Permissions</span>
+                    <small>Fine-grained controls applied by the backend, not just the UI.</small>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 1fr))", gap: 8, width: "100%" }}>
+                    {([
+                      ["readFiles", "Read files"],
+                      ["searchRepository", "Search repository"],
+                      ["editFiles", "Edit files"],
+                      ["createFiles", "Create files"],
+                      ["deleteFiles", "Delete files"],
+                      ["renameFiles", "Rename / move files"],
+                      ["runTests", "Run tests"],
+                      ["runBuilds", "Run builds"],
+                      ["runCommands", "Run shell commands"],
+                      ["networkTools", "Network-enabled tools"],
+                    ] as const).map(([key, label]) => (
+                      <label key={key} className="settings-toggle" style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <span>{label}</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(settings.toolPermissions?.[key])}
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              toolPermissions: {
+                                ...settings.toolPermissions,
+                                [key]: e.target.checked,
+                              },
+                            })
+                          }
+                        />
+                        <span className="settings-toggle-track" />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
+                    <span>Agent Limits</span>
+                    <small>Bound long-running tasks and retries.</small>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(100px, 1fr))", gap: 8, width: "100%" }}>
+                    {([
+                      ["maxAgentSteps", "Max steps"],
+                      ["maxRetries", "Retries"],
+                      ["commandTimeoutMs", "Command timeout (ms)"],
+                    ] as const).map(([key, label]) => (
+                      <label key={key} className="settings-field" style={{ margin: 0 }}>
+                        <span style={{ fontSize: 11 }}>{label}</span>
+                        <input
+                          type="number"
+                          min={key === "maxRetries" ? 0 : 1}
+                          value={Number(settings[key])}
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              [key]: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-label">
                     <span>Agent Auto-Fix Lints</span>
                     <small>
                       Automatically retry with a lint-repair prompt after a
