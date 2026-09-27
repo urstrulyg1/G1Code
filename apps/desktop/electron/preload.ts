@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld("g1code", {
     model?: string;
     reasoning?: string;
     provider?: string;
+    executionMode?: "review" | "auto" | "plan" | "readonly";
     attachedContext?: string[];
   }) => ipcRenderer.invoke("agent:start", input) as Promise<{
     sessionId: string;
