@@ -21,10 +21,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run format
-      - name: Package formatted source
-        run: tar -czf /tmp/g1code-formatted.tgz --exclude=.git --exclude=node_modules .
+      - name: Capture formatting patch
+        run: git diff --no-color > /tmp/g1code-format.patch
       - uses: actions/upload-artifact@v4
         with:
-          name: g1code-formatted-source
-          path: /tmp/g1code-formatted.tgz
+          name: g1code-format-patch
+          path: /tmp/g1code-format.patch
           retention-days: 1
