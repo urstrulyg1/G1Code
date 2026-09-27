@@ -9,7 +9,7 @@ export function unifiedDiff(
   filePath: string,
   original: string,
   proposed: string,
-  operation: "write" | "delete" = "write",
+  operation: "write" | "delete" | "rename" = "write",
   targetPath?: string,
 ) {
   const before = original.split(/\r?\n/);
