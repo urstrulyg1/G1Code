@@ -42,7 +42,7 @@ export function preflightCheck(): void {
 
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const run = spawnSync(execPath, ["-v"], { encoding: "utf8", env });
+  const run = spawnSync(execPath, ["--version"], { encoding: "utf8", env });
   if (run.error) {
     console.error("FAIL: Could not execute Electron binary:", run.error);
     process.exit(1);
