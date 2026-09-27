@@ -8,7 +8,7 @@ import { spawnExecutable } from "../packages/tools/command";
 
 test("workspace path guard rejects traversal and sibling-prefix escapes", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "g1code-security-"));
-  const sibling = path.join(workspace, "-sibling");
+  const sibling = path.join(path.dirname(workspace), `${path.basename(workspace)}-sibling`);
 
   assert.equal(safePath(workspace, "src/main.ts"), path.join(workspace, "src/main.ts"));
   assert.throws(() => safePath(workspace, "../outside"), /outside the selected workspace/);
