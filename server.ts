@@ -910,6 +910,34 @@ const server = http.createServer(async (req, res) => {
         for (const change of changes) {
           if (change.status === "PENDING") service.approveChange(change.id);
         }
+        // File renames/deletes have different filesystem semantics than a
+        // content batch. Resolve those through the normal guarded path; keep
+        // write-only batches transactional.
+        if (changes.some((change) => change.operation && change.operation !== "write")) {
+          const resolved = [];
+          for (const change of changes) {
+            const value = await service.applyChange(change.id);
+            resolved.push(value);
+            const waiter = approvalWaiters.get(change.id);
+            if (waiter) {
+              if (waiter.timer) clearTimeout(waiter.timer);
+              approvalWaiters.delete(change.id);
+              waiter.resolve({
+                approved: value.status === "APPLIED",
+                status: value.status === "APPLIED" ? "APPLIED" : "CONFLICT",
+                message: value.status === "APPLIED" ? "Change applied. Continuing agent." : "Change conflicted safely.",
+              });
+            }
+            persistAndBroadcastEvent(body.sessionId, "approval", {
+              type: "approval",
+              changeId: change.id,
+              action: "resolved",
+              message: value.status === "APPLIED" ? "Change applied." : "Change conflicted safely.",
+              result: { status: value.status === "APPLIED" ? "APPLIED" : "CONFLICT" },
+            });
+          }
+          return sendJson(res, 200, { changes: resolved });
+        }
         const result = await service.applyBatch(
           body.sessionId,
           changes.map((c) => c.id),
