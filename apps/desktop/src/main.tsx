@@ -1445,11 +1445,14 @@ function App() {
       // id, so `pendingSessionRef` lets the very first events through.)
       const currentId = sessionIdRef.current;
       if (event.sessionId && currentId && event.sessionId !== currentId) return;
+      // While POST /api/agent/start is pending we deliberately ignore live
+      // events rather than guessing which session they belong to. The SSE
+      // channel is shared by every session, so binding the first event here
+      // can attach another session's output to the new conversation.
+      // Once the POST resolves, durable event backfill below reconstructs any
+      // chunks that arrived during the request.
+      if (event.sessionId && !currentId && pendingSessionRef.current) return;
       if (event.sessionId && !currentId && !pendingSessionRef.current) return;
-      if (event.sessionId && !currentId) {
-        sessionIdRef.current = event.sessionId;
-        setSessionId(event.sessionId);
-      }
 
       setEvents((old) => mergeAgentEvent(old, event));
 
