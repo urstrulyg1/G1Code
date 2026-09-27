@@ -52,13 +52,13 @@ export function preflightCheck(): void {
   }
 
   const actualVersion = (run.stdout || "").trim();
-  if (actualVersion !== `v${expectedVersion}`) {
+  if (actualVersion !== expectedVersion) {
     console.error(
       `FAIL: Version mismatch. Expected v${expectedVersion}, got ${actualVersion}`,
     );
     process.exit(1);
   }
-  console.log(`✔ Binary runnable and version matches: ${actualVersion}`);
+  console.log(`✔ Binary runnable and version matches: v${actualVersion}`);
 
   // Check host architecture compatibility
   console.log(
