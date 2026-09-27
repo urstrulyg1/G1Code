@@ -19,9 +19,29 @@ export type Settings = {
   apiKeyConfigured: boolean;
   apiKeyMasked?: string;
   // Agent Behaviour Settings
+  agentMode: "review" | "auto" | "plan" | "readonly";
   autoExecution: "always" | "ask" | "never";
   reviewPolicy: "always" | "ask" | "never";
   autoFixLints: boolean;
+  toolPermissions: {
+    readFiles: boolean;
+    searchRepository: boolean;
+    editFiles: boolean;
+    createFiles: boolean;
+    deleteFiles: boolean;
+    renameFiles: boolean;
+    runTests: boolean;
+    runBuilds: boolean;
+    runCommands: boolean;
+    networkTools: boolean;
+  };
+  commandTimeoutMs: number;
+  toolTimeoutMs: number;
+  maxAgentSteps: number;
+  maxConcurrentTools: number;
+  maxRetries: number;
+  contextBudgetChars: number;
+  ignoredPaths: string[];
   // Tab / Inline Suggestion Settings
   suggestionsInEditor: boolean;
   tabGitignoreAccess: boolean;
@@ -117,9 +137,29 @@ export async function readSettings(customDir?: string): Promise<Settings> {
     temperature: 0.2,
     maxTokens: 4096,
     apiKeyConfigured: false,
-    autoExecution: "always",
-    reviewPolicy: "always",
+    agentMode: "review",
+    autoExecution: "ask",
+    reviewPolicy: "ask",
     autoFixLints: true,
+    toolPermissions: {
+      readFiles: true,
+      searchRepository: true,
+      editFiles: true,
+      createFiles: true,
+      deleteFiles: false,
+      renameFiles: false,
+      runTests: true,
+      runBuilds: true,
+      runCommands: true,
+      networkTools: false,
+    },
+    commandTimeoutMs: 120000,
+    toolTimeoutMs: 120000,
+    maxAgentSteps: 50,
+    maxConcurrentTools: 4,
+    maxRetries: 3,
+    contextBudgetChars: 60000,
+    ignoredPaths: ["node_modules", ".git", "dist", "dist-electron", "coverage"],
     suggestionsInEditor: true,
     tabGitignoreAccess: true,
     tabSpeed: "fast",
@@ -165,19 +205,37 @@ export async function saveSettings(
   const dir = getAppDataDir(customDir);
   const current = await readSettings(dir);
 
-  const next: Settings = {
+  const allowedModes = new Set(["review", "auto", "plan", "readonly"]);
+  const allowedExecution = new Set(["always", "ask", "never"]);
+  const allowedSpeeds = new Set(["fast", "normal", "slow"]);
+  const clamp = (value: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.floor(n))) : fallback;
+  };
+  const rawPermissions =
+    input.toolPermissions && typeof input.toolPermissions === "object"
+      ? input.toolPermissions as Record<string, unknown>
+      : current.toolPermissions;
+  const bool = (key: keyof Settings["toolPermissions"], fallback: boolean) =>
+    typeof rawPermissions[key] === "boolean" ? rawPermissions[key] as boolean : fallback;
+  const requestedMode = String(input.agentMode ?? current.agentMode);
+  const requestedExecution = String(input.autoExecution ?? current.autoExecution);
+  const requestedReview = String(input.reviewPolicy ?? current.reviewPolicy);
+  const requestedSpeed = String(input.tabSpeed ?? current.tabSpeed);
+  if (!allowedModes.has(requestedMode)) throw new Error("Invalid agentMode");
+  if (!allowedExecution.has(requestedExecution)) throw new Error("Invalid autoExecution");
+  if (!allowedExecution.has(requestedReview)) throw new Error("Invalid reviewPolicy");
+  if (!allowedSpeeds.has(requestedSpeed)) throw new Error("Invalid tabSpeed");
+    const next: Settings = {
     ...current,
     provider: "experiential-labs",
     endpoint: String(input.endpoint ?? current.endpoint),
     model: String(input.model ?? current.model),
     temperature: Number(input.temperature ?? current.temperature),
-    maxTokens: Number(input.maxTokens ?? current.maxTokens),
-    autoExecution: (input.autoExecution ??
-      current.autoExecution ??
-      "always") as Settings["autoExecution"],
-    reviewPolicy: (input.reviewPolicy ??
-      current.reviewPolicy ??
-      "always") as Settings["reviewPolicy"],
+    maxTokens: clamp(input.maxTokens ?? current.maxTokens, 256, 32768, current.maxTokens),
+    agentMode: requestedMode as Settings["agentMode"],
+    autoExecution: requestedExecution as Settings["autoExecution"],
+    reviewPolicy: requestedReview as Settings["reviewPolicy"],
     autoFixLints: Boolean(input.autoFixLints ?? current.autoFixLints ?? true),
     suggestionsInEditor: Boolean(
       input.suggestionsInEditor ?? current.suggestionsInEditor ?? true,
@@ -185,9 +243,28 @@ export async function saveSettings(
     tabGitignoreAccess: Boolean(
       input.tabGitignoreAccess ?? current.tabGitignoreAccess ?? true,
     ),
-    tabSpeed: (input.tabSpeed ??
-      current.tabSpeed ??
-      "fast") as Settings["tabSpeed"],
+    tabSpeed: requestedSpeed as Settings["tabSpeed"],
+    toolPermissions: {
+      readFiles: bool("readFiles", current.toolPermissions.readFiles),
+      searchRepository: bool("searchRepository", current.toolPermissions.searchRepository),
+      editFiles: bool("editFiles", current.toolPermissions.editFiles),
+      createFiles: bool("createFiles", current.toolPermissions.createFiles),
+      deleteFiles: bool("deleteFiles", current.toolPermissions.deleteFiles),
+      renameFiles: bool("renameFiles", current.toolPermissions.renameFiles),
+      runTests: bool("runTests", current.toolPermissions.runTests),
+      runBuilds: bool("runBuilds", current.toolPermissions.runBuilds),
+      runCommands: bool("runCommands", current.toolPermissions.runCommands),
+      networkTools: bool("networkTools", current.toolPermissions.networkTools),
+    },
+    commandTimeoutMs: clamp(input.commandTimeoutMs ?? current.commandTimeoutMs, 1000, 10 * 60 * 1000, 120000),
+    toolTimeoutMs: clamp(input.toolTimeoutMs ?? current.toolTimeoutMs, 1000, 10 * 60 * 1000, 120000),
+    maxAgentSteps: clamp(input.maxAgentSteps ?? current.maxAgentSteps, 1, 200, 50),
+    maxConcurrentTools: clamp(input.maxConcurrentTools ?? current.maxConcurrentTools, 1, 16, 4),
+    maxRetries: clamp(input.maxRetries ?? current.maxRetries, 0, 8, 3),
+    contextBudgetChars: clamp(input.contextBudgetChars ?? current.contextBudgetChars, 4000, 500000, 60000),
+    ignoredPaths: Array.isArray(input.ignoredPaths)
+      ? input.ignoredPaths.filter((v): v is string => typeof v === "string").slice(0, 200)
+      : current.ignoredPaths,
     tabToImport: Boolean(input.tabToImport ?? current.tabToImport ?? true),
     tabToJump: Boolean(input.tabToJump ?? current.tabToJump ?? true),
   };
