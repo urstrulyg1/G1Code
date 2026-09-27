@@ -34,7 +34,10 @@ if (
 } else {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const args = process.platform === "linux" ? [".", "--smoke", "--no-sandbox"] : [".", "--smoke"];
+  const args =
+    process.platform === "linux"
+      ? [".", "--smoke", "--no-sandbox"]
+      : [".", "--smoke"];
   const child = spawn(electronBinary, args, {
     stdio: "inherit",
     env,
