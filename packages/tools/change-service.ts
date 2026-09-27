@@ -12,6 +12,11 @@ import {
 import { safePath, safeRealPath } from "./workspace";
 import { FailureInjector, SimulatedCrashError } from "./failure-injector";
 
+function renameDiff(from: string, to: string, content: string) {
+  const lines = content.split(/\r?\n/).map(line => ` ${line}`);
+  return [`diff --git a/${from} b/${to}`, `similarity index 100%`, `rename from ${from}`, `rename to ${to}`, `--- a/${from}`, `+++ b/${to}`, ...lines].join("\n");
+}
+
 export class ChangeService {
   constructor(
     private readonly store: DatabaseStore,
@@ -39,7 +44,10 @@ export class ChangeService {
       appliedContent: null,
       operation,
       targetPath: targetPath ?? null,
-      patch: unifiedDiff(relative, originalContent, proposedContent),
+      patch:
+        operation === "rename" && targetPath
+          ? renameDiff(relative, targetPath, originalContent)
+          : unifiedDiff(relative, originalContent, proposedContent),
       status: "PENDING",
     });
     return change;
