@@ -1610,6 +1610,9 @@ const server = http.createServer(async (req, res) => {
         return sendError(res, 400, "sessionId and model are required");
       }
       try {
+        const session = store.getSession(body.sessionId);
+        if (!session) return sendError(res, 404, "Conversation session not found");
+        store.updateSessionModel(body.sessionId, body.model);
         store.addEvent(body.sessionId, "MODEL_CHANGED", {
           message: `Model switched to ${body.model}`,
           model: body.model,
