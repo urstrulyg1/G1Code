@@ -38,13 +38,11 @@ if (
     stdio: "inherit",
     env,
   });
-  const timer = setTimeout(() => child.kill("SIGTERM"), 10_000);
   let timedOut = false;
   const deadline = setTimeout(() => {
     timedOut = true;
     child.kill("SIGTERM");
   }, 10_000);
-  clearTimeout(timer);
   child.on("exit", (code, signal) => {
     clearTimeout(deadline);
     if (!timedOut && signal === null && code === 0) process.exitCode = 0;
