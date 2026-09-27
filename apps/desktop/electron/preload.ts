@@ -68,8 +68,8 @@ contextBridge.exposeInMainWorld("g1code", {
     provider?: string;
     attachedContext?: string[];
   }) => ipcRenderer.invoke("agent:start", input),
-  setSessionModel: (sessionId: string, model: string) =>
-    ipcRenderer.invoke("agent:session-model", { sessionId, model }),
+  setSessionModel: (sessionId: string, model: string, workspace?: string) =>
+    ipcRenderer.invoke("agent:session-model", { sessionId, model, workspace }),
   stopAgent: (sessionId: string) => ipcRenderer.send("agent:stop", sessionId),
   listSessions: (workspace: string) =>
     ipcRenderer.invoke("agent:sessions", workspace),
