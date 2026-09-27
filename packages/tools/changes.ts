@@ -45,7 +45,7 @@ export async function applyApprovedChange(
   originalHash: string,
   original: string,
   proposed: string,
-  operation: "write" | "delete" | "rename" = "write",
+  operation: "write" | "delete" | "rename" | "move" = "write",
   targetPath?: string,
 ) {
   const filePath = await safeRealPath(workspace, requestedPath);
@@ -71,7 +71,7 @@ export async function applyApprovedChange(
       patch: unifiedDiff(path.relative(workspace, filePath), original, ""),
     };
   }
-  if (operation === "rename") {
+  if (operation === "rename" || operation === "move") {
     if (!targetPath) return { status: "CONFLICT" as const, reason: "Rename target is missing" };
     const target = await safeRealPath(workspace, targetPath);
     const targetCurrent = await fs.stat(target).catch(() => null);
@@ -107,7 +107,7 @@ export async function revertAppliedChange(
 ) {
   const filePath = await safeRealPath(workspace, requestedPath);
   const current = await fs.readFile(filePath, "utf8").catch(() => null);
-  if (operation === "rename" && targetPath) {
+  if ((operation === "rename" || operation === "move") && targetPath) {
     const target = await safeRealPath(workspace, targetPath);
     const moved = await fs.readFile(target, "utf8").catch(() => null);
     if (moved === null || contentHash(moved) !== proposedHash || moved !== applied)
