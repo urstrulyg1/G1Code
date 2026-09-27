@@ -1,0 +1,121 @@
+name: G1Code CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g1code-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  npm_config_audit: false
+  npm_config_fund: false
+
+jobs:
+  quality:
+    name: Quality / tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run preflight:electron
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+      - name: Electron smoke test
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a npm run e2e:smoke' || 'npm run e2e:smoke' }}
+
+  integration:
+    name: Integration (${{ matrix.os }})
+    needs: quality
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run preflight:electron
+      - run: npm run build
+      - name: Desktop E2E
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a npm run e2e' || 'npm run e2e' }}
+
+  package:
+    name: Package (${{ matrix.name }})
+    needs: [quality, integration]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            target: linux
+            arch: x64
+          - name: linux-arm64
+            os: ubuntu-latest
+            target: linux
+            arch: arm64
+          - name: macos-x64
+            os: macos-13
+            target: mac
+            arch: x64
+          - name: macos-arm64
+            os: macos-14
+            target: mac
+            arch: arm64
+          - name: windows-x64
+            os: windows-latest
+            target: win
+            arch: x64
+          - name: windows-ia32
+            os: windows-latest
+            target: win
+            arch: ia32
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run preflight:electron
+      - run: npm run build
+      - run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} -p never --config electron-builder.json
+      - name: Verify package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d dist-release
+          case "${{ matrix.target }}" in
+            mac) test -n "$(find dist-release -maxdepth 1 -type f -name '*.dmg' -print -quit)" ;;
+            win) test -n "$(find dist-release -maxdepth 1 -type f -name '*.exe' -print -quit)" ;;
+            linux) test -n "$(find dist-release -maxdepth 1 -type f -name '*.AppImage' -print -quit)" ;;
+          esac
+          find dist-release -maxdepth 1 -type f -printf '%f\n' 2>/dev/null || ls -la dist-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: G1Code-${{ matrix.name }}
+          path: dist-release/*
+          if-no-files-found: error
+          retention-days: 7
