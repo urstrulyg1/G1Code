@@ -1603,15 +1603,20 @@ const server = http.createServer(async (req, res) => {
 
     // Switch model for existing session
     if (pathname === "/api/agent/session-model" && req.method === "POST") {
-      const body = await parseJsonBody<{ sessionId: string; model: string }>(
-        req,
-      );
+      const body = await parseJsonBody<{
+        sessionId: string;
+        model: string;
+        workspace?: string;
+      }>(req);
       if (!body.sessionId || !body.model) {
         return sendError(res, 400, "sessionId and model are required");
       }
       try {
+        const workspace = checkedWorkspace(body.workspace);
         const session = store.getSession(body.sessionId);
         if (!session) return sendError(res, 404, "Conversation session not found");
+        if (!matchesWorkspace(session.workspaceId, workspace))
+          return sendError(res, 403, "Conversation does not belong to the selected workspace");
         store.updateSessionModel(body.sessionId, body.model);
         store.addEvent(body.sessionId, "MODEL_CHANGED", {
           message: `Model switched to ${body.model}`,
