@@ -336,7 +336,7 @@ export class ChangeService {
   }
   async revertChange(id: string) {
     const change = this.requireChange(id);
-    if (change.status !== "APPLIED" || !change.appliedContent)
+    if (change.status !== "APPLIED" || change.appliedContent === null || change.appliedContent === undefined)
       throw new Error("Only applied changes can be reverted");
     if (this.store.transitionChangeStatus(id, "APPLIED", "APPLYING") !== 1)
       throw new Error(
