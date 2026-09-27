@@ -59,7 +59,15 @@ export const workspaceTools = (): AgentTool[] => [
     name: "read_file",
     description: "Read a UTF-8 file section inside the workspace.",
     permission: "safe",
-    inputSchema: { type: "object", properties: { path: { type: "string" }, startLine: { type: "number" }, endLine: { type: "number" } }, required: ["path"] },
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        startLine: { type: "number" },
+        endLine: { type: "number" },
+      },
+      required: ["path"],
+    },
     execute: async (value, context) => {
       const data = value as {
         path: string;
@@ -176,11 +184,14 @@ export const workspaceTools = (): AgentTool[] => [
   },
   {
     name: "list_files",
-    description: "List workspace files and directories using the same guarded implementation as list_directory.",
+    description:
+      "List workspace files and directories using the same guarded implementation as list_directory.",
     permission: "safe",
     inputSchema: input({ path: { type: "string" } }),
     execute: async (value, context) => {
-      const delegate = workspaceTools().find(t => t.name === "list_directory")!;
+      const delegate = workspaceTools().find(
+        (t) => t.name === "list_directory",
+      )!;
       return delegate.execute(value, context);
     },
   },
@@ -251,7 +262,11 @@ export const workspaceTools = (): AgentTool[] => [
     description:
       "Search text in workspace files without sending the repository wholesale.",
     permission: "safe",
-    inputSchema: { type: "object", properties: { query: { type: "string" }, path: { type: "string" } }, required: ["query"] },
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" }, path: { type: "string" } },
+      required: ["query"],
+    },
     execute: async (value, context) => {
       const query = String((value as { query: string }).query);
       const directory = await safeRealPath(
@@ -398,128 +413,318 @@ export const workspaceTools = (): AgentTool[] => [
   },
   {
     name: "inspect_file",
-    description: "Inspect a workspace text file with metadata and a bounded line range.",
+    description:
+      "Inspect a workspace text file with metadata and a bounded line range.",
     permission: "safe",
-    inputSchema: { type: "object", properties: { path: { type: "string" }, startLine: { type: "number" }, endLine: { type: "number" } }, required: ["path"] },
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        startLine: { type: "number" },
+        endLine: { type: "number" },
+      },
+      required: ["path"],
+    },
     execute: async (value, context) => {
-      const data = value as { path: string; startLine?: number; endLine?: number };
+      const data = value as {
+        path: string;
+        startLine?: number;
+        endLine?: number;
+      };
       const file = await safeRealPath(context.workspace, data.path);
       const stat = await fs.stat(file);
       const buffer = await fs.readFile(file);
       const binary = buffer.subarray(0, 8192).includes(0);
       const contentType = binary ? "binary" : "text";
-      if (binary) return { content: JSON.stringify({ path: path.relative(context.workspace, file), size: stat.size, contentType, modified: stat.mtime.toISOString() }) };
+      if (binary)
+        return {
+          content: JSON.stringify({
+            path: path.relative(context.workspace, file),
+            size: stat.size,
+            contentType,
+            modified: stat.mtime.toISOString(),
+          }),
+        };
       const content = buffer.toString("utf8");
       const lines = content.split(/\r?\n/);
       const start = Math.max(1, data.startLine ?? 1);
-      const end = Math.min(lines.length, data.endLine ?? Math.min(lines.length, start + 199));
-      return { content: JSON.stringify({ path: path.relative(context.workspace, file), size: stat.size, contentType, modified: stat.mtime.toISOString(), lineCount: lines.length, startLine: start, endLine: end, content: lines.slice(start - 1, end).join("\n") }) };
+      const end = Math.min(
+        lines.length,
+        data.endLine ?? Math.min(lines.length, start + 199),
+      );
+      return {
+        content: JSON.stringify({
+          path: path.relative(context.workspace, file),
+          size: stat.size,
+          contentType,
+          modified: stat.mtime.toISOString(),
+          lineCount: lines.length,
+          startLine: start,
+          endLine: end,
+          content: lines.slice(start - 1, end).join("\n"),
+        }),
+      };
     },
   },
   {
     name: "create_file",
-    description: "Propose creation of a new UTF-8 text file inside the workspace; requires change approval.",
+    description:
+      "Propose creation of a new UTF-8 text file inside the workspace; requires change approval.",
     permission: "moderate",
-    inputSchema: input({ path: { type: "string" }, content: { type: "string" } }),
+    inputSchema: input({
+      path: { type: "string" },
+      content: { type: "string" },
+    }),
     execute: async (value, context) => {
       const data = value as { path: string; content: string };
       const file = await safeRealPath(context.workspace, data.path);
-      if (await fs.stat(file).catch(() => null)) return { content: "File already exists.", isError: true };
-      if (Buffer.from(data.content, "utf8").includes(0)) return { content: "Binary content is not allowed.", isError: true };
-      if (!context.changeService || !context.sessionId) return { content: "Change service is unavailable.", isError: true };
-      const change = await context.changeService.proposeChange(context.sessionId, data.path, data.content, "write");
-      return { content: JSON.stringify({ status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch }), status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch };
+      if (await fs.stat(file).catch(() => null))
+        return { content: "File already exists.", isError: true };
+      if (Buffer.from(data.content, "utf8").includes(0))
+        return { content: "Binary content is not allowed.", isError: true };
+      if (!context.changeService || !context.sessionId)
+        return { content: "Change service is unavailable.", isError: true };
+      const change = await context.changeService.proposeChange(
+        context.sessionId,
+        data.path,
+        data.content,
+        "write",
+      );
+      return {
+        content: JSON.stringify({
+          status: "pending_approval",
+          changeId: change.id,
+          path: change.path,
+          diff: change.patch,
+        }),
+        status: "pending_approval",
+        changeId: change.id,
+        path: change.path,
+        diff: change.patch,
+      };
     },
   },
   {
     name: "edit_file",
-    description: "Propose a precise context-checked replacement in a text file; requires change approval.",
+    description:
+      "Propose a precise context-checked replacement in a text file; requires change approval.",
     permission: "moderate",
-    inputSchema: input({ path: { type: "string" }, search: { type: "string" }, replace: { type: "string" } }),
+    inputSchema: input({
+      path: { type: "string" },
+      search: { type: "string" },
+      replace: { type: "string" },
+    }),
     execute: async (value, context) => {
       const data = value as { path: string; search: string; replace: string };
       const file = await safeRealPath(context.workspace, data.path);
       const original = await fs.readFile(file, "utf8");
-      if (!original.includes(data.search)) return { content: "Expected source context was not found; file was not changed.", isError: true };
-      if (!context.changeService || !context.sessionId) return { content: "Change service is unavailable.", isError: true };
+      if (!original.includes(data.search))
+        return {
+          content:
+            "Expected source context was not found; file was not changed.",
+          isError: true,
+        };
+      if (!context.changeService || !context.sessionId)
+        return { content: "Change service is unavailable.", isError: true };
       const proposed = original.replace(data.search, data.replace);
-      const change = await context.changeService.proposeChange(context.sessionId, data.path, proposed, "write");
-      return { content: JSON.stringify({ status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch }), status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch };
+      const change = await context.changeService.proposeChange(
+        context.sessionId,
+        data.path,
+        proposed,
+        "write",
+      );
+      return {
+        content: JSON.stringify({
+          status: "pending_approval",
+          changeId: change.id,
+          path: change.path,
+          diff: change.patch,
+        }),
+        status: "pending_approval",
+        changeId: change.id,
+        path: change.path,
+        diff: change.patch,
+      };
     },
   },
   {
     name: "delete_file",
-    description: "Propose deletion of a workspace file; requires change approval and stale-state validation.",
+    description:
+      "Propose deletion of a workspace file; requires change approval and stale-state validation.",
     permission: "dangerous",
     inputSchema: input({ path: { type: "string" } }),
     execute: async (value, context) => {
       const data = value as { path: string };
       const file = await safeRealPath(context.workspace, data.path);
       const stat = await fs.stat(file);
-      if (!stat.isFile()) return { content: "Only regular files can be deleted by this tool.", isError: true };
+      if (!stat.isFile())
+        return {
+          content: "Only regular files can be deleted by this tool.",
+          isError: true,
+        };
       const original = await fs.readFile(file, "utf8");
-      if (Buffer.from(original, "utf8").includes(0)) return { content: "Binary deletion requires an explicit Git-level workflow.", isError: true };
-      if (!context.changeService || !context.sessionId) return { content: "Change service is unavailable.", isError: true };
-      const change = await context.changeService.proposeChange(context.sessionId, data.path, "", "delete");
-      return { content: JSON.stringify({ status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch }), status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch };
+      if (Buffer.from(original, "utf8").includes(0))
+        return {
+          content: "Binary deletion requires an explicit Git-level workflow.",
+          isError: true,
+        };
+      if (!context.changeService || !context.sessionId)
+        return { content: "Change service is unavailable.", isError: true };
+      const change = await context.changeService.proposeChange(
+        context.sessionId,
+        data.path,
+        "",
+        "delete",
+      );
+      return {
+        content: JSON.stringify({
+          status: "pending_approval",
+          changeId: change.id,
+          path: change.path,
+          diff: change.patch,
+        }),
+        status: "pending_approval",
+        changeId: change.id,
+        path: change.path,
+        diff: change.patch,
+      };
     },
   },
   {
     name: "rename_file",
-    description: "Propose a safe file rename inside the workspace; requires change approval.",
+    description:
+      "Propose a safe file rename inside the workspace; requires change approval.",
     permission: "moderate",
-    inputSchema: input({ path: { type: "string" }, newPath: { type: "string" } }),
+    inputSchema: input({
+      path: { type: "string" },
+      newPath: { type: "string" },
+    }),
     execute: async (value, context) => {
       const data = value as { path: string; newPath: string };
       const source = await safeRealPath(context.workspace, data.path);
       await fs.stat(source);
       const target = await safeRealPath(context.workspace, data.newPath);
-      if (await fs.stat(target).catch(() => null)) return { content: "Rename target already exists.", isError: true };
+      if (await fs.stat(target).catch(() => null))
+        return { content: "Rename target already exists.", isError: true };
       const original = await fs.readFile(source, "utf8");
-      if (!context.changeService || !context.sessionId) return { content: "Change service is unavailable.", isError: true };
-      const change = await context.changeService.proposeChange(context.sessionId, data.path, original, "rename", data.newPath);
-      return { content: JSON.stringify({ status: "pending_approval", changeId: change.id, path: change.path, targetPath: data.newPath, diff: change.patch }), status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch };
+      if (!context.changeService || !context.sessionId)
+        return { content: "Change service is unavailable.", isError: true };
+      const change = await context.changeService.proposeChange(
+        context.sessionId,
+        data.path,
+        original,
+        "rename",
+        data.newPath,
+      );
+      return {
+        content: JSON.stringify({
+          status: "pending_approval",
+          changeId: change.id,
+          path: change.path,
+          targetPath: data.newPath,
+          diff: change.patch,
+        }),
+        status: "pending_approval",
+        changeId: change.id,
+        path: change.path,
+        diff: change.patch,
+      };
     },
   },
   {
     name: "move_file",
-    description: "Propose moving a file to another workspace-relative path; requires change approval.",
+    description:
+      "Propose moving a file to another workspace-relative path; requires change approval.",
     permission: "moderate",
-    inputSchema: input({ path: { type: "string" }, newPath: { type: "string" } }),
+    inputSchema: input({
+      path: { type: "string" },
+      newPath: { type: "string" },
+    }),
     execute: async (value, context) => {
       const data = value as { path: string; newPath: string };
       const source = await safeRealPath(context.workspace, data.path);
       await fs.stat(source);
       const target = await safeRealPath(context.workspace, data.newPath);
-      if (await fs.stat(target).catch(() => null)) return { content: "Move target already exists.", isError: true };
+      if (await fs.stat(target).catch(() => null))
+        return { content: "Move target already exists.", isError: true };
       const original = await fs.readFile(source, "utf8");
-      if (!context.changeService || !context.sessionId) return { content: "Change service is unavailable.", isError: true };
-      const change = await context.changeService.proposeChange(context.sessionId, data.path, original, "rename", data.newPath);
-      return { content: JSON.stringify({ status: "pending_approval", changeId: change.id, path: change.path, targetPath: data.newPath, diff: change.patch }), status: "pending_approval", changeId: change.id, path: change.path, diff: change.patch };
+      if (!context.changeService || !context.sessionId)
+        return { content: "Change service is unavailable.", isError: true };
+      const change = await context.changeService.proposeChange(
+        context.sessionId,
+        data.path,
+        original,
+        "rename",
+        data.newPath,
+      );
+      return {
+        content: JSON.stringify({
+          status: "pending_approval",
+          changeId: change.id,
+          path: change.path,
+          targetPath: data.newPath,
+          diff: change.patch,
+        }),
+        status: "pending_approval",
+        changeId: change.id,
+        path: change.path,
+        diff: change.patch,
+      };
     },
   },
   {
     name: "get_file_diff",
-    description: "Return the real pending diff for a file from the current session.",
+    description:
+      "Return the real pending diff for a file from the current session.",
     permission: "safe",
     inputSchema: input({ path: { type: "string" } }),
     execute: async (value, context) => {
       const data = value as { path: string };
       await safeRealPath(context.workspace, data.path);
-      const pending = context.changeService && context.sessionId ? context.changeService.listPendingChanges(context.sessionId).filter(c => c.path === path.normalize(data.path) || c.path === data.path) : [];
-      if (pending.length) return { content: pending.map(c => c.patch).join("\n"), diff: pending.map(c => c.patch).join("\n") };
-      const execution = await exec("git", ["diff", "--", data.path], { cwd: context.workspace, timeout: 15000, maxBuffer: 200_000 }).catch(() => ({ stdout: "" }));
-      return { content: execution.stdout || "No diff.", diff: execution.stdout || "" };
+      const pending =
+        context.changeService && context.sessionId
+          ? context.changeService
+              .listPendingChanges(context.sessionId)
+              .filter(
+                (c) =>
+                  c.path === path.normalize(data.path) || c.path === data.path,
+              )
+          : [];
+      if (pending.length)
+        return {
+          content: pending.map((c) => c.patch).join("\n"),
+          diff: pending.map((c) => c.patch).join("\n"),
+        };
+      const execution = await exec("git", ["diff", "--", data.path], {
+        cwd: context.workspace,
+        timeout: 15000,
+        maxBuffer: 200_000,
+      }).catch(() => ({ stdout: "" }));
+      return {
+        content: execution.stdout || "No diff.",
+        diff: execution.stdout || "",
+      };
     },
   },
   {
     name: "get_workspace_status",
-    description: "Return actual Git branch and working-tree status for the workspace.",
+    description:
+      "Return actual Git branch and working-tree status for the workspace.",
     permission: "safe",
     inputSchema: { type: "object", properties: {} },
     execute: async (_value, context) => {
-      const branch = await exec("git", ["branch", "--show-current"], { cwd: context.workspace, timeout: 10000 }).then(r => r.stdout.trim()).catch(() => "");
-      const status = await exec("git", ["status", "--short"], { cwd: context.workspace, timeout: 10000 }).then(r => r.stdout).catch(() => "");
+      const branch = await exec("git", ["branch", "--show-current"], {
+        cwd: context.workspace,
+        timeout: 10000,
+      })
+        .then((r) => r.stdout.trim())
+        .catch(() => "");
+      const status = await exec("git", ["status", "--short"], {
+        cwd: context.workspace,
+        timeout: 10000,
+      })
+        .then((r) => r.stdout)
+        .catch(() => "");
       return { content: JSON.stringify({ branch, status }) };
     },
   },

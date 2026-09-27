@@ -501,7 +501,9 @@ function registerApiBridgeHandlers() {
     }),
   );
   ipcMain.handle("agent:get-pending-permissions", async (_e, sessionId) => {
-    const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+    const query = sessionId
+      ? `?sessionId=${encodeURIComponent(sessionId)}`
+      : "";
     return api(`/api/agent/permissions/pending${query}`);
   });
   ipcMain.handle("agent:get-session", async (_e, input) => {
