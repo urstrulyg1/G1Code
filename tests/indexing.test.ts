@@ -13,9 +13,18 @@ test("repository scan honors gitignore and excludes sensitive files", async () =
     path.join(root, ".gitignore"),
     "ignored/\n*.generated.ts\n",
   );
-  await writeFile(path.join(root, "src", "main.ts"), "export function main() {}\n");
-  await writeFile(path.join(root, "ignored", "secret.ts"), "export const secret = true;\n");
-  await writeFile(path.join(root, "model.generated.ts"), "export const generated = true;\n");
+  await writeFile(
+    path.join(root, "src", "main.ts"),
+    "export function main() {}\n",
+  );
+  await writeFile(
+    path.join(root, "ignored", "secret.ts"),
+    "export const secret = true;\n",
+  );
+  await writeFile(
+    path.join(root, "model.generated.ts"),
+    "export const generated = true;\n",
+  );
   await writeFile(path.join(root, ".env"), "TOKEN=do-not-index\n");
 
   const result = await scanRepository(root);
