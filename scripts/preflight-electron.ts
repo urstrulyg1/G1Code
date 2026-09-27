@@ -40,15 +40,18 @@ export function preflightCheck(): void {
     `✔ Binary size valid (${(stats.size / 1024 / 1024).toFixed(2)} MB)`,
   );
 
-  const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
-  const run = spawnSync(execPath, ["--version"], { encoding: "utf8", env });
+  const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
+  const run = spawnSync(
+    execPath,
+    ["-e", "process.stdout.write(process.versions.electron)"],
+    { encoding: "utf8", env },
+  );
   if (run.error) {
     console.error("FAIL: Could not execute Electron binary:", run.error);
     process.exit(1);
   }
 
-  const actualVersion = `${run.stdout || ""}${run.stderr || ""}`.trim().split(/\r?\n/).map(line => line.trim()).find(line => /^v\d+\.\d+\.\d+/.test(line)) || "";
+  const actualVersion = (run.stdout || "").trim();
   if (actualVersion !== `v${expectedVersion}`) {
     console.error(
       `FAIL: Version mismatch. Expected v${expectedVersion}, got ${actualVersion}`,
