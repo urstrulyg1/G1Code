@@ -260,6 +260,8 @@ function spawnSpec(
     new Promise<CommandResult>((resolve) =>
       child.once("close", (code) => {
         clearTimeout(timeout);
+        if (killTimer) clearTimeout(killTimer);
+        if (signal) signal.removeEventListener("abort", cancel);
         resolve({
           stdout: stdoutText,
           stderr: stderrText,
