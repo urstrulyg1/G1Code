@@ -1530,6 +1530,15 @@ const server = http.createServer(async (req, res) => {
             body.attachedContext ?? [],
             priorMessages,
           );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const terminalState = signal.aborted ? "CANCELLED" : "FAILED";
+          emit({ type: "error", message: "Agent execution terminated unexpectedly: " + message });
+          emit({
+            type: "state",
+            state: terminalState,
+            message: signal.aborted ? "Agent cancelled." : "Agent failed unexpectedly.",
+          });
         } finally {
           releaseSessionWaiters(sessionId);
         }
