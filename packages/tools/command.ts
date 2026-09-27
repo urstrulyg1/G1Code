@@ -68,6 +68,7 @@ export function spawnCommand(
   command: string,
   cwd: string,
   signal?: AbortSignal,
+  timeoutMs = 120_000,
 ): CommandExecution {
   const safeEnvironment = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -131,7 +132,7 @@ export function spawnCommand(
       try { child.kill("SIGKILL"); } catch {}
     }
   };
-  const timeout = setTimeout(() => cancel(), 120_000);
+  const timeout = setTimeout(() => cancel(), timeoutMs);
   if (signal) {
     if (signal.aborted) cancel();
     else signal.addEventListener("abort", cancel, { once: true });
