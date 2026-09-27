@@ -48,7 +48,7 @@ export function preflightCheck(): void {
     process.exit(1);
   }
 
-  const actualVersion = (run.stdout || "").trim();
+  const actualVersion = `${run.stdout || ""}${run.stderr || ""}`.trim().split(/\r?\n/).map(line => line.trim()).find(line => /^v\d+\.\d+\.\d+/.test(line)) || "";
   if (actualVersion !== `v${expectedVersion}`) {
     console.error(
       `FAIL: Version mismatch. Expected v${expectedVersion}, got ${actualVersion}`,
