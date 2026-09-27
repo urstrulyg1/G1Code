@@ -27,7 +27,7 @@ export class ChangeService {
     sessionId: string,
     requestedPath: string,
     proposedContent: string,
-    operation: "write" | "delete" = "write",
+    operation: "write" | "delete" | "rename" = "write",
     targetPath?: string,
   ) {
     const file = await safeRealPath(this.workspace, requestedPath);
