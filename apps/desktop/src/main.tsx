@@ -5016,10 +5016,35 @@ function App() {
                       }
                       if (
                         e.toolName === "write_file" ||
-                        e.toolName === "apply_patch"
+                        e.toolName === "apply_patch" ||
+                        e.toolName === "edit_file"
                       ) {
                         const p = (e.input as any)?.path || "";
                         return `Editing ${p || "file"}...`;
+                      }
+                      if (e.toolName === "create_file") {
+                        const p = (e.input as any)?.path || "";
+                        return `Creating ${p || "file"}...`;
+                      }
+                      if (e.toolName === "delete_file") {
+                        const p = (e.input as any)?.path || "";
+                        return `Deleting ${p || "file"}...`;
+                      }
+                      if (e.toolName === "rename_file" || e.toolName === "move_file") {
+                        const p = (e.input as any)?.path || "";
+                        const target = (e.input as any)?.newPath || "";
+                        return target ? "Moving " + p + " → " + target + "..." : "Moving " + p + "...";
+                      }
+                      if (e.toolName === "inspect_file") {
+                        const p = (e.input as any)?.path || "";
+                        return `Inspecting ${p || "file"}...`;
+                      }
+                      if (e.toolName === "get_file_diff") {
+                        const p = (e.input as any)?.path || "";
+                        return `Reviewing diff for ${p || "file"}...`;
+                      }
+                      if (e.toolName === "get_workspace_status") {
+                        return "Checking workspace status...";
                       }
                       return `${e.toolName.replace(/_/g, " ")}...`;
                     }
