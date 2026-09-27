@@ -880,13 +880,17 @@ export function registerRuntimeHandlers(
         changeService,
         (changeId) => {
           const decision = waitForChangeApproval(sessionId, changeId);
-          if (settings.reviewPolicy === "always" || settings.reviewPolicy === "never") {
-            queueMicrotask(() =>
-              void finishChangeApproval(
-                workspace,
-                changeId,
-                settings.reviewPolicy === "always",
-              ).catch(() => undefined),
+          if (
+            settings.reviewPolicy === "always" ||
+            settings.reviewPolicy === "never"
+          ) {
+            queueMicrotask(
+              () =>
+                void finishChangeApproval(
+                  workspace,
+                  changeId,
+                  settings.reviewPolicy === "always",
+                ).catch(() => undefined),
             );
           }
           return decision;

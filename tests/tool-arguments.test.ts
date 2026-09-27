@@ -33,54 +33,49 @@ class MalformedProvider implements AIProvider {
   }
 }
 
-test(
-  "malformed tool arguments are rejected before tool execution",
-  async () => {
-    const provider = new MalformedProvider();
-    const registry = new ToolRegistry();
-    let executed = false;
+test("malformed tool arguments are rejected before tool execution", async () => {
+  const provider = new MalformedProvider();
+  const registry = new ToolRegistry();
+  let executed = false;
 
-    registry.register({
-      name: "needs_string",
-      description: "Requires a string.",
-      permission: "safe",
-      inputSchema: {
-        type: "object",
-        properties: { value: { type: "string" } },
-        required: ["value"],
-      },
-      execute: async () => {
-        executed = true;
-        return { content: "should not execute" };
-      },
-    });
+  registry.register({
+    name: "needs_string",
+    description: "Requires a string.",
+    permission: "safe",
+    inputSchema: {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    },
+    execute: async () => {
+      executed = true;
+      return { content: "should not execute" };
+    },
+  });
 
-    const events: Array<{ type: string; message?: string }> = [];
-    const runtime = new AgentRuntime(
-      provider,
-      registry,
-      process.cwd(),
+  const events: Array<{ type: string; message?: string }> = [];
+  const runtime = new AgentRuntime(
+    provider,
+    registry,
+    process.cwd(),
+    (event) => events.push({ type: event.type, message: event.message }),
+    async () => true,
+    {
+      maxIterations: 2,
+      maxToolCalls: 5,
+      maxExecutionTime: 5000,
+      maxRepairAttempts: 1,
+    },
+    "malformed-session",
+  );
+
+  await runtime.run("call the tool", "agent");
+
+  assert.equal(executed, false);
+  assert(
+    events.some(
       (event) =>
-        events.push({ type: event.type, message: event.message }),
-      async () => true,
-      {
-        maxIterations: 2,
-        maxToolCalls: 5,
-        maxExecutionTime: 5000,
-        maxRepairAttempts: 1,
-      },
-      "malformed-session",
-    );
-
-    await runtime.run("call the tool", "agent");
-
-    assert.equal(executed, false);
-    assert(
-      events.some(
-        (event) =>
-          event.type === "error" &&
-          event.message?.includes("must be a string"),
-      ),
-    );
-  },
-);
+        event.type === "error" && event.message?.includes("must be a string"),
+    ),
+  );
+});
