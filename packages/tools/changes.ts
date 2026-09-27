@@ -63,7 +63,8 @@ export async function applyApprovedChange(
       reason: "File changed since it was inspected",
     };
   if (operation === "delete") {
-    if (current === null) return { status: "CONFLICT" as const, reason: "File no longer exists" };
+    if (current === null)
+      return { status: "CONFLICT" as const, reason: "File no longer exists" };
     await fs.rm(filePath);
     return {
       status: "APPLIED" as const,
@@ -74,10 +75,18 @@ export async function applyApprovedChange(
     };
   }
   if (operation === "rename") {
-    if (!targetPath) return { status: "CONFLICT" as const, reason: "Rename target is missing" };
+    if (!targetPath)
+      return {
+        status: "CONFLICT" as const,
+        reason: "Rename target is missing",
+      };
     const target = await safeRealPath(workspace, targetPath);
     const targetCurrent = await fs.stat(target).catch(() => null);
-    if (targetCurrent) return { status: "CONFLICT" as const, reason: "Rename target already exists" };
+    if (targetCurrent)
+      return {
+        status: "CONFLICT" as const,
+        reason: "Rename target already exists",
+      };
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.rename(filePath, target);
     return {
@@ -112,8 +121,15 @@ export async function revertAppliedChange(
   if (operation === "rename" && targetPath) {
     const target = await safeRealPath(workspace, targetPath);
     const moved = await fs.readFile(target, "utf8").catch(() => null);
-    if (moved === null || contentHash(moved) !== proposedHash || moved !== applied)
-      return { status: "CONFLICT" as const, reason: "Renamed file contains additional changes or is missing" };
+    if (
+      moved === null ||
+      contentHash(moved) !== proposedHash ||
+      moved !== applied
+    )
+      return {
+        status: "CONFLICT" as const,
+        reason: "Renamed file contains additional changes or is missing",
+      };
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.rename(target, filePath);
     return { status: "REVERTED" as const, path: filePath };
