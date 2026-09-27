@@ -2296,6 +2296,36 @@ function App() {
       setSessionId(res.sessionId);
       sessionIdRef.current = res.sessionId;
       pendingSessionRef.current = false;
+
+      // The shared SSE channel may have delivered events before the POST
+      // response established the session id. Rehydrate the durable timeline
+      // immediately so those early streaming chunks are not lost from the UI.
+      try {
+        const persisted = await window.g1code.loadSessionEvents(
+          workspace,
+          res.sessionId,
+        );
+        if (Array.isArray(persisted)) {
+          setEvents((current) => {
+            let merged = [...current];
+            for (const raw of persisted as any[]) {
+              const payload = raw?.payload ?? raw?.data ?? raw;
+              if (!payload || typeof payload !== "object") continue;
+              const event = {
+                ...(payload as Event),
+                id: (payload as Event).id || raw?.id,
+                sessionId: (payload as Event).sessionId || raw?.sessionId,
+                at: (payload as Event).at || raw?.timestamp,
+              } as Event;
+              merged = mergeAgentEvent(merged, event);
+            }
+            return merged;
+          });
+        }
+      } catch {
+        // Live SSE remains the primary path; polling will reconcile later.
+      }
+
       if (window.g1code.getUsageLimits) {
         void window.g1code.getUsageLimits().then((l) => l && setUsageLimits(l));
       }
