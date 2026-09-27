@@ -115,62 +115,35 @@ export async function scanRepository(
     const ignorePatterns = await fs
       .readFile(path.join(root, ".gitignore"), "utf8")
       .then((text) =>
-        text
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter((line) => line && !line.startsWith("#") && !line.startsWith("!")),
+        text.split(/\r?\n/).map((line) => line.trim()).filter(
+          (line) => line && !line.startsWith("#") && !line.startsWith("!"),
+        ),
       )
-      .catch(() => []);
+      .catch(() => [] as string[]);
 
-    const globToRegExp = (pattern: string) => {
-      const normalized = pattern.replaceAll("\\", "/").replace(/^\.\//, "");
-      const escaped = normalized.replace(/[.+^$()|{}]/g, "\\  async function walkFallback(): Promise<string[]> {
-    const files: string[] = [];
-    async function visit(directory: string) {
-      for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
-        if (entry.isDirectory() && !ignored.has(entry.name)) {
-          await visit(path.join(directory, entry.name));
-        } else if (entry.isFile()) {
-          files.push(path.relative(root, path.join(directory, entry.name)));
-        }
-      }
-    }
-    await visit(root);
-    return files;
-  }");
-      const regex = escaped
-        .replace(/\\\*\\\*/g, ".*")
-        .replace(/\\\*/g, "[^/]*")
-        .replace(/\\\?/g, "[^/]");
-      return new RegExp(
-        normalized.endsWith("/")
-          ? "^" + regex
-          : normalized.includes("/")
-            ? "^" + regex + "$"
-            : "(^|/)" + regex + "$",
-      );
-    };
-    const ignoredByFile = ignorePatterns.map((pattern) => ({
-      directory: pattern.endsWith("/"),
-      regex: globToRegExp(pattern),
-    }));
     const shouldIgnore = (relativePath: string) => {
       const normalized = relativePath.replaceAll("\\", "/");
-      return ignoredByFile.some(({ regex }) => regex.test(normalized));
+      const base = path.posix.basename(normalized);
+      return ignorePatterns.some((pattern) => {
+        const p = pattern.replaceAll("\\", "/").replace(/^\.\//, "");
+        if (p.endsWith("/")) return normalized.startsWith(p);
+        if (p.startsWith("*")) return base.endsWith(p.slice(1));
+        if (p.endsWith("*")) return base.startsWith(p.slice(0, -1));
+        if (p.includes("*")) {
+          const [prefix, suffix] = p.split("*", 2);
+          return normalized.startsWith(prefix) && normalized.endsWith(suffix);
+        }
+        return normalized === p || normalized.endsWith("/" + p);
+      });
     };
 
     async function visit(directory: string) {
       for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
-        const relative = path
-          .relative(root, path.join(directory, entry.name))
-          .replaceAll("\\", "/");
-        if (ignored.has(entry.name) || shouldIgnore(relative + (entry.isDirectory() ? "/" : "")))
-          continue;
-        if (entry.isDirectory()) {
-          await visit(path.join(directory, entry.name));
-        } else if (entry.isFile()) {
-          files.push(path.relative(root, path.join(directory, entry.name)));
-        }
+        const absolute = path.join(directory, entry.name);
+        const relative = path.relative(root, absolute).replaceAll("\\", "/");
+        if (ignored.has(entry.name) || shouldIgnore(relative + (entry.isDirectory() ? "/" : ""))) continue;
+        if (entry.isDirectory()) await visit(absolute);
+        else if (entry.isFile()) files.push(path.relative(root, absolute));
       }
     }
     await visit(root);
