@@ -175,6 +175,16 @@ export const workspaceTools = (): AgentTool[] => [
     },
   },
   {
+    name: "list_files",
+    description: "List workspace files and directories using the same guarded implementation as list_directory.",
+    permission: "safe",
+    inputSchema: input({ path: { type: "string" } }),
+    execute: async (value, context) => {
+      const delegate = workspaceTools().find(t => t.name === "list_directory")!;
+      return delegate.execute(value, context);
+    },
+  },
+  {
     name: "get_project_info",
     description:
       "Returns project metadata: package.json (name, scripts, dependencies) and README excerpt. Use this at the start of any task to understand the project structure before diving in.",
@@ -257,7 +267,7 @@ export const workspaceTools = (): AgentTool[] => [
             ]
           : [
               "-lc",
-              `rg -n --hidden --glob '!node_modules' --glob '!.git' ${JSON.stringify(query)} ${JSON.stringify(directory)} || true`,
+              `rg -n --hidden --glob '!node_modules' --glob '!.git' --glob '!dist' --glob '!dist-electron' --glob '!coverage' --glob '!.env' --glob '!.env.*' --glob '!**/*.pem' --glob '!**/*.key' --glob '!**/*credentials*' --glob '!**/*secret*' --glob '!**/id_rsa*' --glob '!**/*.p12' --glob '!**/*.pfx' --glob '!**/*.der' --glob '!**/*.png' --glob '!**/*.jpg' --glob '!**/*.jpeg' --glob '!**/*.gif' --glob '!**/*.webp' --glob '!**/*.zip' --glob '!**/*.tar' --glob '!**/*.gz' --glob '!**/*.sqlite' --glob '!**/*.db' --glob '!**/*.exe' --glob '!**/*.dll' --glob '!**/*.so' --glob '!**/*.dylib' ${JSON.stringify(query)} ${JSON.stringify(directory)} || true`,
             ];
       const result = await exec(
         process.platform === "win32" ? "powershell.exe" : "sh",
