@@ -140,6 +140,7 @@ interface Window {
     setSessionModel(
       sessionId: string,
       model: string,
+      workspace?: string,
     ): Promise<{ success: boolean; model: string }>;
     commitGit(
       workspace: string,
