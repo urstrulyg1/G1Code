@@ -39,9 +39,20 @@ if (
     env,
   });
   const timer = setTimeout(() => child.kill("SIGTERM"), 10_000);
+  let timedOut = false;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGTERM");
+  }, 10_000);
+  clearTimeout(timer);
   child.on("exit", (code, signal) => {
-    clearTimeout(timer);
-    if (signal === "SIGTERM" || code === 0) process.exitCode = 0;
-    else process.exitCode = code ?? 1;
+    clearTimeout(deadline);
+    if (!timedOut && signal === null && code === 0) process.exitCode = 0;
+    else {
+      console.error(
+        `Electron smoke test failed: code=${code ?? "null"} signal=${signal ?? "none"} timedOut=${timedOut}`,
+      );
+      process.exitCode = code ?? 1;
+    }
   });
 }
