@@ -235,23 +235,42 @@ async function finishChangeApproval(
   }
 }
 
-function setCorsHeaders(res: http.ServerResponse) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+function setCorsHeaders(
+  res: http.ServerResponse,
+  origin?: string,
+) {
+  const allowedOrigins = new Set([
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+  ]);
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader(
     "Access-Control-Allow-Methods",
     "GET, POST, PUT, DELETE, OPTIONS",
   );
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-G1Code-Client",
+  );
+  res.setHeader("Access-Control-Max-Age", "600");
 }
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown) {
-  setCorsHeaders(res);
+  setCorsHeaders(res, res.getHeader("X-G1Code-Origin") as string | undefined);
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
 }
 
 function sendError(res: http.ServerResponse, status: number, message: string) {
   sendJson(res, status, { error: message });
+}
+
+function isTrustedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // Electron/Node clients do not send Origin.
+  return origin === "http://localhost:5173" || origin === "http://127.0.0.1:5173";
 }
 
 async function parseJsonBody<T = unknown>(
@@ -308,7 +327,14 @@ function checkedWorkspace(inputWorkspace: string | undefined): string {
 }
 
 const server = http.createServer(async (req, res) => {
-  setCorsHeaders(res);
+  const origin = req.headers.origin;
+  if (!isTrustedOrigin(origin)) {
+    sendError(res, 403, "Untrusted browser origin");
+    return;
+  }
+  res.setHeader("X-G1Code-Origin", origin || "");
+
+  setCorsHeaders(res, origin);
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -1168,6 +1194,7 @@ const server = http.createServer(async (req, res) => {
         );
       }
       const { provider, settings } = providerPackage;
+      const executionMode = settings.agentMode || "review";
       let selectedModel =
         body.model ||
         settings.model ||
@@ -1312,6 +1339,7 @@ const server = http.createServer(async (req, res) => {
       const sessionId =
         existingSession?.id ||
         `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const requestId = randomUUID();
       const priorMessages: ChatMessage[] = existingSession
         ? store
             .sessionMessages(existingSession.id)
@@ -1514,14 +1542,47 @@ const server = http.createServer(async (req, res) => {
         workspace,
         emit,
         async (tool, value, toolCallId) => {
-          if (tool.permission === "safe") return true;
-          // Server-side enforcement of the user's execution policy. The
-          // renderer is only a decision surface; it can never bypass this
-          // boundary by calling a tool directly.
-          if (settings.autoExecution === "always") return true;
-          if (settings.autoExecution === "never") return false;
+          const permissions = settings.toolPermissions;
+          const commandText =
+            tool.name === "run_command" && value && typeof value === "object"
+              ? String((value as { command?: unknown }).command ?? "")
+              : "";
+          const isTestCommand = /(^|\s)(npm\s+(run\s+)?test|npx\s+(jest|vitest)|pytest|go\s+test|cargo\s+test|make\s+test)(\s|$)/i.test(commandText);
+          const isBuildCommand = /(^|\s)(npm\s+(run\s+)?build|tsc(\s|$)|vite\s+build|electron-builder|go\s+build|cargo\s+build|make)(\s|$)/i.test(commandText);
+          const permissionAllowed =
+            tool.name === "run_command"
+              ? isTestCommand
+                ? permissions.runTests
+                : isBuildCommand
+                  ? permissions.runBuilds
+                  : permissions.runCommands
+              : /^(read_file|list_directory|list_files|get_project_info|search_files|search_repository_context|git_status|git_diff|git_branch|git_log)$/.test(tool.name)
+                ? (tool.name.startsWith("search") ? permissions.searchRepository : permissions.readFiles)
+                : /^(write_file|apply_patch)$/.test(tool.name)
+                  ? permissions.editFiles
+                  : tool.name === "delete_file"
+                    ? permissions.deleteFiles
+                    : tool.name === "rename_file"
+                      ? permissions.renameFiles
+                      : tool.permission !== "dangerous";
+          if (!permissionAllowed) return false;
 
-          const key = `${sessionId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+          // Plan and read-only modes are enforced at the privileged boundary,
+          // not just by prompt instructions.
+          if (executionMode === "plan" || executionMode === "readonly") {
+            if (tool.permission !== "safe") return false;
+          }
+          // Dangerous operations always require explicit approval, even when
+          // ordinary coding actions are configured for automatic execution.
+          if (tool.permission === "dangerous") {
+            // fall through to the approval waiter
+          } else if (executionMode === "auto" || settings.autoExecution === "always") {
+            return true;
+          } else if (executionMode === "readonly" || settings.autoExecution === "never") {
+            return false;
+          }
+
+          const key = `${sessionId}:${requestId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
           return new Promise<boolean>((resolve) => {
             const timer = setTimeout(() => {
               const waiter = permissionWaiters.get(key);
@@ -1559,7 +1620,15 @@ const server = http.createServer(async (req, res) => {
             });
           });
         },
-        undefined,
+        {
+          maxIterations: settings.maxAgentSteps,
+          maxToolCalls: Math.max(settings.maxAgentSteps * 3, 30),
+          maxExecutionTime: Math.max(settings.toolTimeoutMs, settings.maxAgentSteps * settings.toolTimeoutMs),
+          maxRepairAttempts: Math.min(settings.maxRetries, 8),
+          commandTimeoutMs: settings.commandTimeoutMs,
+          toolTimeoutMs: settings.toolTimeoutMs,
+          maxRetries: settings.maxRetries,
+        },
         sessionId,
         changeService,
         (changeId) =>
@@ -1618,6 +1687,7 @@ const server = http.createServer(async (req, res) => {
           });
         },
         selectedModel,
+        requestId,
       );
 
       manager.startSession(sessionId, runtime, async (signal) => {
@@ -1649,7 +1719,7 @@ const server = http.createServer(async (req, res) => {
         }
       });
 
-      return sendJson(res, 200, { sessionId });
+      return sendJson(res, 200, { sessionId, requestId, executionMode });
     }
 
     // Stop agent
@@ -1975,7 +2045,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, "127.0.0.1", () => {
   console.log(`[G1Code Backend] Server listening on port ${PORT}`);
   console.log(`[G1Code Backend] Active workspace: ${selectedWorkspace}`);
 });
