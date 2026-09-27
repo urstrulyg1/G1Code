@@ -22,6 +22,8 @@ export class ChangeService {
     sessionId: string,
     requestedPath: string,
     proposedContent: string,
+    operation: "write" | "delete" = "write",
+    targetPath?: string,
   ) {
     const file = await safeRealPath(this.workspace, requestedPath);
     const originalContent = await fs.readFile(file, "utf8").catch(() => "");
@@ -35,6 +37,8 @@ export class ChangeService {
       originalContent,
       proposedContent,
       appliedContent: null,
+      operation,
+      targetPath: targetPath ?? null,
       patch: unifiedDiff(relative, originalContent, proposedContent),
       status: "PENDING",
     });
@@ -88,6 +92,8 @@ export class ChangeService {
       change.originalHash,
       change.originalContent,
       change.proposedContent,
+      change.operation,
+      change.targetPath ?? undefined,
     );
     if (result.status === "CONFLICT") {
       this.store.updateChangeStatus(id, "CONFLICT");
@@ -334,6 +340,8 @@ export class ChangeService {
       change.proposedHash,
       change.originalContent,
       change.appliedContent,
+      change.operation,
+      change.targetPath ?? undefined,
     );
     if (result.status === "CONFLICT") {
       this.store.updateChangeStatus(id, "CONFLICT");
