@@ -9,7 +9,9 @@ class FakeProvider implements AIProvider {
   readonly name = "Fake";
   calls: ChatRequest[] = [];
 
-  async getModels() { return [{ id: "fake-model", name: "Fake Model", supportsTools: true }]; }
+  async getModels() {
+    return [{ id: "fake-model", name: "Fake Model", supportsTools: true }];
+  }
   async chat() {
     return { message: { role: "assistant" as const, content: "unused" } };
   }
