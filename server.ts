@@ -1606,17 +1606,11 @@ const server = http.createServer(async (req, res) => {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const terminalState = signal.aborted ? "CANCELLED" : "FAILED";
-          emit({
-            id: randomUUID(),
-            sessionId,
-            at: new Date().toISOString(),
+          persistAndBroadcastEvent(sessionId, "ERROR", {
             type: "error",
             message: "Agent execution terminated unexpectedly: " + message,
           });
-          emit({
-            id: randomUUID(),
-            sessionId,
-            at: new Date().toISOString(),
+          persistAndBroadcastEvent(sessionId, "STATE", {
             type: "state",
             state: terminalState,
             message: signal.aborted ? "Agent cancelled." : "Agent failed unexpectedly.",
