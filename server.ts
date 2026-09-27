@@ -1174,11 +1174,20 @@ const server = http.createServer(async (req, res) => {
         model?: string;
         reasoning?: string;
         reasoningEffort?: string;
+        executionMode?: "review" | "auto" | "plan" | "readonly";
         attachedContext?: string[];
       }>(req);
 
       if (!body.prompt || !["ask", "plan", "agent"].includes(body.mode)) {
         return sendError(res, 400, "Invalid agent request");
+      }
+
+      const requestedExecutionMode = body.executionMode;
+      if (
+        requestedExecutionMode &&
+        !["review", "auto", "plan", "readonly"].includes(requestedExecutionMode)
+      ) {
+        return sendError(res, 400, "Invalid execution mode");
       }
 
       const targetProvider = "experiential-labs";
@@ -1194,7 +1203,9 @@ const server = http.createServer(async (req, res) => {
         );
       }
       const { provider, settings } = providerPackage;
-      const executionMode = settings.agentMode || "review";
+      const executionMode =
+        requestedExecutionMode ||
+        (body.mode === "plan" ? "plan" : settings.agentMode || "review");
       let selectedModel =
         body.model ||
         settings.model ||
