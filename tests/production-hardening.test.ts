@@ -58,7 +58,7 @@ test("settings reject invalid execution modes and clamp dangerous limits", async
         maxRetries: 99,
         commandTimeoutMs: 1,
         contextBudgetChars: 9999999,
-        toolPermissions: { deleteFiles: true },
+        toolPermissions: { deleteFiles: true } as any,
       },
       dir,
     );
