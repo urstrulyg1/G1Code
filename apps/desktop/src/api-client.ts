@@ -243,7 +243,7 @@ if (typeof window !== "undefined" && !window.g1code) {
       attachedContext?: string[];
     }) {
       ensureEventSource();
-      return apiRequest<{ sessionId: string; model?: string }>(
+      return apiRequest<{ sessionId: string; requestId: string; executionMode: string; model?: string }>(
         "/api/agent/start",
         {
           method: "POST",
