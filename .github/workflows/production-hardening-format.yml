@@ -1,35 +1,30 @@
 name: Temporary production-hardening formatter
 
 on:
-  push:
-    branches: [production-hardening-2026-09-27]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   format:
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run format
-      - name: Commit formatting
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet; then
-            echo "Formatting already clean."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "style: format production hardening changes [skip ci]"
-          git push origin HEAD:${GITHUB_REF_NAME}
+      - name: Package formatted source
+        run: tar -czf /tmp/g1code-formatted.tgz --exclude=.git --exclude=node_modules .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: g1code-formatted-source
+          path: /tmp/g1code-formatted.tgz
+          retention-days: 1
