@@ -13,8 +13,16 @@ import { safePath, safeRealPath } from "./workspace";
 import { FailureInjector, SimulatedCrashError } from "./failure-injector";
 
 function renameDiff(from: string, to: string, content: string) {
-  const lines = content.split(/\r?\n/).map(line => ` ${line}`);
-  return [`diff --git a/${from} b/${to}`, `similarity index 100%`, `rename from ${from}`, `rename to ${to}`, `--- a/${from}`, `+++ b/${to}`, ...lines].join("\n");
+  const lines = content.split(/\r?\n/).map((line) => ` ${line}`);
+  return [
+    `diff --git a/${from} b/${to}`,
+    `similarity index 100%`,
+    `rename from ${from}`,
+    `rename to ${to}`,
+    `--- a/${from}`,
+    `+++ b/${to}`,
+    ...lines,
+  ].join("\n");
 }
 
 export class ChangeService {
@@ -336,7 +344,11 @@ export class ChangeService {
   }
   async revertChange(id: string) {
     const change = this.requireChange(id);
-    if (change.status !== "APPLIED" || change.appliedContent === null || change.appliedContent === undefined)
+    if (
+      change.status !== "APPLIED" ||
+      change.appliedContent === null ||
+      change.appliedContent === undefined
+    )
       throw new Error("Only applied changes can be reverted");
     if (this.store.transitionChangeStatus(id, "APPLIED", "APPLYING") !== 1)
       throw new Error(

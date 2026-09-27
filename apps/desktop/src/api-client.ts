@@ -252,7 +252,11 @@ if (typeof window !== "undefined" && !window.g1code) {
       );
     },
 
-    async setSessionModel(sessionId: string, model: string, workspace?: string) {
+    async setSessionModel(
+      sessionId: string,
+      model: string,
+      workspace?: string,
+    ) {
       return apiRequest("/api/agent/session-model", {
         method: "POST",
         body: JSON.stringify({ sessionId, model, workspace }),

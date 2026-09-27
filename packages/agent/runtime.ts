@@ -72,8 +72,7 @@ function validateToolArguments(tool: AgentTool, value: unknown): string | null {
     : [];
   const object = value as Record<string, unknown>;
   for (const key of required) {
-    if (!(key in object))
-      return `Missing required tool argument: ${key}`;
+    if (!(key in object)) return `Missing required tool argument: ${key}`;
   }
 
   for (const [key, property] of Object.entries(schema.properties ?? {})) {
