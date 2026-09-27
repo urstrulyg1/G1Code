@@ -195,6 +195,9 @@ export class AgentRuntime {
       maxToolCalls: 150,
       maxExecutionTime: 20 * 60_000,
       maxRepairAttempts: 5,
+      commandTimeoutMs: 120000,
+      toolTimeoutMs: 120000,
+      maxRetries: 3,
     },
     private readonly sessionId = "",
     private readonly changeService?: import("../tools/change-service").ChangeService,
@@ -388,7 +391,7 @@ export class AgentRuntime {
       let text = "";
       const calls = new Map<string, ToolCall>();
       let streamSucceeded = false;
-      const maxStreamAttempts = 3;
+      const maxStreamAttempts = Math.max(1, this.limits.maxRetries ?? 3);
 
       for (let attempt = 0; attempt < maxStreamAttempts; attempt++) {
         text = "";
@@ -598,6 +601,8 @@ export class AgentRuntime {
               detail: event.detail ? redactSecrets(event.detail) : undefined,
             }),
           signal,
+          commandTimeoutMs: this.limits.commandTimeoutMs,
+          toolTimeoutMs: this.limits.toolTimeoutMs,
           changeService: this.changeService,
           sessionId: this.sessionId,
           recordTestRun: (run) => this.contextRecordTestRun?.(run),
