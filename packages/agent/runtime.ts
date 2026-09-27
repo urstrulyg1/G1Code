@@ -53,6 +53,8 @@ export type AgentEvent = {
   duration?: number;
   /** Stable request identifier for renderer-side event reconciliation. */
   requestId?: string;
+  /** Monotonic sequence within one request; used to reject stale/out-of-order events. */
+  seq?: number;
 };
 export type ChangeApprovalResult = {
   approved: boolean;
@@ -216,8 +218,10 @@ export class AgentRuntime {
       result: string;
     }) => void,
     private readonly model: string = "",
+    private readonly requestId: string = randomUUID(),
   ) {}
   private repairAttempts = 0;
+  private eventSequence = 0;
   /**
    * Approval callbacks normally live in the main process and are released by
    * the session manager. Keeping a local wake-up set as well makes the runtime
@@ -266,20 +270,15 @@ export class AgentRuntime {
   }
   private transition(state: AgentState, message: string) {
     this.state = state;
-    this.emit({
-      id: randomUUID(),
-      sessionId: this.sessionId,
-      at: new Date().toISOString(),
-      type: "state",
-      state,
-      message,
-    });
+    this.event({ type: "state", state, message });
   }
   private event(event: Omit<AgentEvent, "id" | "at" | "sessionId">) {
     this.emit({
       ...event,
       id: randomUUID(),
       sessionId: this.sessionId,
+      requestId: this.requestId,
+      seq: ++this.eventSequence,
       at: new Date().toISOString(),
     });
   }
@@ -295,6 +294,7 @@ export class AgentRuntime {
     this.cancelled = false;
     this.toolCalls = 0;
     this.repairAttempts = 0;
+    this.eventSequence = 0;
     this.pendingDecisionWakeups.clear();
 
     // Capability check: If model explicitly does not support tools in agent mode
