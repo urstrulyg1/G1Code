@@ -1,0 +1,33 @@
+name: Temporary format verification
+
+on:
+  push:
+    branches:
+      - verify/agent-file-workflow-6
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx prettier --write apps/desktop/electron/main.ts apps/desktop/electron/runtime.ts apps/desktop/src/main.tsx packages/agent/manager.ts packages/agent/runtime.ts packages/database/connection.ts packages/indexing/repository.ts packages/tools/change-service.ts packages/tools/changes.ts packages/tools/workspace.ts server.ts scripts/preflight-electron.ts tests/agent-file-workflow.test.ts tests/agent-runtime.test.ts tests/file-tools.test.ts tests/indexing.test.ts tests/security-hardening.test.ts tests/tool-arguments.test.ts
+      - name: Commit formatting
+        run: |
+          if git diff --quiet; then
+            echo "Already formatted"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/electron/main.ts apps/desktop/electron/runtime.ts apps/desktop/src/main.tsx packages/agent/manager.ts packages/agent/runtime.ts packages/database/connection.ts packages/indexing/repository.ts packages/tools/change-service.ts packages/tools/changes.ts packages/tools/workspace.ts server.ts scripts/preflight-electron.ts tests/agent-file-workflow.test.ts tests/agent-runtime.test.ts tests/file-tools.test.ts tests/indexing.test.ts tests/security-hardening.test.ts tests/tool-arguments.test.ts
+          git commit -m "style: format agent workflow changes"
+          git push origin HEAD:${{ github.ref_name }}
