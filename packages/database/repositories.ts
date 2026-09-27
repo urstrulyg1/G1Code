@@ -581,7 +581,7 @@ export class DatabaseStore {
     const timestamp = now();
     this.db
       .prepare(
-        "INSERT INTO file_changes (id,session_id,path,original_hash,proposed_hash,original_content,proposed_content,applied_content,patch,status,created_at,updated_at) VALUES (@id,@sessionId,@path,@originalHash,@proposedHash,@originalContent,@proposedContent,@appliedContent,@patch,@status,@createdAt,@updatedAt)",
+        "INSERT INTO file_changes (id,session_id,path,operation,target_path,original_hash,proposed_hash,original_content,proposed_content,applied_content,patch,status,created_at,updated_at) VALUES (@id,@sessionId,@path,@operation,@targetPath,@originalHash,@proposedHash,@originalContent,@proposedContent,@appliedContent,@patch,@status,@createdAt,@updatedAt)",
       )
       .run({ ...change, createdAt: timestamp, updatedAt: timestamp });
     return { ...change, createdAt: timestamp, updatedAt: timestamp };
@@ -699,7 +699,7 @@ export class DatabaseStore {
   getChange(id: string) {
     return this.db
       .prepare(
-        "SELECT id, session_id as sessionId, path, original_hash as originalHash, proposed_hash as proposedHash, original_content as originalContent, proposed_content as proposedContent, applied_content as appliedContent, patch, status, created_at as createdAt, updated_at as updatedAt FROM file_changes WHERE id = ?",
+        "SELECT id, session_id as sessionId, path, operation, target_path as targetPath, original_hash as originalHash, proposed_hash as proposedHash, original_content as originalContent, proposed_content as proposedContent, applied_content as appliedContent, patch, status, created_at as createdAt, updated_at as updatedAt FROM file_changes WHERE id = ?",
       )
       .get(id) as FileChange | undefined;
   }
@@ -718,8 +718,8 @@ export class DatabaseStore {
   }
   pendingChanges(sessionId?: string) {
     const query = sessionId
-      ? "SELECT id, session_id as sessionId, path, original_hash as originalHash, proposed_hash as proposedHash, original_content as originalContent, proposed_content as proposedContent, applied_content as appliedContent, patch, status, created_at as createdAt, updated_at as updatedAt FROM file_changes WHERE session_id = ? AND status IN ('PENDING','APPROVED','APPLYING') ORDER BY created_at"
-      : "SELECT id, session_id as sessionId, path, original_hash as originalHash, proposed_hash as proposedHash, original_content as originalContent, proposed_content as proposedContent, applied_content as appliedContent, patch, status, created_at as createdAt, updated_at as updatedAt FROM file_changes WHERE status IN ('PENDING','APPROVED','APPLYING') ORDER BY created_at";
+      ? "SELECT id, session_id as sessionId, path, operation, target_path as targetPath, original_hash as originalHash, proposed_hash as proposedHash, original_content as originalContent, proposed_content as proposedContent, applied_content as appliedContent, patch, status, created_at as createdAt, updated_at as updatedAt FROM file_changes WHERE session_id = ? AND status IN ('PENDING','APPROVED','APPLYING') ORDER BY created_at"
+      : "SELECT id, session_id as sessionId, path, operation, target_path as targetPath, original_hash as originalHash, proposed_hash as proposedHash, original_content as originalContent, proposed_content as proposedContent, applied_content as appliedContent, patch, status, created_at as createdAt, updated_at as updatedAt FROM file_changes WHERE status IN ('PENDING','APPROVED','APPLYING') ORDER BY created_at";
     return (
       sessionId
         ? this.db.prepare(query).all(sessionId)
