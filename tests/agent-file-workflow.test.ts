@@ -22,7 +22,7 @@ class CodingProvider implements AIProvider {
   async *streamChat(request: ChatRequest): AsyncIterable<ChatChunk> {
     this.calls++;
     if (!request.messages.some(m => m.role === "tool")) {
-      yield { toolCalls: [{ id: "create-1", name: "create_file", arguments: { path: "src/agent-created.ts", content: "export const answer = 42;\\n" } }] };
+      yield { toolCalls: [{ id: "create-1", name: "create_file", arguments: { path: "src/agent-created.ts", content: "export const answer = 42;\n" } }] };
     } else {
       yield { content: "Created the requested file and verified the tool result." };
     }
