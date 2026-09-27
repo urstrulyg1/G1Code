@@ -9,6 +9,8 @@ export function unifiedDiff(
   filePath: string,
   original: string,
   proposed: string,
+  operation: "write" | "delete" = "write",
+  targetPath?: string,
 ) {
   const before = original.split(/\r?\n/);
   const after = proposed.split(/\r?\n/);
@@ -58,6 +60,32 @@ export async function applyApprovedChange(
       status: "CONFLICT" as const,
       reason: "File changed since it was inspected",
     };
+  if (operation === "delete") {
+    if (current === null) return { status: "CONFLICT" as const, reason: "File no longer exists" };
+    await fs.rm(filePath);
+    return {
+      status: "APPLIED" as const,
+      path: filePath,
+      originalHash,
+      proposedHash: contentHash(""),
+      patch: unifiedDiff(path.relative(workspace, filePath), original, ""),
+    };
+  }
+  if (operation === "rename") {
+    if (!targetPath) return { status: "CONFLICT" as const, reason: "Rename target is missing" };
+    const target = await safeRealPath(workspace, targetPath);
+    const targetCurrent = await fs.stat(target).catch(() => null);
+    if (targetCurrent) return { status: "CONFLICT" as const, reason: "Rename target already exists" };
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.rename(filePath, target);
+    return {
+      status: "APPLIED" as const,
+      path: filePath,
+      originalHash,
+      proposedHash: contentHash(proposed),
+      patch: unifiedDiff(path.relative(workspace, filePath), original, ""),
+    };
+  }
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, proposed, "utf8");
   return {
@@ -74,6 +102,8 @@ export async function revertAppliedChange(
   proposedHash: string,
   original: string,
   applied: string,
+  operation: "write" | "delete" = "write",
+  targetPath?: string,
 ) {
   const filePath = await safeRealPath(workspace, requestedPath);
   const current = await fs.readFile(filePath, "utf8").catch(() => null);
@@ -86,6 +116,20 @@ export async function revertAppliedChange(
       status: "CONFLICT" as const,
       reason: "File contains additional changes",
     };
+  if (operation === "delete") {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, original, "utf8");
+    return { status: "REVERTED" as const, path: filePath };
+  }
+  if (operation === "rename" && targetPath) {
+    const target = await safeRealPath(workspace, targetPath);
+    const source = await safeRealPath(workspace, requestedPath);
+    const targetStat = await fs.stat(target).catch(() => null);
+    if (!targetStat) return { status: "CONFLICT" as const, reason: "Renamed file is missing" };
+    await fs.mkdir(path.dirname(source), { recursive: true });
+    await fs.rename(target, source);
+    return { status: "REVERTED" as const, path: source };
+  }
   await fs.writeFile(filePath, original, "utf8");
   return { status: "REVERTED" as const, path: filePath };
 }
