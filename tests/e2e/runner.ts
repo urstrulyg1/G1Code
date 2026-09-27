@@ -26,7 +26,11 @@ async function runE2ESuite() {
     const smokePass = await new Promise<boolean>((resolve) => {
       const env = { ...process.env };
       delete env.ELECTRON_RUN_AS_NODE;
-      const child = spawn(electronBinary, [".", "--smoke"], {
+      const args =
+        process.platform === "linux"
+          ? [".", "--smoke", "--no-sandbox"]
+          : [".", "--smoke"];
+      const child = spawn(electronBinary, args, {
         stdio: "pipe",
         env,
       });
