@@ -47,6 +47,8 @@ export async function applyApprovedChange(
   originalHash: string,
   original: string,
   proposed: string,
+  operation: "write" | "delete" | "rename" = "write",
+  targetPath?: string,
 ) {
   const filePath = await safeRealPath(workspace, requestedPath);
   const current = await fs.readFile(filePath, "utf8").catch(() => null);
