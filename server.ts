@@ -1576,9 +1576,10 @@ const server = http.createServer(async (req, res) => {
           // ordinary coding actions are configured for automatic execution.
           if (tool.permission === "dangerous") {
             // fall through to the approval waiter
-          } else if (executionMode === "auto" || settings.autoExecution === "always") {
+          } else if (executionMode === "auto") {
             return true;
-          } else if (executionMode === "readonly" || settings.autoExecution === "never") {
+          } else {
+            // review mode intentionally pauses for an explicit user decision.
             return false;
           }
 
