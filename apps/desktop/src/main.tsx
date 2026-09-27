@@ -2405,7 +2405,7 @@ function App() {
     });
     setSettings(updated as SettingsType);
     if (sessionId && window.g1code.setSessionModel) {
-      await window.g1code.setSessionModel(sessionId, newModel);
+      await window.g1code.setSessionModel(sessionId, newModel, workspace);
     }
   };
 
