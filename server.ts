@@ -1549,7 +1549,7 @@ const server = http.createServer(async (req, res) => {
               : "";
           const isTestCommand = /(^|\s)(npm\s+(run\s+)?test|npx\s+(jest|vitest)|pytest|go\s+test|cargo\s+test|make\s+test)(\s|$)/i.test(commandText);
           const isBuildCommand = /(^|\s)(npm\s+(run\s+)?build|tsc(\s|$)|vite\s+build|electron-builder|go\s+build|cargo\s+build|make)(\s|$)/i.test(commandText);
-          const permissionAllowed =
+          let permissionAllowed =
             tool.name === "run_command"
               ? isTestCommand
                 ? permissions.runTests
@@ -1565,6 +1565,20 @@ const server = http.createServer(async (req, res) => {
                     : tool.name === "rename_file"
                       ? permissions.renameFiles
                       : tool.permission !== "dangerous";
+          if (tool.name === "write_file" && value && typeof value === "object") {
+            const requestedPath = String((value as { path?: unknown }).path ?? "");
+            if (requestedPath) {
+              const safeTarget = await safeRealPath(workspace, requestedPath);
+              try {
+                await fs.stat(safeTarget);
+                permissionAllowed = permissionAllowed && permissions.editFiles;
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT")
+                  permissionAllowed = permissions.createFiles;
+                else throw error;
+              }
+            }
+          }
           if (!permissionAllowed) return false;
 
           // Plan and read-only modes are enforced at the privileged boundary,
