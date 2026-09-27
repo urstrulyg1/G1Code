@@ -703,6 +703,12 @@ export class DatabaseStore {
       )
       .get(id) as FileChange | undefined;
   }
+  updateSessionModel(id: string, model: string) {
+    this.db
+      .prepare("UPDATE sessions SET model = ?, updated_at = ? WHERE id = ?")
+      .run(model, now(), id);
+  }
+
   getSession(id: string) {
     return this.db
       .prepare(
