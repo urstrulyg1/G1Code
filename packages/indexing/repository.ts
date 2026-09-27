@@ -112,9 +112,61 @@ export async function scanRepository(
 
   async function walkFallback(): Promise<string[]> {
     const files: string[] = [];
+    const ignorePatterns = await fs
+      .readFile(path.join(root, ".gitignore"), "utf8")
+      .then((text) =>
+        text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line && !line.startsWith("#") && !line.startsWith("!")),
+      )
+      .catch(() => []);
+
+    const globToRegExp = (pattern: string) => {
+      const normalized = pattern.replaceAll("\\", "/").replace(/^\.\//, "");
+      const escaped = normalized.replace(/[.+^$()|{}]/g, "\\  async function walkFallback(): Promise<string[]> {
+    const files: string[] = [];
     async function visit(directory: string) {
       for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
         if (entry.isDirectory() && !ignored.has(entry.name)) {
+          await visit(path.join(directory, entry.name));
+        } else if (entry.isFile()) {
+          files.push(path.relative(root, path.join(directory, entry.name)));
+        }
+      }
+    }
+    await visit(root);
+    return files;
+  }");
+      const regex = escaped
+        .replace(/\\\*\\\*/g, ".*")
+        .replace(/\\\*/g, "[^/]*")
+        .replace(/\\\?/g, "[^/]");
+      return new RegExp(
+        normalized.endsWith("/")
+          ? "^" + regex
+          : normalized.includes("/")
+            ? "^" + regex + "$"
+            : "(^|/)" + regex + "$",
+      );
+    };
+    const ignoredByFile = ignorePatterns.map((pattern) => ({
+      directory: pattern.endsWith("/"),
+      regex: globToRegExp(pattern),
+    }));
+    const shouldIgnore = (relativePath: string) => {
+      const normalized = relativePath.replaceAll("\\", "/");
+      return ignoredByFile.some(({ regex }) => regex.test(normalized));
+    };
+
+    async function visit(directory: string) {
+      for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+        const relative = path
+          .relative(root, path.join(directory, entry.name))
+          .replaceAll("\\", "/");
+        if (ignored.has(entry.name) || shouldIgnore(relative + (entry.isDirectory() ? "/" : "")))
+          continue;
+        if (entry.isDirectory()) {
           await visit(path.join(directory, entry.name));
         } else if (entry.isFile()) {
           files.push(path.relative(root, path.join(directory, entry.name)));
