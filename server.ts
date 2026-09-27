@@ -13,7 +13,7 @@ import { captureGitBaseline, attributeFiles } from "./packages/git/baseline";
 import { safeRealPath, workspaceTools } from "./packages/tools/workspace";
 import { gitTools } from "./packages/tools/git";
 import { testingTools } from "./packages/testing/tool";
-import { ToolRegistry } from "./packages/tools/types";
+import { ToolRegistry, type AgentTool } from "./packages/tools/types";
 import {
   AgentRuntime,
   type AgentEvent,
@@ -1193,6 +1193,42 @@ const server = http.createServer(async (req, res) => {
       [...workspaceTools(), ...gitTools(), ...testingTools()].forEach((tool) =>
         registry.register(tool),
       );
+
+      // Persistent repository context is exposed as a safe read-only tool.
+      // This lets the agent use the durable index for targeted context instead
+      // of repeatedly scanning the repository from scratch.
+      const repositoryContextTool: AgentTool = {
+        name: "search_repository_context",
+        description:
+          "Search the persistent workspace index for relevant symbols and files. Prefer this for repository-wide context discovery before broad file scans.",
+        permission: "safe",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            limit: { type: "number" },
+          },
+          required: ["query"],
+        },
+        execute: async (value, context) => {
+          const input = value as { query?: unknown; limit?: unknown };
+          const query = typeof input.query === "string" ? input.query.trim() : "";
+          if (!query) return { content: JSON.stringify({ symbols: [], files: [] }) };
+          const limit =
+            typeof input.limit === "number" && Number.isFinite(input.limit)
+              ? Math.max(1, Math.min(50, Math.floor(input.limit)))
+              : 20;
+          const symbols = store.searchSymbols(context.workspace, query).slice(0, limit);
+          const files = store
+            .indexedFiles(context.workspace)
+            .filter((entry) => entry.path.toLowerCase().includes(query.toLowerCase()))
+            .slice(0, limit);
+          return {
+            content: JSON.stringify({ query, symbols, files }),
+          };
+        },
+      };
+      registry.register(repositoryContextTool);
 
       const requestedSessionId =
         typeof body.sessionId === "string" ? body.sessionId.trim() : "";
