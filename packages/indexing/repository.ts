@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
+
+const MAX_INDEXABLE_FILE_BYTES = 2 * 1024 * 1024;
 export type FileIndexEntry = {
   path: string;
   language: string;
@@ -88,26 +93,74 @@ export async function scanRepository(
 ): Promise<FileIndexEntry[]> {
   const result: FileIndexEntry[] = [];
   let scanned = 0;
-  async function visit(directory: string) {
-    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
-      if (entry.isDirectory() && !ignored.has(entry.name))
-        await visit(path.join(directory, entry.name));
-      else if (entry.isFile() && !sensitive.test(entry.name)) {
-        const file = path.join(directory, entry.name);
-        const content = await fs.readFile(file).catch(() => null);
-        if (!content) continue;
-        const stat = await fs.stat(file);
-        result.push({
-          path: path.relative(root, file),
-          language: language(file),
-          size: stat.size,
-          modifiedTime: stat.mtime.toISOString(),
-          hash: createHash("sha256").update(content).digest("hex"),
-        });
-        onProgress?.(++scanned);
-      }
+
+  async function gitCandidates(): Promise<string[] | null> {
+    try {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        { cwd: root, maxBuffer: 10 * 1024 * 1024 },
+      );
+      return stdout
+        .split("\0")
+        .filter(Boolean)
+        .map((entry) => entry.split(path.sep).join("/"));
+    } catch {
+      return null;
     }
   }
-  await visit(root);
+
+  async function walkFallback(): Promise<string[]> {
+    const files: string[] = [];
+    async function visit(directory: string) {
+      for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+        if (entry.isDirectory() && !ignored.has(entry.name)) {
+          await visit(path.join(directory, entry.name));
+        } else if (entry.isFile()) {
+          files.push(path.relative(root, path.join(directory, entry.name)));
+        }
+      }
+    }
+    await visit(root);
+    return files;
+  }
+
+  const candidates = (await gitCandidates()) ?? (await walkFallback());
+
+  for (const relativePath of candidates) {
+    const file = path.resolve(root, relativePath);
+    let stat;
+    try {
+      stat = await fs.lstat(file);
+    } catch {
+      continue;
+    }
+
+    // Never index symlink targets. Git may legitimately track symlinks, but
+    // following them would make repository context cross workspace boundaries.
+    if (!stat.isFile() || stat.isSymbolicLink()) continue;
+    if (stat.size > MAX_INDEXABLE_FILE_BYTES) continue;
+
+    const baseName = path.basename(relativePath);
+    if (sensitive.test(baseName)) continue;
+
+    const content = await fs.readFile(file).catch(() => null);
+    if (!content || content.length === 0) continue;
+
+    // Binary/media/generated blobs do not provide useful symbol context and
+    // can be extremely expensive to hash/index.
+    if (content.subarray(0, Math.min(content.length, 8192)).includes(0)) continue;
+
+    result.push({
+      path: path.relative(root, file),
+      language: language(file),
+      size: stat.size,
+      modifiedTime: stat.mtime.toISOString(),
+      hash: createHash("sha256").update(content).digest("hex"),
+    });
+    onProgress?.(++scanned);
+  }
+
+  result.sort((a, b) => a.path.localeCompare(b.path));
   return result;
 }
