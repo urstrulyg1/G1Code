@@ -148,7 +148,7 @@ export class DatabaseStore {
   sessionMessages(sessionId: string) {
     return this.db
       .prepare(
-        "SELECT id, role, content, created_at as createdAt FROM messages WHERE session_id = ? ORDER BY created_at",
+        "SELECT id, role, content, created_at as createdAt FROM messages WHERE session_id = ? ORDER BY created_at, rowid",
       )
       .all(sessionId) as Array<{
       id: string;
@@ -569,7 +569,7 @@ export class DatabaseStore {
   sessionEvents(sessionId: string) {
     return this.db
       .prepare(
-        "SELECT id,session_id as sessionId,event_type as eventType,payload,timestamp FROM agent_events WHERE session_id = ? ORDER BY timestamp",
+        "SELECT id,session_id as sessionId,event_type as eventType,payload,timestamp FROM agent_events WHERE session_id = ? ORDER BY timestamp, rowid",
       )
       .all(sessionId)
       .map((row) => ({
