@@ -86,6 +86,8 @@ type Event = {
   chunk?: string;
   exitCode?: number;
   duration?: number;
+  requestId?: string;
+  seq?: number;
 };
 type Change = {
   id: string;
