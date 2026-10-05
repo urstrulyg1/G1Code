@@ -67,3 +67,31 @@ test("annotation escaping never breaks the workflow command", () => {
   assert.equal(escaped.includes("\r"), false);
   assert.match(escaped, /100%25 done/);
 });
+
+test("nested subtest failures report the innermost error, not 'test failed'", () => {
+  const nested = `not ok 4 - database stores sessions
+  ---
+  duration_ms: 12
+  type: 'test'
+  failureType: 'subtestFailed'
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+    ---
+    error: 'Could not locate the bindings file'
+    code: 'MODULE_NOT_FOUND'
+    stack: 'Error: Could not locate the bindings file'
+    ...
+  ...
+1..4
+# tests 4
+# pass 0
+# fail 1
+`;
+  const failures = parseTapFailures(nested);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].detail, /Could not locate the bindings file/);
+  const annotations = annotationsFor(nested);
+  assert.match(annotations[0], /title=database stores sessions/);
+  assert.match(annotations[0], /MODULE_NOT_FOUND/);
+});

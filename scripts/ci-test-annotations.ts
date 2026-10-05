@@ -38,24 +38,51 @@ export function parseTapFailures(report: string): FailedTest[] {
   const lines = report.split("\n");
   const failures: FailedTest[] = [];
   for (let index = 0; index < lines.length; index += 1) {
-    const match = /^not ok \d+ - (.*)$/.exec(lines[index]);
+    // Nested subtests are indented, so leading whitespace is allowed here.
+    const match = /^\s*not ok \d+ - (.*)$/.exec(lines[index]);
     if (!match) continue;
-    const name = match[1].replace(/\s*#\s*(SKIP|TODO).*$/i, "").trim();
     if (/#\s*(SKIP|TODO)/i.test(match[1])) continue;
-    let detail = "";
+    const name = match[1].replace(/\s*#\s*(SKIP|TODO).*$/i, "").trim();
+
+    // Collect the diagnostic keys of this failure *and* of any nested subtest
+    // block that follows it, so the annotation carries the real error instead
+    // of a generic "test failed".
+    const details = new Map<string, string[]>();
     for (
       let look = index + 1;
-      look < Math.min(index + 40, lines.length);
+      look < Math.min(index + 120, lines.length);
       look += 1
     ) {
       const line = lines[look];
-      if (/^not ok \d+ - /.test(line) || /^ok \d+ - /.test(line)) break;
-      const error = /^\s*(?:error|message):\s*(.*)$/.exec(line);
-      if (error && error[1].trim()) {
-        detail = error[1].trim();
+      const next = /^\s*not ok \d+ - /.exec(line);
+      if (
+        next &&
+        (line.match(/^\s*/)?.[0].length ?? 0) <=
+          (lines[index].match(/^\s*/)?.[0].length ?? 0)
+      )
         break;
-      }
+      const key =
+        /^\s*(error|code|stack|actual|expected|operator|failureType|message):\s*(.*)$/.exec(
+          line,
+        );
+      if (!key || !key[2].trim()) continue;
+      const values = details.get(key[1]) ?? [];
+      values.push(key[2].trim().slice(0, 600));
+      details.set(key[1], values);
     }
+    // Nested subtest failures repeat these keys, so pick the most specific
+    // value (the innermost error) rather than the generic outer "test failed".
+    const specific = (values: string[] | undefined) =>
+      values?.find(
+        (value) =>
+          !/^'?(test failed|subtestFailed|ERR_TEST_FAILURE)'?$/.test(value),
+      ) ??
+      values?.[0] ??
+      "";
+    const detail = ["error", "code", "actual", "expected", "operator", "stack"]
+      .filter((key) => details.has(key))
+      .map((key) => `${key}: ${specific(details.get(key))}`)
+      .join(" | ");
     failures.push({ name, detail });
   }
   return failures;
