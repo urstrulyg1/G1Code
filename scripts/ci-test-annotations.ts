@@ -125,8 +125,10 @@ export function rawTailAnnotation(report: string, maxChars = 3_500): string[] {
 export function annotationsFor(report: string): string[] {
   const failures = parseTapFailures(report);
   const lines = [
+    // GitHub keeps at most 10 error annotations per step, so name a few
+    // failures and always keep room for the raw tail below.
     ...failures
-      .slice(0, 20)
+      .slice(0, 4)
       .map(
         (failure) =>
           `::error title=${escapeAnnotation(failure.name)}::${escapeAnnotation(failure.detail || "test failed")}`,
