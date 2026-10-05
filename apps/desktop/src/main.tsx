@@ -62,33 +62,16 @@ import {
   Moon,
 } from "lucide-react";
 import "./styles.css";
+import {
+  ACTIVITY_LABELS,
+  agentActivity,
+  isTerminalEvent,
+  mergeAgentEvent,
+  type Event,
+} from "./agent-events";
 
 type Entry = { name: string; kind: "file" | "directory" };
 type Tab = { path: string; content: string; dirty: boolean };
-type Event = {
-  id?: string;
-  /** IDs folded into this visual event when streaming chunks are merged. */
-  eventIds?: string[];
-  sessionId?: string;
-  at?: string;
-  type: string;
-  state?: string;
-  message?: string;
-  detail?: string;
-  toolName?: string;
-  toolCallId?: string;
-  changeId?: string;
-  input?: unknown;
-  result?: unknown;
-  command?: string;
-  action?: string;
-  stream?: "stdout" | "stderr";
-  chunk?: string;
-  exitCode?: number;
-  duration?: number;
-  requestId?: string;
-  seq?: number;
-};
 type Change = {
   id: string;
   sessionId?: string;
@@ -407,122 +390,7 @@ function cleanAssistantText(raw: string): string {
  *  - `command` chunks attach to their tool call
  *  - a resolved `approval` (with `result`) updates the pending card in place
  */
-function mergeAgentEvent(old: Event[], event: Event): Event[] {
-  if (
-    event.requestId &&
-    typeof event.seq === "number" &&
-    old.some(
-      (existing) =>
-        existing.requestId === event.requestId &&
-        typeof existing.seq === "number" &&
-        (existing.seq as number) >= (event.seq as number),
-    )
-  )
-    return old;
 
-  const incomingIds = [
-    ...(event.eventIds || []),
-    ...(event.id ? [event.id] : []),
-  ];
-  // SSE, history replay, and the polling backfill can all deliver the same
-  // durable event. Treat the event id as the source of truth instead of using
-  // array length (text chunks are intentionally folded into fewer rows).
-  if (
-    incomingIds.length > 0 &&
-    old.some((existing) =>
-      incomingIds.some(
-        (id) => id === existing.id || Boolean(existing.eventIds?.includes(id)),
-      ),
-    )
-  ) {
-    return old;
-  }
-
-  const normalized: Event = {
-    ...event,
-    eventIds: incomingIds.length > 0 ? incomingIds : undefined,
-  };
-
-  if (event.type === "text") {
-    if (!event.message) return old;
-    const last = old[old.length - 1];
-    if (last && last.type === "text") {
-      return [
-        ...old.slice(0, -1),
-        {
-          ...last,
-          message: (last.message || "") + event.message,
-          eventIds: [
-            ...(last.eventIds || (last.id ? [last.id] : [])),
-            ...incomingIds,
-          ],
-          id: undefined,
-          seq: event.seq,
-          requestId: event.requestId,
-        },
-      ];
-    }
-    return [...old, normalized];
-  }
-
-  if (
-    event.type === "command" &&
-    event.action === "chunk" &&
-    event.toolCallId
-  ) {
-    const idx = old.findIndex(
-      (e) =>
-        (e.type === "command" || e.type === "tool") &&
-        e.toolCallId === event.toolCallId,
-    );
-    if (idx !== -1) {
-      const copy = [...old];
-      copy[idx] = {
-        ...copy[idx],
-        chunk: (copy[idx].chunk || "") + (event.chunk || event.message || ""),
-        eventIds: [
-          ...(copy[idx].eventIds || (copy[idx].id ? [copy[idx].id] : [])),
-          ...incomingIds,
-        ],
-        id: undefined,
-        seq: event.seq,
-        requestId: event.requestId,
-      };
-      return copy;
-    }
-  }
-
-  if (event.type === "approval" && event.result) {
-    const idx = old.findIndex((e) => {
-      if (e.type !== "approval") return false;
-      const inputId =
-        e.input && typeof e.input === "object"
-          ? (e.input as { changeId?: string }).changeId
-          : undefined;
-      return (
-        (event.changeId && (inputId || e.changeId) === event.changeId) ||
-        (event.toolCallId && e.toolCallId === event.toolCallId)
-      );
-    });
-    if (idx !== -1) {
-      const copy = [...old];
-      copy[idx] = {
-        ...copy[idx],
-        result: event.result,
-        action: event.action || "resolved",
-        message: event.message,
-        eventIds: [
-          ...(copy[idx].eventIds || (copy[idx].id ? [copy[idx].id] : [])),
-          ...incomingIds,
-        ],
-        id: undefined,
-      };
-      return copy;
-    }
-  }
-
-  return [...old, normalized];
-}
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getLanguage(filePath: string): string {
@@ -939,6 +807,9 @@ function App() {
     | "readonly"
   >("review");
   const [events, setEvents] = useState<Event[]>([]);
+  const [contextManifest, setContextManifest] = useState<
+    Event["manifest"] | null
+  >(null);
   const [changes, setChanges] = useState<Change[]>([]);
   const [sessions, setSessions] = useState<
     Array<{
@@ -1518,14 +1389,30 @@ function App() {
       if (event.sessionId && !currentId && pendingSessionRef.current) return;
       if (event.sessionId && !currentId && !pendingSessionRef.current) return;
 
-      setEvents((old) => mergeAgentEvent(old, event));
+      if (event.type === "context" && event.manifest) {
+        // Automatic context assembly: show what was actually given to the
+        // model instead of a raw transport event.
+        const included = event.manifest.included ?? [];
+        setContextManifest(event.manifest);
+        setEvents((old) =>
+          mergeAgentEvent(old, {
+            ...event,
+            message: included.length
+              ? `Context assembled: ${included
+                  .slice(0, 4)
+                  .map((entry) => entry.path)
+                  .filter(Boolean)
+                  .join(
+                    ", ",
+                  )}${included.length > 4 ? ` +${included.length - 4} more` : ""}`
+              : "Context assembled: no repository files matched this request.",
+          }),
+        );
+      } else {
+        setEvents((old) => mergeAgentEvent(old, event));
+      }
 
-      if (
-        event.type === "done" ||
-        ["COMPLETED", "FAILED", "STOPPED", "CANCELLED", "INTERRUPTED"].includes(
-          event.state ?? "",
-        )
-      ) {
+      if (isTerminalEvent(event)) {
         setRunning(false);
         pendingSessionRef.current = false;
         setPermission(null);
@@ -5143,6 +5030,25 @@ function App() {
 
                 return (
                   <div className="activity-timeline">
+                    {contextManifest &&
+                      (contextManifest.included?.length ?? 0) > 0 && (
+                        <div className="chat-context-summary">
+                          <FileText size={11} />
+                          <span>
+                            {contextManifest.included?.length} context file(s)
+                            {typeof contextManifest.usedChars === "number"
+                              ? ` · ${Math.round(contextManifest.usedChars / 1000)}k chars`
+                              : ""}
+                          </span>
+                          <span className="chat-context-summary-files">
+                            {(contextManifest.included ?? [])
+                              .slice(0, 5)
+                              .map((entry) => entry.path)
+                              .filter(Boolean)
+                              .join(", ")}
+                          </span>
+                        </div>
+                      )}
                     {segments.map((seg, sIdx) => {
                       // ── 1. User turn ─────────────────────────────────────────────────────
                       if (seg.kind === "user") {

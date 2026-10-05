@@ -66,6 +66,12 @@ export type ChatResponse = {
 };
 export type ChatChunk = {
   content?: string;
+  /**
+   * Optional reasoning/thinking delta. Providers that do not emit one leave
+   * this undefined. The agent never persists or displays the content — it only
+   * reports that reasoning activity is happening (see AGENTS.md / docs).
+   */
+  reasoning?: string;
   toolCalls?: ToolCall[];
   done?: boolean;
   usage?: Usage;

@@ -10,6 +10,14 @@ import {
 import { ChatStorage } from "./chat-storage";
 
 const now = () => new Date().toISOString();
+
+function safeParse(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
 export class DatabaseStore {
   private readonly unsubscribeEviction?: () => void;
 
@@ -459,6 +467,15 @@ export class DatabaseStore {
       )
       .all(sessionId) as Array<{ path: string; status: string }>;
   }
+  /** Full change history for one session, including resolved changes. */
+  changeHistory(sessionId: string) {
+    return this.db
+      .prepare(
+        "SELECT id, session_id as sessionId, path, operation, target_path as targetPath, original_hash as originalHash, proposed_hash as proposedHash, original_content as originalContent, proposed_content as proposedContent, applied_content as appliedContent, patch, status, created_at as createdAt, updated_at as updatedAt FROM file_changes WHERE session_id = ? ORDER BY created_at",
+      )
+      .all(sessionId) as FileChange[];
+  }
+
   sessionSummaryData(sessionId: string) {
     return {
       session: this.getSession(sessionId),
@@ -510,6 +527,359 @@ export class DatabaseStore {
       ? { ...row, checkpoint: JSON.parse(row.checkpoint) as unknown }
       : undefined;
   }
+
+  // -------------------------------------------------------------------------
+  // Phase 4 repository intelligence
+  // -------------------------------------------------------------------------
+
+  replaceImports(
+    workspaceId: string,
+    filePath: string,
+    imports: Array<{
+      module: string;
+      kind: string;
+      line: number;
+      resolvedPath?: string | null;
+      names?: string[];
+    }>,
+  ) {
+    const transaction = this.db.transaction(() => {
+      this.db
+        .prepare("DELETE FROM file_imports WHERE workspace_id = ? AND path = ?")
+        .run(workspaceId, filePath);
+      const insert = this.db.prepare(
+        "INSERT OR REPLACE INTO file_imports (workspace_id, path, module, kind, line, resolved_path, names) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
+      for (const item of imports)
+        insert.run(
+          workspaceId,
+          filePath,
+          item.module,
+          item.kind,
+          item.line,
+          item.resolvedPath ?? null,
+          item.names ? JSON.stringify(item.names) : null,
+        );
+    });
+    transaction();
+  }
+
+  importsForFile(workspaceId: string, filePath: string) {
+    return this.db
+      .prepare(
+        "SELECT module, kind, line, resolved_path as resolvedPath FROM file_imports WHERE workspace_id = ? AND path = ? ORDER BY line",
+      )
+      .all(workspaceId, filePath) as Array<{
+      module: string;
+      kind: string;
+      line: number;
+      resolvedPath: string | null;
+    }>;
+  }
+
+  /** Files that import the given path (reverse dependency lookup). */
+  importerPaths(workspaceId: string, filePath: string, limit = 50) {
+    return this.db
+      .prepare(
+        "SELECT DISTINCT path FROM file_imports WHERE workspace_id = ? AND resolved_path = ? ORDER BY path LIMIT ?",
+      )
+      .all(workspaceId, filePath, limit) as Array<{ path: string }>;
+  }
+
+  searchImports(workspaceId: string, query: string, limit = 100) {
+    return this.db
+      .prepare(
+        "SELECT DISTINCT path, module FROM file_imports WHERE workspace_id = ? AND lower(module) LIKE lower(?) LIMIT ?",
+      )
+      .all(workspaceId, `%${query}%`, limit) as Array<{
+      path: string;
+      module: string;
+    }>;
+  }
+
+  symbolsForFile(workspaceId: string, filePath: string) {
+    return this.db
+      .prepare(
+        "SELECT symbol, kind, line, column_number as column, parent FROM symbols WHERE workspace_id = ? AND path = ? ORDER BY line",
+      )
+      .all(workspaceId, filePath) as Array<{
+      symbol: string;
+      kind: string;
+      line: number;
+      column: number;
+      parent: string | null;
+    }>;
+  }
+
+  replaceFileGitMeta(
+    workspaceId: string,
+    entries: Array<{
+      path: string;
+      status: string;
+      lastCommit?: string | null;
+      lastCommitAt?: string | null;
+      lastCommitSubject?: string | null;
+    }>,
+  ) {
+    const transaction = this.db.transaction(() => {
+      this.db
+        .prepare("DELETE FROM file_git_meta WHERE workspace_id = ?")
+        .run(workspaceId);
+      const insert = this.db.prepare(
+        "INSERT OR REPLACE INTO file_git_meta (workspace_id, path, status, last_commit, last_commit_at, last_commit_subject) VALUES (?, ?, ?, ?, ?, ?)",
+      );
+      for (const entry of entries)
+        insert.run(
+          workspaceId,
+          entry.path,
+          entry.status,
+          entry.lastCommit ?? null,
+          entry.lastCommitAt ?? null,
+          entry.lastCommitSubject ?? null,
+        );
+    });
+    transaction();
+  }
+
+  fileGitMeta(workspaceId: string, filePath: string) {
+    return this.db
+      .prepare(
+        "SELECT status, last_commit as lastCommit, last_commit_at as lastCommitAt, last_commit_subject as lastCommitSubject FROM file_git_meta WHERE workspace_id = ? AND path = ?",
+      )
+      .get(workspaceId, filePath) as
+      | {
+          status: string;
+          lastCommit: string | null;
+          lastCommitAt: string | null;
+          lastCommitSubject: string | null;
+        }
+      | undefined;
+  }
+
+  gitModifiedFiles(workspaceId: string) {
+    return this.db
+      .prepare(
+        "SELECT path, status FROM file_git_meta WHERE workspace_id = ? AND status NOT IN ('', 'clean') ORDER BY path",
+      )
+      .all(workspaceId) as Array<{ path: string; status: string }>;
+  }
+
+  recentIndexedFiles(workspaceId: string, limit = 25) {
+    return this.db
+      .prepare(
+        "SELECT path, language, size, modified_time as modifiedTime FROM files WHERE workspace_id = ? ORDER BY modified_time DESC LIMIT ?",
+      )
+      .all(workspaceId, limit) as Array<{
+      path: string;
+      language: string;
+      size: number;
+      modifiedTime: string;
+    }>;
+  }
+
+  searchIndexedFiles(workspaceId: string, query: string, limit = 100) {
+    return this.db
+      .prepare(
+        "SELECT path, language, size, modified_time as modifiedTime FROM files WHERE workspace_id = ? AND lower(path) LIKE lower(?) ORDER BY length(path), path LIMIT ?",
+      )
+      .all(workspaceId, `%${query}%`, limit) as Array<{
+      path: string;
+      language: string;
+      size: number;
+      modifiedTime: string;
+    }>;
+  }
+
+  indexFreshness(workspaceId: string) {
+    return this.db
+      .prepare(
+        "SELECT indexed_at as indexedAt FROM repository_indexes WHERE workspace_id = ?",
+      )
+      .get(workspaceId) as { indexedAt: string } | undefined;
+  }
+
+  markIndexed(workspaceId: string) {
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO repository_indexes (workspace_id, indexed_at) VALUES (?, ?)",
+      )
+      .run(workspaceId, now());
+  }
+
+  addVerificationRun(run: {
+    id: string;
+    sessionId?: string | null;
+    workspaceId: string;
+    status: string;
+    level: string;
+    changedFiles: string[];
+    steps: unknown;
+    summary: string;
+  }) {
+    this.db
+      .prepare(
+        "INSERT INTO verification_runs (id, session_id, workspace_id, status, level, changed_files, steps, summary, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        run.id,
+        run.sessionId ?? null,
+        run.workspaceId,
+        run.status,
+        run.level,
+        JSON.stringify(run.changedFiles),
+        JSON.stringify(run.steps),
+        run.summary,
+        now(),
+        run.status === "RUNNING" ? null : now(),
+      );
+    return run.id;
+  }
+
+  updateVerificationRun(
+    id: string,
+    status: string,
+    steps: unknown,
+    summary: string,
+  ) {
+    this.db
+      .prepare(
+        "UPDATE verification_runs SET status = ?, steps = ?, summary = ?, completed_at = ? WHERE id = ?",
+      )
+      .run(status, JSON.stringify(steps), summary, now(), id);
+  }
+
+  verificationRun(id: string) {
+    const row = this.db
+      .prepare(
+        "SELECT id, session_id as sessionId, workspace_id as workspaceId, status, level, changed_files as changedFiles, steps, summary, created_at as createdAt, completed_at as completedAt FROM verification_runs WHERE id = ?",
+      )
+      .get(id) as
+      | {
+          id: string;
+          sessionId: string | null;
+          workspaceId: string;
+          status: string;
+          level: string;
+          changedFiles: string;
+          steps: string;
+          summary: string;
+          createdAt: string;
+          completedAt: string | null;
+        }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      ...row,
+      changedFiles: JSON.parse(row.changedFiles) as string[],
+      steps: JSON.parse(row.steps) as unknown,
+    };
+  }
+
+  verificationRuns(workspaceId: string, sessionId?: string, limit = 20) {
+    const rows = (
+      sessionId
+        ? this.db
+            .prepare(
+              "SELECT id, session_id as sessionId, status, level, changed_files as changedFiles, steps, summary, created_at as createdAt, completed_at as completedAt FROM verification_runs WHERE workspace_id = ? AND session_id = ? ORDER BY created_at DESC LIMIT ?",
+            )
+            .all(workspaceId, sessionId, limit)
+        : this.db
+            .prepare(
+              "SELECT id, session_id as sessionId, status, level, changed_files as changedFiles, steps, summary, created_at as createdAt, completed_at as completedAt FROM verification_runs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
+            )
+            .all(workspaceId, limit)
+    ) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      ...row,
+      changedFiles: JSON.parse(String(row.changedFiles)) as string[],
+      steps: JSON.parse(String(row.steps)) as unknown,
+    }));
+  }
+
+  sessionChangeStats(sessionId: string) {
+    const row = this.db
+      .prepare(
+        "SELECT COUNT(*) as total, SUM(CASE WHEN status = 'APPLIED' THEN 1 ELSE 0 END) as applied, SUM(CASE WHEN status = 'CONFLICT' THEN 1 ELSE 0 END) as conflicts FROM file_changes WHERE session_id = ?",
+      )
+      .get(sessionId) as
+      | {
+          total: number | null;
+          applied: number | null;
+          conflicts: number | null;
+        }
+      | undefined;
+    return {
+      total: row?.total ?? 0,
+      applied: row?.applied ?? 0,
+      conflicts: row?.conflicts ?? 0,
+    };
+  }
+
+  renameSession(id: string, title: string) {
+    this.db
+      .prepare("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?")
+      .run(title.slice(0, 200), now(), id);
+  }
+
+  setSessionArchived(id: string, archived: boolean) {
+    this.db
+      .prepare("UPDATE sessions SET archived = ?, updated_at = ? WHERE id = ?")
+      .run(archived ? 1 : 0, now(), id);
+  }
+
+  /**
+   * Recent sessions with the metadata the sidebar needs (change and
+   * verification counts) in one query instead of N+1 lookups from the renderer.
+   */
+  sessionHistory(workspaceId: string, limit = 50, includeArchived = false) {
+    const rows = this.db
+      .prepare(
+        `SELECT s.id, s.title, s.mode, s.status, s.model, s.created_at as createdAt, s.updated_at as updatedAt,
+                s.archived as archived,
+                (SELECT COUNT(*) FROM file_changes c WHERE c.session_id = s.id) as changeCount,
+                (SELECT COUNT(*) FROM file_changes c WHERE c.session_id = s.id AND c.status = 'APPLIED') as appliedCount,
+                (SELECT COUNT(*) FROM file_changes c WHERE c.session_id = s.id AND c.status = 'CONFLICT') as conflictCount,
+                (SELECT status FROM verification_runs v WHERE v.session_id = s.id ORDER BY v.created_at DESC LIMIT 1) as verificationStatus,
+                (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) as messageCount
+         FROM sessions s
+         WHERE s.workspace_id = ? ${includeArchived ? "" : "AND COALESCE(s.archived, 0) = 0"}
+         ORDER BY s.updated_at DESC LIMIT ?`,
+      )
+      .all(workspaceId, limit) as Array<Record<string, unknown>>;
+    return rows.map((row): Record<string, unknown> => ({
+      ...row,
+      archived: Boolean(row.archived),
+    }));
+  }
+
+  /**
+   * Deterministically ordered events for one session, used both for the live SSE
+   * stream and for restoration. `afterSeq` lets a client resume without gaps.
+   */
+  orderedSessionEvents(sessionId: string, afterSeq = 0, limit = 5000) {
+    const rows = this.db
+      .prepare(
+        "SELECT id, event_type as eventType, payload, timestamp FROM agent_events WHERE session_id = ? ORDER BY timestamp, rowid LIMIT ?",
+      )
+      .all(sessionId, limit) as Array<{
+      id: string;
+      eventType: string;
+      payload: string;
+      timestamp: string;
+    }>;
+    return rows
+      .map((row) => ({
+        id: row.id,
+        eventType: row.eventType,
+        timestamp: row.timestamp,
+        payload: safeParse(row.payload),
+      }))
+      .filter((entry) => {
+        const seq = (entry.payload as { seq?: number } | undefined)?.seq;
+        return typeof seq !== "number" || seq > afterSeq;
+      });
+  }
+
   searchSymbols(workspaceId: string, query: string) {
     return this.db
       .prepare(

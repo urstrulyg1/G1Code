@@ -21,6 +21,13 @@ export type ToolContext = {
   toolTimeoutMs?: number;
   changeService?: import("./change-service").ChangeService;
   sessionId?: string;
+  /**
+   * Phase 4: tools must report long-lived resources (child processes, timers,
+   * abort listeners) so a cancelled session can release them deterministically
+   * instead of leaking them until the process exits.
+   */
+  registerCleanup?: (cleanup: () => void | Promise<void>) => void;
+  trackProcess?: (child: { kill: (signal?: NodeJS.Signals) => void }) => void;
   recordTestRun?: (run: {
     command: string;
     cwd: string;

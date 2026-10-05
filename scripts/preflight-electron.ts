@@ -2,14 +2,44 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
+/**
+ * Phase 4: the Electron preflight is a diagnostic, not a gate for work that
+ * does not need a browser window. TypeScript checks, unit tests, the backend
+ * server, and the Vite build all work without the binary.
+ *
+ * `--strict` (or `G1CODE_REQUIRE_ELECTRON=1`) keeps the original hard failure so
+ * packaging and Electron smoke tests still fail loudly on a broken install.
+ */
+function strictMode(): boolean {
+  return (
+    process.env.G1CODE_REQUIRE_ELECTRON === "1" ||
+    process.argv.includes("--strict")
+  );
+}
+
+function fail(message: string): void {
+  if (strictMode()) {
+    console.error(message);
+    process.exit(1);
+  }
+  console.warn(message);
+  console.warn(
+    "[preflight] SKIPPED: Electron binary unavailable — continuing because strict mode is off.",
+  );
+  console.warn(
+    "[preflight] Run `npm run preflight:electron -- --strict` (or set G1CODE_REQUIRE_ELECTRON=1) to require it.",
+  );
+  process.exit(0);
+}
+
 export function preflightCheck(): void {
   console.log("=== ELECTRON PREFLIGHT HEALTH CHECK ===");
   const root = process.cwd();
   const electronDir = path.join(root, "node_modules", "electron");
 
   if (!existsSync(electronDir)) {
-    console.error("FAIL: node_modules/electron directory does not exist.");
-    process.exit(1);
+    fail("FAIL: node_modules/electron directory does not exist.");
+    return;
   }
   console.log("✔ Electron package installed");
 
@@ -19,22 +49,22 @@ export function preflightCheck(): void {
 
   const pathTxtPath = path.join(electronDir, "path.txt");
   if (!existsSync(pathTxtPath)) {
-    console.error("FAIL: node_modules/electron/path.txt does not exist.");
-    process.exit(1);
+    fail("FAIL: node_modules/electron/path.txt does not exist.");
+    return;
   }
   const platformPath = readFileSync(pathTxtPath, "utf8").trim();
   const execPath = path.join(electronDir, "dist", platformPath);
 
   if (!existsSync(execPath)) {
-    console.error(`FAIL: Electron binary does not exist at ${execPath}`);
-    process.exit(1);
+    fail(`FAIL: Electron binary does not exist at ${execPath}`);
+    return;
   }
   console.log(`✔ Electron binary exists: ${execPath}`);
 
   const stats = statSync(execPath);
   if (stats.size < 1000) {
-    console.error(`FAIL: Binary size suspicious (${stats.size} bytes)`);
-    process.exit(1);
+    fail(`FAIL: Binary size suspicious (${stats.size} bytes)`);
+    return;
   }
   console.log(
     `✔ Binary size valid (${(stats.size / 1024 / 1024).toFixed(2)} MB)`,
@@ -47,16 +77,16 @@ export function preflightCheck(): void {
     { encoding: "utf8", env },
   );
   if (run.error) {
-    console.error("FAIL: Could not execute Electron binary:", run.error);
-    process.exit(1);
+    fail(`FAIL: Could not execute Electron binary: ${String(run.error)}`);
+    return;
   }
 
   const actualVersion = (run.stdout || "").trim();
   if (actualVersion !== expectedVersion) {
-    console.error(
+    fail(
       `FAIL: Version mismatch. Expected v${expectedVersion}, got ${actualVersion}`,
     );
-    process.exit(1);
+    return;
   }
   console.log(`✔ Binary runnable and version matches: v${actualVersion}`);
 

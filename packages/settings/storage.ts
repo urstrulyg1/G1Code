@@ -52,6 +52,12 @@ export type Settings = {
 
 export function getAppDataDir(customDir?: string): string {
   if (customDir) return customDir;
+  // Headless/test override, kept in sync with `openDatabase` so the SQLite
+  // store and the settings/credential store always share one directory.
+  if (process.env.G1CODE_DATA_DIR) {
+    fsSync.mkdirSync(process.env.G1CODE_DATA_DIR, { recursive: true });
+    return process.env.G1CODE_DATA_DIR;
+  }
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const electron = require("electron");

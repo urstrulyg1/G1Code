@@ -21,25 +21,43 @@ env:
 
 jobs:
   quality:
-    name: Quality / tests
+    name: Quality / unit + security tests (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # better-sqlite3 v13 (the database layer) requires Node >= 22 and
+        # publishes no Node 20 prebuilds, so 22 is the real minimum.
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      # Electron downloads are best-effort: the preflight reports whether the
+      # binary is available without failing the unit-test job.
       - run: npm run preflight:electron
+      - run: npm run typecheck
       - run: npm run format:check
-      - run: npm test
+      - name: Unit + integration tests
+        run: |
+          set -o pipefail
+          npx tsx --test-reporter=tap --test tests/*.test.ts 2>&1 | tee /tmp/g1code-test.log
+      - name: Publish test failures as annotations
+        if: failure()
+        run: npx tsx scripts/ci-test-annotations.ts /tmp/g1code-test.log
+      - name: Security suites
+        run: npm run test:security
       - run: npm run build
-      - name: Electron smoke test
-        run: ${{ runner.os == 'Linux' && 'xvfb-run -a npm run e2e:smoke' || 'npm run e2e:smoke' }}
+      - name: Electron smoke test (Linux, xvfb)
+        if: matrix.node == 22
+        run: xvfb-run -a npm run e2e:smoke
 
   integration:
-    name: Integration (${{ matrix.os }})
+    name: Headless E2E (${{ matrix.os }})
     needs: quality
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
@@ -54,14 +72,30 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run preflight:electron
       - run: npm run build
-      - name: Desktop E2E
-        run: ${{ runner.os == 'Linux' && 'xvfb-run -a npm run e2e' || 'npm run e2e' }}
+      # No Electron binary and no network: a real backend, a temporary project,
+      # and a local mock provider exercise the full agent workflow.
+      - run: npm run e2e:backend
+
+  desktop:
+    name: Desktop E2E (electron)
+    needs: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run preflight:electron:strict
+      - run: npm run build
+      - run: xvfb-run -a npm run e2e:electron
 
   package:
     name: Package (${{ matrix.name }})
-    needs: [quality, integration]
+    needs: [integration]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -99,7 +133,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run preflight:electron
+      - run: npm run preflight:electron:strict
       - run: npm run build
       - run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} -p never --config electron-builder.json
       - name: Verify package artifact

@@ -10,11 +10,34 @@ import { ChatStorage } from "./packages/database/chat-storage";
 import { AgentRuntimeManager } from "./packages/agent/manager";
 import { ChangeService } from "./packages/tools/change-service";
 import { RepositoryIndexService } from "./packages/indexing/service";
+import {
+  RepositorySearchService,
+  type RepositorySearchKind,
+} from "./packages/indexing/search-service";
+import { repositoryTools } from "./packages/indexing/tools";
+import {
+  ContextAssembler,
+  type ContextManifest,
+} from "./packages/context/assembler";
 import { captureGitBaseline, attributeFiles } from "./packages/git/baseline";
 import { safeRealPath, workspaceTools } from "./packages/tools/workspace";
 import { gitTools } from "./packages/tools/git";
 import { testingTools } from "./packages/testing/tool";
 import { ToolRegistry, type AgentTool } from "./packages/tools/types";
+import {
+  decidePermission,
+  type PermissionVerdict,
+} from "./packages/security/permission-policy";
+import type { SessionLifecycleState } from "./packages/agent/lifecycle";
+import { redactObject, redactSecrets } from "./packages/security/redaction";
+import {
+  spawnExecutable,
+  spawnShell,
+  type CommandExecution,
+} from "./packages/tools/command";
+import { detectProject } from "./packages/testing/detector";
+import { discoverTests } from "./packages/testing/discovery";
+import { runTests } from "./packages/testing/runner";
 import {
   AgentRuntime,
   type AgentEvent,
@@ -52,6 +75,14 @@ for (const batch of store.activeChangeBatches()) {
 
 const manager = new AgentRuntimeManager();
 const indexService = new RepositoryIndexService(store);
+const searchService = new RepositorySearchService(store);
+const contextAssembler = new ContextAssembler({ store, search: searchService });
+
+/**
+ * Index the workspace once (coalesced by the service) but never block a
+ * request for more than this long. The index continues in the background.
+ */
+const FIRST_INDEX_WAIT_MS = 4_000;
 
 const APPROVAL_TIMEOUT_MS = Math.max(
   60_000,
@@ -255,6 +286,11 @@ function setCorsHeaders(res: http.ServerResponse, origin?: string) {
   res.setHeader("Access-Control-Max-Age", "600");
 }
 
+function sha256(content: string): string {
+  const { createHash } = require("node:crypto") as typeof import("node:crypto");
+  return createHash("sha256").update(content).digest("hex");
+}
+
 function sendJson(res: http.ServerResponse, status: number, data: unknown) {
   setCorsHeaders(res, res.getHeader("X-G1Code-Origin") as string | undefined);
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -323,6 +359,378 @@ function checkedWorkspace(inputWorkspace: string | undefined): string {
     throw new Error("Workspace mismatch; refusing cross-workspace access");
   }
   return candidate;
+}
+
+/**
+ * Phase 4: one permission decision for every tool call.
+ *
+ * The previous inline branch returned `false` for every non-dangerous tool in
+ * `review` mode (the default), which silently disabled edits, tests and
+ * commands. The decision now comes from `packages/security/permission-policy`
+ * so it is testable, documented, and identical for every entry point.
+ */
+async function evaluateToolPermission(input: {
+  tool: AgentTool;
+  value: unknown;
+  executionMode: "review" | "auto" | "plan" | "readonly";
+  permissions: Settings["toolPermissions"];
+  workspace: string;
+}): Promise<PermissionVerdict> {
+  const { tool, value, executionMode, permissions, workspace } = input;
+  const command =
+    tool.name === "run_command" && value && typeof value === "object"
+      ? String((value as { command?: unknown }).command ?? "")
+      : undefined;
+  let targetExists: boolean | undefined;
+  if (tool.name === "write_file" && value && typeof value === "object") {
+    const requestedPath = String((value as { path?: unknown }).path ?? "");
+    if (requestedPath) {
+      try {
+        const safeTarget = await safeRealPath(workspace, requestedPath);
+        await fs.stat(safeTarget);
+        targetExists = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT")
+          targetExists = false;
+        else targetExists = true; // fail closed: treat as an existing file
+      }
+    }
+  }
+  return decidePermission({
+    toolName: tool.name,
+    input: value,
+    executionMode,
+    permissions,
+    command,
+    targetExists,
+  });
+}
+
+/**
+ * Phase 4 verification pipeline.
+ *
+ * A verification run is a real sequence of bounded commands (typecheck, tests,
+ * build) executed inside the workspace with streaming output, persisted in
+ * `verification_runs`, and broadcast step-by-step so the renderer's
+ * VerificationPanel can show progress instead of a spinner.
+ *
+ * Levels are explicit so a one-line change never triggers a full build:
+ *   * `targeted`  — tests, narrowed to the given paths when possible
+ *   * `typecheck` — the project's typecheck script / `tsc --noEmit`
+ *   * `build`     — the project's build script
+ *   * `full`      — typecheck + targeted tests (build stays opt-in)
+ */
+type VerificationStep = {
+  name: string;
+  command: string;
+  status: "passed" | "failed" | "skipped";
+  exitCode?: number;
+  durationMs: number;
+  stdout?: string;
+  stderr?: string;
+  reason?: string;
+};
+
+async function fileExists(candidate: string): Promise<boolean> {
+  return fs
+    .stat(candidate)
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function readScriptsFile(workspace: string) {
+  try {
+    const raw = await fs.readFile(path.join(workspace, "package.json"), "utf8");
+    const parsed = JSON.parse(raw) as { scripts?: Record<string, string> };
+    return parsed.scripts ?? {};
+  } catch {
+    return {};
+  }
+}
+
+async function executeVerificationStep(input: {
+  workspace: string;
+  name: string;
+  command: string;
+  executable?: string;
+  args?: string[];
+  timeoutMs?: number;
+}): Promise<VerificationStep> {
+  const started = Date.now();
+  const timeoutMs = input.timeoutMs ?? 240_000;
+  try {
+    const execution: CommandExecution = input.executable
+      ? spawnExecutable({
+          executable: input.executable,
+          args: input.args ?? [],
+          cwd: input.workspace,
+          timeoutMs,
+        })
+      : spawnShell({
+          shellCommand: input.command,
+          cwd: input.workspace,
+          timeoutMs,
+        });
+    let stdout = "";
+    let stderr = "";
+    const drain = async (
+      stream: AsyncIterable<string>,
+      push: (chunk: string) => void,
+    ) => {
+      for await (const chunk of stream) push(chunk);
+    };
+    const [result] = await Promise.all([
+      execution.wait(),
+      drain(execution.stdout, (chunk) => {
+        stdout = (stdout + chunk).slice(-40_000);
+      }),
+      drain(execution.stderr, (chunk) => {
+        stderr = (stderr + chunk).slice(-10_000);
+      }),
+    ]);
+    return {
+      name: input.name,
+      command: input.command,
+      status: result.exitCode === 0 ? "passed" : "failed",
+      exitCode: result.exitCode,
+      durationMs: Date.now() - started,
+      stdout: redactSecrets(stdout.slice(-4_000)),
+      stderr: redactSecrets(stderr.slice(-2_000)),
+    };
+  } catch (error) {
+    return {
+      name: input.name,
+      command: input.command,
+      status: "failed",
+      durationMs: Date.now() - started,
+      stderr: redactSecrets(
+        error instanceof Error ? error.message : String(error),
+      ),
+    };
+  }
+}
+
+async function runVerification(input: {
+  workspace: string;
+  sessionId?: string;
+  paths?: string[];
+  level: "targeted" | "full" | "typecheck" | "build";
+  signal?: AbortSignal;
+}): Promise<{
+  id: string;
+  status: string;
+  level: string;
+  changedFiles: string[];
+  steps: VerificationStep[];
+  summary: string;
+  durationMs: number;
+}> {
+  const started = Date.now();
+  const { workspace, sessionId } = input;
+  const level = input.level;
+  const changedFiles = (input.paths ?? [])
+    .filter((entry) => typeof entry === "string" && entry.length < 500)
+    .slice(0, 200);
+  const scripts = await readScriptsFile(workspace);
+  const project = await detectProject(workspace).catch(() => null);
+  const steps: VerificationStep[] = [];
+  const runId = randomUUID();
+  store.addVerificationRun({
+    id: runId,
+    sessionId: sessionId ?? null,
+    workspaceId: workspace,
+    status: "RUNNING",
+    level,
+    changedFiles,
+    steps: [],
+    summary: "verification started",
+  });
+
+  const broadcastStep = (step: VerificationStep, index: number) =>
+    broadcastSSE({
+      type: "verification",
+      sessionId,
+      verificationId: runId,
+      level,
+      step: step.name,
+      status: step.status,
+      index,
+      total: steps.length,
+      message: `${step.name} ${step.status}`,
+    });
+
+  const push = (step: VerificationStep) => {
+    steps.push(step);
+    broadcastStep(step, steps.length);
+  };
+
+  const wantsTypecheck = level === "typecheck" || level === "full";
+  const wantsTests = level === "targeted" || level === "full";
+  const wantsBuild = level === "build";
+
+  if (wantsTypecheck) {
+    if (scripts.typecheck) {
+      push(
+        await executeVerificationStep({
+          workspace,
+          name: "typecheck",
+          command: "npm run typecheck",
+          timeoutMs: 240_000,
+        }),
+      );
+    } else if (await fileExists(path.join(workspace, "tsconfig.json"))) {
+      push(
+        await executeVerificationStep({
+          workspace,
+          name: "typecheck",
+          command: "npx --no-install tsc --noEmit",
+          timeoutMs: 240_000,
+        }),
+      );
+    } else {
+      push({
+        name: "typecheck",
+        command: "",
+        status: "skipped",
+        durationMs: 0,
+        reason: "No typecheck script or tsconfig.json in this workspace.",
+      });
+    }
+  }
+
+  if (wantsTests) {
+    if (!project) {
+      push({
+        name: "tests",
+        command: "",
+        status: "skipped",
+        durationMs: 0,
+        reason: "No supported test project detected.",
+      });
+    } else {
+      const startedTests = Date.now();
+      const candidates = await discoverTests(
+        workspace,
+        changedFiles,
+        project,
+      ).catch(() => []);
+      let execution: CommandExecution | undefined;
+      const run = await runTests(
+        project,
+        workspace,
+        candidates.slice(0, 5),
+        input.signal,
+        () => undefined,
+        (child) => {
+          execution = child;
+        },
+      ).catch((error: unknown) => ({
+        command: project.testCommand,
+        cwd: workspace,
+        targeted: false,
+        passed: false,
+        exitCode: -1,
+        result: undefined,
+        error,
+      }));
+      push({
+        name: run.targeted ? "tests (targeted)" : "tests",
+        command: run.command,
+        status: run.passed ? "passed" : "failed",
+        exitCode: run.exitCode,
+        durationMs: Date.now() - startedTests,
+        stdout: redactSecrets((run.result?.stdout ?? "").slice(-4_000)),
+        stderr: redactSecrets(
+          (
+            run.result?.stderr ??
+            ("error" in run && run.error instanceof Error
+              ? run.error.message
+              : "")
+          ).slice(-2_000),
+        ),
+      });
+      void execution;
+    }
+  }
+
+  if (wantsBuild) {
+    if (scripts.build) {
+      push(
+        await executeVerificationStep({
+          workspace,
+          name: "build",
+          command: "npm run build",
+          timeoutMs: 600_000,
+        }),
+      );
+    } else {
+      push({
+        name: "build",
+        command: "",
+        status: "skipped",
+        durationMs: 0,
+        reason: "No build script defined in package.json.",
+      });
+    }
+  }
+
+  const failed = steps.filter((step) => step.status === "failed");
+  const passed = steps.filter((step) => step.status === "passed");
+  const status = failed.length
+    ? "FAILED"
+    : passed.length
+      ? "PASSED"
+      : "SKIPPED";
+  const durationMs = Date.now() - started;
+  const summary = failed.length
+    ? `${failed.length} of ${steps.length} step(s) failed: ${failed.map((step) => step.name).join(", ")}`
+    : passed.length
+      ? `${passed.length} step(s) passed in ${(durationMs / 1000).toFixed(1)}s`
+      : "Nothing to verify for this workspace.";
+  store.updateVerificationRun(runId, status, steps, summary);
+  broadcastSSE({
+    type: "verification",
+    sessionId,
+    verificationId: runId,
+    level,
+    step: "complete",
+    status,
+    message: summary,
+  });
+  return { id: runId, status, level, changedFiles, steps, summary, durationMs };
+}
+
+/**
+ * `git blame --line-porcelain` parser. Returns one entry per source line with
+ * the commit, author, timestamp and content — bounded by the caller's range.
+ */
+function parseBlameOutput(output: string) {
+  const lines = output.split("\n");
+  const result: Array<{
+    hash: string;
+    line: number;
+    author?: string;
+    authorTime?: number;
+    summary?: string;
+    content: string;
+  }> = [];
+  let current: (typeof result)[number] | null = null;
+  for (const line of lines) {
+    const header = /^([0-9a-f]{7,40}) \d+ (\d+)(?: \d+)?$/.exec(line);
+    if (header) {
+      if (current) result.push(current);
+      current = { hash: header[1], line: Number(header[2]), content: "" };
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith("author ")) current.author = line.slice(7);
+    else if (line.startsWith("author-time "))
+      current.authorTime = Number(line.slice(12)) || undefined;
+    else if (line.startsWith("summary ")) current.summary = line.slice(8);
+    else if (line.startsWith("\t")) current.content = line.slice(1);
+  }
+  if (current) result.push(current);
+  return result;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -504,9 +912,12 @@ const server = http.createServer(async (req, res) => {
 
     // File write
     if (pathname === "/api/file/write" && req.method === "POST") {
-      const body = await parseJsonBody<{ filePath: string; contents: string }>(
-        req,
-      );
+      const body = await parseJsonBody<{
+        filePath: string;
+        contents: string;
+        /** sha256 of the content the caller believes is on disk. */
+        expectedHash?: string;
+      }>(req);
       if (!body.filePath || typeof body.contents !== "string") {
         return sendError(res, 400, "filePath and contents required");
       }
@@ -514,8 +925,37 @@ const server = http.createServer(async (req, res) => {
         ? path.relative(selectedWorkspace, body.filePath)
         : body.filePath;
       const safePath = await safeRealPath(selectedWorkspace, relPath);
-      await fs.writeFile(safePath, body.contents, "utf8");
-      return sendJson(res, 200, { success: true });
+
+      // Never silently overwrite: when the caller supplies the hash it read,
+      // a mismatch is reported as a conflict instead of clobbering the file.
+      const currentHash = await fs
+        .readFile(safePath, "utf8")
+        .then((content) => sha256(content))
+        .catch(() => null);
+      if (
+        typeof body.expectedHash === "string" &&
+        body.expectedHash &&
+        currentHash &&
+        body.expectedHash !== currentHash
+      ) {
+        return sendJson(res, 409, {
+          success: false,
+          written: false,
+          conflict: true,
+          currentHash,
+        });
+      }
+
+      // Atomic replace so a crash cannot leave a half-written file behind.
+      const temporary = `${safePath}.g1code-write-${randomUUID().slice(0, 8)}`;
+      await fs.writeFile(temporary, body.contents, { mode: 0o600 });
+      await fs.rename(temporary, safePath);
+      return sendJson(res, 200, {
+        success: true,
+        written: true,
+        conflict: false,
+        hash: sha256(body.contents),
+      });
     }
 
     // Terminal run
@@ -792,8 +1232,14 @@ const server = http.createServer(async (req, res) => {
       const workspace = checkedWorkspace(
         url.searchParams.get("workspace") || undefined,
       );
-      const sessions = store.recentSessions(workspace);
-      return sendJson(res, 200, sessions);
+      // Rich session metadata for the session sidebar: title, timestamps,
+      // status, changed-file counts and the latest verification result.
+      const includeArchived = url.searchParams.get("includeArchived") === "1";
+      return sendJson(
+        res,
+        200,
+        store.sessionHistory(workspace, 50, includeArchived),
+      );
     }
 
     // Session details
@@ -867,6 +1313,17 @@ const server = http.createServer(async (req, res) => {
         const session = store.getSession(sessionId);
         if (!session || !matchesWorkspace(session.workspaceId, workspace))
           return sendError(res, 403, "Session does not belong to workspace");
+      }
+      // The renderer's diff viewer and session sidebar need resolved changes
+      // too (APPLIED / REJECTED / REVERTED / CONFLICT), not only pending ones.
+      if (url.searchParams.get("includeResolved") === "1") {
+        if (!sessionId)
+          return sendError(
+            res,
+            400,
+            "sessionId is required for the full change history",
+          );
+        return sendJson(res, 200, store.changeHistory(sessionId));
       }
       return sendJson(res, 200, store.pendingChanges(sessionId));
     }
@@ -1145,8 +1602,8 @@ const server = http.createServer(async (req, res) => {
     if (pathname === "/api/index/rebuild" && req.method === "POST") {
       const body = await parseJsonBody<{ workspace?: string }>(req);
       const workspace = validWorkspace(body.workspace);
-      const entries = await indexService.index(workspace);
-      return sendJson(res, 200, { files: entries.length });
+      const result = await indexService.index(workspace);
+      return sendJson(res, 200, result);
     }
 
     // Search symbols
@@ -1162,6 +1619,387 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
+    // -----------------------------------------------------------------------
+    // Phase 4: repository intelligence, context assembly, verification,
+    // diagnostics, and git inspection. These are the endpoints the Electron
+    // bridge channels proxy to; every one of them is workspace-contained.
+    // -----------------------------------------------------------------------
+    if (pathname === "/api/repository/search" && req.method === "POST") {
+      const body = await parseJsonBody<{
+        workspace?: string;
+        query?: string;
+        limit?: number;
+        kind?: string;
+        contextPath?: string;
+      }>(req);
+      const workspace = checkedWorkspace(body.workspace);
+      const query = typeof body.query === "string" ? body.query.trim() : "";
+      if (!query) return sendError(res, 400, "query is required");
+      const kind: RepositorySearchKind = (
+        ["mixed", "filename", "symbol", "text", "recent"] as const
+      ).includes(body.kind as RepositorySearchKind)
+        ? (body.kind as RepositorySearchKind)
+        : "mixed";
+      const result = await searchService.search(workspace, query, {
+        limit:
+          typeof body.limit === "number" && Number.isFinite(body.limit)
+            ? Math.max(1, Math.min(100, Math.floor(body.limit)))
+            : 20,
+        kind,
+        contextPath:
+          typeof body.contextPath === "string" ? body.contextPath : undefined,
+      });
+      return sendJson(res, 200, result);
+    }
+
+    if (pathname === "/api/repository/status" && req.method === "GET") {
+      const workspace = checkedWorkspace(
+        url.searchParams.get("workspace") ?? undefined,
+      );
+      const files = store.indexedFiles(workspace);
+      const languages = new Map<string, number>();
+      for (const file of files)
+        languages.set(file.language, (languages.get(file.language) ?? 0) + 1);
+      const git = await searchService.gitContext(workspace).catch(() => null);
+      return sendJson(res, 200, {
+        workspace,
+        indexing: indexService.isIndexing(workspace),
+        indexedAt: store.indexFreshness(workspace)?.indexedAt ?? null,
+        fileCount: files.length,
+        languages: [...languages.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 20)
+          .map(([language, count]) => ({ language, count })),
+        recentFiles: store.recentIndexedFiles(workspace, 10).map((file) => ({
+          path: file.path,
+          modifiedTime: file.modifiedTime,
+        })),
+        git: git?.isRepo
+          ? {
+              branch: git.branch,
+              head: git.head,
+              modified: git.modified.slice(0, 100),
+              untracked: git.untracked.slice(0, 100),
+            }
+          : null,
+      });
+    }
+
+    if (pathname === "/api/repository/index" && req.method === "POST") {
+      const body = await parseJsonBody<{ workspace?: string }>(req);
+      const workspace = checkedWorkspace(body.workspace);
+      const result = await indexService.index(workspace, (progress) =>
+        broadcastSSE({ type: "index", workspace, ...progress }),
+      );
+      return sendJson(res, 200, result);
+    }
+
+    if (pathname === "/api/context/assemble" && req.method === "POST") {
+      const body = await parseJsonBody<{
+        workspace?: string;
+        prompt?: string;
+        openFile?: string;
+        selection?: string;
+        budget?: number;
+        sessionId?: string;
+      }>(req);
+      const workspace = checkedWorkspace(body.workspace);
+      const assembled = await contextAssembler.assemble({
+        workspace,
+        prompt: typeof body.prompt === "string" ? body.prompt : "",
+        openFile: typeof body.openFile === "string" ? body.openFile : undefined,
+        selection:
+          typeof body.selection === "string" ? body.selection : undefined,
+        budgetChars:
+          typeof body.budget === "number" && Number.isFinite(body.budget)
+            ? body.budget
+            : undefined,
+        sessionId: typeof body.sessionId === "string" ? body.sessionId : "",
+      });
+      return sendJson(res, 200, {
+        workspace,
+        text: assembled.text,
+        chars: assembled.manifest.usedChars,
+        manifest: assembled.manifest,
+      });
+    }
+
+    if (pathname === "/api/verification/run" && req.method === "POST") {
+      const body = await parseJsonBody<{
+        workspace?: string;
+        sessionId?: string;
+        paths?: string[];
+        level?: string;
+      }>(req);
+      const workspace = checkedWorkspace(body.workspace);
+      const level = (
+        ["targeted", "full", "typecheck", "build"] as const
+      ).includes(body.level as never)
+        ? (body.level as "targeted" | "full" | "typecheck" | "build")
+        : "targeted";
+      const sessionId =
+        typeof body.sessionId === "string" && body.sessionId
+          ? body.sessionId
+          : undefined;
+      if (sessionId) {
+        const session = store.getSession(sessionId);
+        if (!session) return sendError(res, 404, "Session not found");
+        if (!matchesWorkspace(session.workspaceId, workspace))
+          return sendError(
+            res,
+            403,
+            "Session does not belong to the selected workspace",
+          );
+      }
+      const result = await runVerification({
+        workspace,
+        sessionId,
+        paths: Array.isArray(body.paths) ? body.paths : undefined,
+        level,
+      });
+      return sendJson(res, 200, result);
+    }
+
+    if (pathname === "/api/verification/list" && req.method === "GET") {
+      const workspace = checkedWorkspace(
+        url.searchParams.get("workspace") ?? undefined,
+      );
+      const sessionId = url.searchParams.get("sessionId") ?? undefined;
+      return sendJson(res, 200, {
+        workspace,
+        runs: store.verificationRuns(workspace, sessionId || undefined, 20),
+      });
+    }
+
+    if (pathname === "/api/diagnostics" && req.method === "GET") {
+      const workspace = checkedWorkspace(
+        url.searchParams.get("workspace") ?? undefined,
+      );
+      const settings = await readSettings();
+      const files = store.indexedFiles(workspace);
+      const history = store.sessionHistory(workspace, 8, true);
+      const recentErrors: Array<{
+        sessionId: string;
+        timestamp: string;
+        message: string;
+      }> = [];
+      const recentToolCalls: Array<{
+        sessionId: string;
+        tool: string;
+        timestamp: string;
+      }> = [];
+      for (const session of history.slice(0, 5)) {
+        const events = store
+          .orderedSessionEvents(String(session.id), 0, 2_000)
+          .slice(-300);
+        for (const event of events) {
+          const payload = event.payload as {
+            message?: string;
+            toolName?: string;
+          };
+          if (event.eventType === "ERROR")
+            recentErrors.push({
+              sessionId: String(session.id),
+              timestamp: event.timestamp,
+              message: String(payload?.message ?? "unknown error").slice(
+                0,
+                300,
+              ),
+            });
+          if (event.eventType === "tool" && payload?.toolName)
+            recentToolCalls.push({
+              sessionId: String(session.id),
+              tool: String(payload.toolName),
+              timestamp: event.timestamp,
+            });
+        }
+      }
+      return sendJson(res, 200, {
+        workspace,
+        generatedAt: new Date().toISOString(),
+        runtime: {
+          node: process.version,
+          platform: process.platform,
+          uptimeSeconds: Math.round(process.uptime()),
+          activeSessions: manager.activeSessions(),
+        },
+        provider: {
+          provider: settings.provider,
+          model: settings.model,
+          apiKeyConfigured: Boolean(settings.apiKeyConfigured),
+          apiKeyMasked: settings.apiKeyMasked ?? "",
+        },
+        indexing: {
+          indexing: indexService.isIndexing(workspace),
+          indexedAt: store.indexFreshness(workspace)?.indexedAt ?? null,
+          fileCount: files.length,
+          recentFiles: store
+            .recentIndexedFiles(workspace, 5)
+            .map((file) => file.path),
+        },
+        sessions: history.map((session) => ({
+          id: session.id,
+          title: session.title,
+          status: session.status,
+          archived: session.archived,
+          changeCount: session.changeCount,
+          appliedCount: session.appliedCount,
+          conflictCount: session.conflictCount,
+          verificationStatus: session.verificationStatus ?? null,
+          updatedAt: session.updatedAt,
+        })),
+        recentToolCalls: recentToolCalls.slice(-20),
+        recentErrors: recentErrors.slice(-20),
+        verification: store.verificationRuns(workspace, undefined, 5),
+      });
+    }
+
+    if (pathname === "/api/git/blame" && req.method === "GET") {
+      const workspace = checkedWorkspace(
+        url.searchParams.get("workspace") ?? undefined,
+      );
+      const relative = url.searchParams.get("path") ?? "";
+      if (!relative) return sendError(res, 400, "path is required");
+      try {
+        await safeRealPath(workspace, relative);
+      } catch {
+        return sendError(res, 403, "Path resolves outside the workspace");
+      }
+      const startLine = Number(url.searchParams.get("startLine") ?? 0);
+      const endLine = Number(url.searchParams.get("endLine") ?? 0);
+      const args = ["-C", workspace, "blame", "--line-porcelain"];
+      if (startLine > 0 && endLine >= startLine)
+        args.push("-L", `${startLine},${endLine}`);
+      args.push("--", relative);
+      const stdout = await execFileAsync("git", args, {
+        maxBuffer: 8_000_000,
+      })
+        .then((result) => result.stdout)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          if (/not a git repository/i.test(message)) return null;
+          throw new Error(`git blame failed: ${message}`);
+        });
+      if (stdout === null)
+        return sendJson(res, 200, { path: relative, isRepo: false, lines: [] });
+      return sendJson(res, 200, {
+        path: relative,
+        isRepo: true,
+        lines: parseBlameOutput(stdout),
+      });
+    }
+
+    if (pathname === "/api/git/file-history" && req.method === "GET") {
+      const workspace = checkedWorkspace(
+        url.searchParams.get("workspace") ?? undefined,
+      );
+      const relative = url.searchParams.get("path") ?? "";
+      if (!relative) return sendError(res, 400, "path is required");
+      try {
+        await safeRealPath(workspace, relative);
+      } catch {
+        return sendError(res, 403, "Path resolves outside the workspace");
+      }
+      const limit = Math.max(
+        1,
+        Math.min(200, Number(url.searchParams.get("limit") ?? 20) || 20),
+      );
+      const stdout = await execFileAsync(
+        "git",
+        [
+          "-C",
+          workspace,
+          "log",
+          "--follow",
+          "--format=%H%x1f%ct%x1f%an%x1f%s",
+          "-n",
+          String(limit),
+          "--",
+          relative,
+        ],
+        { maxBuffer: 4_000_000 },
+      )
+        .then((result) => result.stdout)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          // A workspace that is not a git repository is a valid state, not a
+          // server error: the renderer shows "no history" instead of failing.
+          if (/not a git repository/i.test(message)) return null;
+          throw new Error(`git log failed: ${message}`);
+        });
+      if (stdout === null)
+        return sendJson(res, 200, {
+          path: relative,
+          isRepo: false,
+          commits: [],
+        });
+      const commits = stdout
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const [hash = "", timestamp = "", author = "", subject = ""] =
+            line.split("\u001f");
+          return {
+            hash,
+            timestamp: Number(timestamp) || 0,
+            author,
+            subject,
+          };
+        });
+      return sendJson(res, 200, { path: relative, isRepo: true, commits });
+    }
+
+    // Session history management: rename / archive / unarchive / delete.
+    if (pathname === "/api/agent/session-update" && req.method === "POST") {
+      const body = await parseJsonBody<{
+        workspace?: string;
+        sessionId?: string;
+        action?: string;
+        title?: string;
+      }>(req);
+      const workspace = checkedWorkspace(body.workspace);
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      if (!sessionId) return sendError(res, 400, "sessionId is required");
+      const session = store.getSession(sessionId);
+      if (!session) return sendError(res, 404, "Session not found");
+      if (!matchesWorkspace(session.workspaceId, workspace))
+        return sendError(
+          res,
+          403,
+          "Session does not belong to the selected workspace",
+        );
+      switch (body.action) {
+        case "rename": {
+          const title = (body.title ?? "").trim().slice(0, 200);
+          if (!title) return sendError(res, 400, "title is required");
+          store.renameSession(sessionId, title);
+          break;
+        }
+        case "archive":
+          store.setSessionArchived(sessionId, true);
+          break;
+        case "unarchive":
+          store.setSessionArchived(sessionId, false);
+          break;
+        case "delete": {
+          if (manager.hasSession(sessionId))
+            return sendError(res, 409, "Stop the session before deleting it");
+          store.deleteSession(sessionId);
+          break;
+        }
+        default:
+          return sendError(res, 400, "Unknown session action");
+      }
+      store.addEvent(sessionId, "SESSION_UPDATED", {
+        action: body.action,
+        title: body.title ?? null,
+      });
+      return sendJson(res, 200, { success: true, action: body.action });
+    }
+
     // Start agent
     if (pathname === "/api/agent/start" && req.method === "POST") {
       const body = await parseJsonBody<{
@@ -1175,6 +2013,11 @@ const server = http.createServer(async (req, res) => {
         reasoningEffort?: string;
         executionMode?: "review" | "auto" | "plan" | "readonly";
         attachedContext?: string[];
+        /** Editor context used by automatic context assembly. */
+        openFile?: string;
+        selection?: string;
+        /** `false` keeps the pre-Phase-4 prompt-only behaviour. */
+        autoContext?: boolean;
       }>(req);
 
       if (!body.prompt || !["ask", "plan", "agent"].includes(body.mode)) {
@@ -1280,49 +2123,15 @@ const server = http.createServer(async (req, res) => {
         registry.register(tool),
       );
 
-      // Persistent repository context is exposed as a safe read-only tool.
-      // This lets the agent use the durable index for targeted context instead
-      // of repeatedly scanning the repository from scratch.
-      const repositoryContextTool: AgentTool = {
-        name: "search_repository_context",
-        description:
-          "Search the persistent workspace index for relevant symbols and files. Prefer this for repository-wide context discovery before broad file scans.",
-        permission: "safe",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            limit: { type: "number" },
-          },
-          required: ["query"],
-        },
-        execute: async (value, context) => {
-          const input = value as { query?: unknown; limit?: unknown };
-          const query =
-            typeof input.query === "string" ? input.query.trim() : "";
-          if (!query)
-            return {
-              content: JSON.stringify({ symbols: [], files: [] }),
-            };
-          const limit =
-            typeof input.limit === "number" && Number.isFinite(input.limit)
-              ? Math.max(1, Math.min(50, Math.floor(input.limit)))
-              : 20;
-          const symbols = store
-            .searchSymbols(context.workspace, query)
-            .slice(0, limit);
-          const files = store
-            .indexedFiles(context.workspace)
-            .filter((entry) =>
-              entry.path.toLowerCase().includes(query.toLowerCase()),
-            )
-            .slice(0, limit);
-          return {
-            content: JSON.stringify({ query, symbols, files }),
-          };
-        },
-      };
-      registry.register(repositoryContextTool);
+      // Phase 4 repository intelligence tools. These read from the persisted
+      // index (symbols, imports, git metadata) instead of rescanning the tree
+      // for every question, and they are all read-only (`safe`).
+      for (const tool of repositoryTools({
+        store,
+        search: searchService,
+        index: indexService,
+      }))
+        registry.register(tool);
 
       const requestedSessionId =
         typeof body.sessionId === "string" ? body.sessionId.trim() : "";
@@ -1384,8 +2193,77 @@ const server = http.createServer(async (req, res) => {
       );
       store.addMessage(sessionId, "user", body.prompt);
 
+      // ------------------------------------------------------------------
+      // Automatic context assembly (Phase 4). The manifest is persisted as a
+      // session event and returned to the renderer so the user can see
+      // exactly which files were given to the model, and why.
+      // ------------------------------------------------------------------
+      let contextManifest: ContextManifest | null = null;
+      let assembledContext = "";
+      if (body.autoContext !== false) {
+        if (
+          !store.indexFreshness(workspace) &&
+          !indexService.isIndexing(workspace)
+        ) {
+          // First request in a workspace: index in the background, but never
+          // hold the request open for more than FIRST_INDEX_WAIT_MS.
+          await Promise.race([
+            indexService.index(workspace).catch(() => undefined),
+            new Promise((resolve) => setTimeout(resolve, FIRST_INDEX_WAIT_MS)),
+          ]);
+        }
+        try {
+          const assembled = await contextAssembler.assemble({
+            workspace,
+            prompt: body.prompt,
+            openFile:
+              typeof body.openFile === "string" ? body.openFile : undefined,
+            selection:
+              typeof body.selection === "string" ? body.selection : undefined,
+            sessionId,
+            attachments: Array.isArray(body.attachedContext)
+              ? body.attachedContext.filter(
+                  (entry): entry is string => typeof entry === "string",
+                )
+              : [],
+          });
+          assembledContext = assembled.text;
+          contextManifest = assembled.manifest;
+          store.addEvent(sessionId, "CONTEXT_ASSEMBLED", contextManifest);
+          broadcastSSE({
+            type: "context",
+            sessionId,
+            requestId,
+            manifest: contextManifest,
+          });
+          console.log(
+            `[Context] session "${sessionId}": ${contextManifest.included.length} file(s), ${contextManifest.usedChars} chars in ${contextManifest.timings.assembleMs}ms`,
+          );
+        } catch (error) {
+          // Context is an optimisation; a failure must never abort a request.
+          console.error("[Context] assembly failed:", error);
+        }
+      }
+
+      /**
+       * Lifecycle states observed for *this* run. Scoped per request so two
+       * concurrent sessions can never observe each other's lifecycle.
+       */
+      const sessionLifecycle: SessionLifecycleState[] = [];
       const emit = (agentEvent: AgentEvent) => {
         store.addEvent(sessionId, agentEvent.type, agentEvent);
+        if (agentEvent.type === "lifecycle" && agentEvent.lifecycle) {
+          sessionLifecycle.push(agentEvent.lifecycle);
+          const statusMap: Partial<Record<SessionLifecycleState, string>> = {
+            running: "RUNNING",
+            waiting_for_approval: "WAITING_FOR_APPROVAL",
+            completed: "COMPLETED",
+            failed: "FAILED",
+            cancelled: "CANCELLED",
+          };
+          const mapped = statusMap[agentEvent.lifecycle];
+          if (mapped) store.updateSessionStatus(sessionId, mapped as never);
+        }
         if (agentEvent.type === "state" && agentEvent.state) {
           console.log(`[Agent] State -> ${agentEvent.state}`);
         } else if (agentEvent.type === "tool" && agentEvent.toolName) {
@@ -1552,77 +2430,33 @@ const server = http.createServer(async (req, res) => {
         workspace,
         emit,
         async (tool, value, toolCallId) => {
-          const permissions = settings.toolPermissions;
-          const commandText =
-            tool.name === "run_command" && value && typeof value === "object"
-              ? String((value as { command?: unknown }).command ?? "")
-              : "";
-          const isTestCommand =
-            /(^|\s)(npm\s+(run\s+)?test|npx\s+(jest|vitest)|pytest|go\s+test|cargo\s+test|make\s+test)(\s|$)/i.test(
-              commandText,
-            );
-          const isBuildCommand =
-            /(^|\s)(npm\s+(run\s+)?build|tsc(\s|$)|vite\s+build|electron-builder|go\s+build|cargo\s+build|make)(\s|$)/i.test(
-              commandText,
-            );
-          let permissionAllowed =
-            tool.name === "run_command"
-              ? isTestCommand
-                ? permissions.runTests
-                : isBuildCommand
-                  ? permissions.runBuilds
-                  : permissions.runCommands
-              : /^(read_file|list_directory|list_files|get_project_info|search_files|search_repository_context|git_status|git_diff|git_branch|git_log)$/.test(
-                    tool.name,
-                  )
-                ? tool.name.startsWith("search")
-                  ? permissions.searchRepository
-                  : permissions.readFiles
-                : /^(write_file|apply_patch)$/.test(tool.name)
-                  ? permissions.editFiles
-                  : tool.name === "delete_file"
-                    ? permissions.deleteFiles
-                    : tool.name === "rename_file"
-                      ? permissions.renameFiles
-                      : tool.permission !== "dangerous";
-          if (
-            tool.name === "write_file" &&
-            value &&
-            typeof value === "object"
-          ) {
-            const requestedPath = String(
-              (value as { path?: unknown }).path ?? "",
-            );
-            if (requestedPath) {
-              const safeTarget = await safeRealPath(workspace, requestedPath);
-              try {
-                await fs.stat(safeTarget);
-                permissionAllowed = permissionAllowed && permissions.editFiles;
-              } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === "ENOENT")
-                  permissionAllowed = permissions.createFiles;
-                else throw error;
-              }
-            }
-          }
-          if (!permissionAllowed) return false;
+          const verdict = await evaluateToolPermission({
+            tool,
+            value,
+            executionMode,
+            permissions: settings.toolPermissions,
+            workspace,
+          });
 
-          // Plan and read-only modes are enforced at the privileged boundary,
-          // not just by prompt instructions.
-          if (executionMode === "plan" || executionMode === "readonly") {
-            if (tool.permission !== "safe") return false;
-          }
-          // Dangerous operations always require explicit approval, even when
-          // ordinary coding actions are configured for automatic execution.
-          if (tool.permission === "dangerous") {
-            // fall through to the approval waiter
-          } else if (executionMode === "auto") {
-            return true;
-          } else {
-            // review mode intentionally pauses for an explicit user decision.
+          if (verdict.decision === "deny") {
+            // Denials are auditable: the renderer and the persisted event log
+            // both show why a tool never ran.
+            persistAndBroadcastEvent(sessionId, "approval", {
+              type: "approval",
+              toolCallId,
+              toolName: tool.name,
+              input: redactObject(value),
+              action: "denied",
+              activity: "approval",
+              result: { status: "DENIED", reason: verdict.reason },
+              message: verdict.summary,
+            });
             return false;
           }
 
+          if (verdict.decision === "allow") return true;
+
+          // decision === "ask": wait for an explicit user decision.
           const key = `${sessionId}:${requestId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
           return new Promise<boolean>((resolve) => {
             const timer = setTimeout(() => {
@@ -1637,6 +2471,7 @@ const server = http.createServer(async (req, res) => {
                 toolName: tool.name,
                 input: value,
                 action: "timeout",
+                activity: "approval" as const,
                 result: { status: "REJECTED", approved: false },
                 message: `Approval timed out for ${tool.name}`,
               };
@@ -1656,7 +2491,10 @@ const server = http.createServer(async (req, res) => {
               type: "permission:request",
               requestId: key,
               tool: tool.name,
-              input: value,
+              input: redactObject(value),
+              reason: verdict.reason,
+              risks: verdict.risks,
+              summary: verdict.summary,
               sessionId,
             });
           });
@@ -1734,10 +2572,14 @@ const server = http.createServer(async (req, res) => {
         requestId,
       );
 
-      manager.startSession(sessionId, runtime, async (signal) => {
+      manager.startSession(sessionId, runtime, async (signal, session) => {
+        // The session owns the AbortController and the cleanup registry; the
+        // runtime reads the signal from it so cancellation, child-process
+        // cleanup, and lifecycle transitions all use one source of truth.
+        runtime.attachSession(session);
         try {
           await runtime.run(
-            `${instructions ? `Project instructions:\n${instructions}\n\n` : ""}${body.prompt}`,
+            `${instructions ? `Project instructions:\n${instructions}\n\n` : ""}${assembledContext ? `${assembledContext}\n\n` : ""}${body.prompt}`,
             body.mode,
             signal,
             body.attachedContext ?? [],
@@ -1763,17 +2605,71 @@ const server = http.createServer(async (req, res) => {
         }
       });
 
-      return sendJson(res, 200, { sessionId, requestId, executionMode });
+      return sendJson(res, 200, {
+        sessionId,
+        requestId,
+        executionMode,
+        model: selectedModel,
+        contextManifest,
+      });
+    }
+
+    // Renderer/window closed while sessions may still be live. Cancelling here
+    // is what prevents a pending approval from suspending the runtime until the
+    // 15-minute timeout after the user closed the window.
+    if (pathname === "/api/agent/renderer-closed" && req.method === "POST") {
+      const body = await parseJsonBody<{ sessionIds?: string[] }>(req).catch(
+        () => ({}) as { sessionIds?: string[] },
+      );
+      const requested = Array.isArray(body.sessionIds)
+        ? body.sessionIds.filter((id): id is string => typeof id === "string")
+        : [];
+      const targets = requested.length
+        ? requested
+        : Array.from(manager.activeSessions(), (session) => session.sessionId);
+      for (const sessionId of targets) {
+        // Release waiters first so the runtime observes a decision immediately,
+        // then request cancellation through the lifecycle.
+        releaseSessionWaiters(sessionId);
+        if (manager.cancelSession(sessionId) === "not-found") {
+          store.updateSessionStatus(sessionId, "STOPPED");
+        }
+        store.addEvent(sessionId, "SESSION_CANCELLED", {
+          message: "Renderer closed while the task was running.",
+          reason: "renderer_closed",
+        });
+      }
+      // Any permission request that belongs to a now-dead renderer must not
+      // keep a promise alive.
+      for (const [key, waiter] of [...permissionWaiters]) {
+        if (targets.length === 0 || targets.includes(waiter.sessionId)) {
+          permissionWaiters.delete(key);
+          if (waiter.timer) clearTimeout(waiter.timer);
+          waiter.resolve(false);
+        }
+      }
+      return sendJson(res, 200, { cancelled: targets });
     }
 
     // Stop agent
     if (pathname === "/api/agent/stop" && req.method === "POST") {
       const body = await parseJsonBody<{ sessionId: string }>(req);
-      if (body.sessionId) {
-        releaseSessionWaiters(body.sessionId);
-        manager.cancelSession(body.sessionId);
+      if (!body.sessionId || typeof body.sessionId !== "string") {
+        return sendError(res, 400, "sessionId required");
       }
-      return sendJson(res, 200, { success: true });
+      releaseSessionWaiters(body.sessionId);
+      const outcome = manager.cancelSession(body.sessionId);
+      if (outcome === "not-found") {
+        // Repeated stops and stops after completion are not errors: report the
+        // current persisted state so the UI can reconcile.
+        const session = store.getSession(body.sessionId);
+        return sendJson(res, 200, {
+          success: true,
+          outcome,
+          status: session?.status ?? null,
+        });
+      }
+      return sendJson(res, 200, { success: true, outcome });
     }
 
     // Switch model for existing session

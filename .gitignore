@@ -12,3 +12,6 @@ G1Code/
 release/
 .icon-tmp/
 .icon-gen-tmp/
+
+# Chat transcripts mirrored into the project root at runtime
+chats/

@@ -756,6 +756,10 @@ export const workspaceTools = (): AgentTool[] => [
         context.signal,
         context.commandTimeoutMs,
       );
+      // Let session cancellation terminate the whole process tree even if the
+      // abort signal cannot reach a tool that is awaiting its result.
+      context.trackProcess?.(execution.process);
+      context.registerCleanup?.(() => void execution.cancel());
       context.emit({
         type: "command",
         toolCallId: context.toolCallId,
