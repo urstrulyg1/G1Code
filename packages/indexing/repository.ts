@@ -152,7 +152,10 @@ export async function scanRepository(
         )
           continue;
         if (entry.isDirectory()) await visit(absolute);
-        else if (entry.isFile()) files.push(path.relative(root, absolute));
+        // Repository-relative paths are always POSIX so the index, the search
+        // service, the context manifest and the renderer agree on one spelling
+        // (on Windows `path.relative` returns backslashes).
+        else if (entry.isFile()) files.push(relative);
       }
     }
     await visit(root);
@@ -187,7 +190,7 @@ export async function scanRepository(
       continue;
 
     result.push({
-      path: path.relative(root, file),
+      path: path.relative(root, file).replaceAll("\\", "/"),
       language: language(file),
       size: stat.size,
       modifiedTime: stat.mtime.toISOString(),

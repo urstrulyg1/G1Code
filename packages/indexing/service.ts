@@ -167,8 +167,10 @@ export class RepositoryIndexService {
     );
     let indexed = 0;
     const missing: string[] = [];
-    for (const relative of paths) {
+    for (const requested of paths) {
       if (signal?.aborted) break;
+      // Index keys are POSIX; accept either separator from callers/watchers.
+      const relative = requested.replaceAll("\\", "/");
       const full = path.join(workspace, relative);
       const stat = await fs.stat(full).catch(() => null);
       if (!stat || !stat.isFile()) {

@@ -146,6 +146,40 @@ test("index service is incremental, stores symbols/imports and survives file del
   store.dispose();
 });
 
+test("index paths are POSIX on every platform", async () => {
+  const { store } = await tempStore();
+  const root = await project("g1code-paths-", {
+    "src/nested/deep/file.ts": "export const nested = 1;\n",
+  });
+  const service = new RepositoryIndexService(store);
+  await service.index(root);
+  const paths = store.indexedFiles(root).map((entry) => entry.path);
+  assert.deepEqual(paths, ["src/nested/deep/file.ts"]);
+  assert.equal(
+    paths.some((entry) => entry.includes("\\")),
+    false,
+    "index keys never contain platform separators",
+  );
+
+  // Watcher-driven updates accept either separator and still land on the same
+  // index entry (Windows watchers report native paths).
+  await writeFile(
+    path.join(root, "src/nested/deep/file.ts"),
+    "export const nested = 2;\n",
+  );
+  await service.indexPaths(root, ["src\\nested\\deep\\file.ts"]);
+  assert.deepEqual(
+    store.indexedFiles(root).map((entry) => entry.path),
+    ["src/nested/deep/file.ts"],
+  );
+  assert.equal(
+    store.symbolsForFile(root, "src/nested/deep/file.ts").length,
+    1,
+    "the incremental update replaced the same entry",
+  );
+  store.dispose();
+});
+
 test("ranked search finds files by name, symbol and text, with reasons", async () => {
   const { store } = await tempStore();
   const root = await project("g1code-search-", {
