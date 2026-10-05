@@ -19,6 +19,7 @@ import http from "node:http";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { escapeAnnotation } from "../../scripts/ci-test-annotations";
 
 const execFileAsync = promisify(execFile);
 
@@ -186,6 +187,8 @@ type Backend = {
   process: ChildProcess;
   port: number;
   dataDir: string;
+  /** Recent backend output, used to explain E2E failures. */
+  logs: () => string;
   get: (pathname: string) => Promise<Json>;
   post: (pathname: string, body?: Json) => Promise<Json>;
   stop: () => Promise<void>;
@@ -247,6 +250,7 @@ async function startBackend(input: {
     process: child,
     port: input.port,
     dataDir: input.dataDir,
+    logs: () => logs.join("").slice(-4_000),
     get: async (pathname) => (await request("GET", pathname)).body,
     post: async (pathname, body) =>
       (await request("POST", pathname, body)).body,
@@ -273,6 +277,9 @@ async function sessionStatus(
   return session.session?.status ?? session.status ?? "UNKNOWN";
 }
 
+/** Backend handle shared with the failure reporter. */
+let activeBackend: Backend | null = null;
+
 async function run() {
   const dataDir = await mkdtemp(path.join(tmpdir(), "g1code-e2e-data-"));
   const workspace = await mkdtemp(path.join(tmpdir(), "g1code-e2e-ws-"));
@@ -294,6 +301,7 @@ async function run() {
   const backendPort = await freePort();
   const provider = await startMockProvider(providerPort);
   let backend = await startBackend({ dataDir, port: backendPort });
+  activeBackend = backend;
   const results: string[] = [];
   const step = (name: string) => {
     results.push(name);
@@ -566,6 +574,7 @@ async function run() {
     );
     await backend.stop();
     backend = await startBackend({ dataDir, port: backendPort });
+    activeBackend = backend;
     await backend.post("/api/workspace/choose", { path: workspace });
     const restored = await sessionStatus(backend, workspace, start.sessionId);
     assert.notEqual(
@@ -611,8 +620,25 @@ async function run() {
   }
 }
 
+/**
+ * Emit GitHub Actions annotations on failure. The suite runs on Linux, macOS and
+ * Windows with different default shells, so the annotations are produced by the
+ * script itself (workflow commands are honoured by every runner) instead of by
+ * shell-specific log plumbing.
+ */
+function annotate(message: string, title = "Backend E2E") {
+  console.log(
+    `::error title=${escapeAnnotation(title)}::${escapeAnnotation(message)}`,
+  );
+}
+
 run().catch((error) => {
   console.error("\n=== BACKEND E2E FAILED ===");
-  console.error(error instanceof Error ? error.stack : String(error));
+  const detail =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  console.error(detail);
+  annotate(detail.slice(0, 3_500));
+  const backendLogs = activeBackend?.logs() ?? "";
+  if (backendLogs.trim()) annotate(backendLogs, "Backend log tail");
   process.exitCode = 1;
 });
