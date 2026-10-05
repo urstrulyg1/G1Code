@@ -13,6 +13,5 @@ release/
 .icon-tmp/
 .icon-gen-tmp/
 
-# Test-generated chat transcripts (fixtures under chats/ stay tracked)
-chats/[0-9]*-*.json
-chats/[0-9]*-*.md
+# Chat transcripts mirrored into the project root at runtime
+chats/

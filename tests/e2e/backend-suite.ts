@@ -195,8 +195,16 @@ async function startBackend(input: {
   dataDir: string;
   port: number;
 }): Promise<Backend> {
-  const tsx = path.join(PROJECT_ROOT, "node_modules", ".bin", "tsx");
-  const child = spawn(tsx, ["server.ts"], {
+  // Spawn through the current Node binary and the tsx CLI entry so the suite
+  // works on Windows too (`node_modules/.bin/tsx` is not executable there).
+  const tsxCli = path.join(
+    PROJECT_ROOT,
+    "node_modules",
+    "tsx",
+    "dist",
+    "cli.mjs",
+  );
+  const child = spawn(process.execPath, [tsxCli, "server.ts"], {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
