@@ -103,6 +103,25 @@ export function summaryLine(report: string): string {
     .join(" ");
 }
 
+/**
+ * The last part of the raw log, as one annotation. TAP nesting can hide the
+ * real cause of a file-level failure (module load errors, native bindings), and
+ * CI logs are not always reachable — this guarantees the cause is visible.
+ */
+export function rawTailAnnotation(report: string, maxChars = 3_500): string[] {
+  const lines = report.split("\n").filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return [];
+  const interesting = lines.filter(
+    (line) =>
+      !/^\s*(# (Subtest|tests|pass|fail|skipped|cancelled)|ok \d+ - |---|\.\.\.)/.test(
+        line,
+      ),
+  );
+  const source = interesting.length > 0 ? interesting : lines;
+  const tail = source.slice(-40).join("\n").slice(-maxChars);
+  return [`::error title=Failure detail (log tail)::${escapeAnnotation(tail)}`];
+}
+
 export function annotationsFor(report: string): string[] {
   const failures = parseTapFailures(report);
   const lines = [
@@ -137,7 +156,7 @@ function main(): void {
     );
     return;
   }
-  const annotations = annotationsFor(report);
+  const annotations = [...annotationsFor(report), ...rawTailAnnotation(report)];
   if (annotations.length === 0) {
     console.log("::notice title=Tests::the test report contains no failures");
     return;
