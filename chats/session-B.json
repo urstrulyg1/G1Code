@@ -1,0 +1,12 @@
+{
+  "id": "session-B",
+  "workspaceId": "/tmp/g1code-matrix-wsB-Omve82",
+  "title": "Session B",
+  "mode": "agent",
+  "model": "test-model",
+  "provider": "test-provider",
+  "status": "RUNNING",
+  "createdAt": "2026-10-05T16:40:53.789Z",
+  "updatedAt": "2026-10-05T16:40:53.789Z",
+  "messages": []
+}

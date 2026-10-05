@@ -1,0 +1,12 @@
+{
+  "id": "session-A",
+  "workspaceId": "/tmp/g1code-matrix-wsA-NdyX7q",
+  "title": "Session A",
+  "mode": "agent",
+  "model": "test-model",
+  "provider": "test-provider",
+  "status": "RUNNING",
+  "createdAt": "2026-10-05T16:40:53.787Z",
+  "updatedAt": "2026-10-05T16:40:53.787Z",
+  "messages": []
+}

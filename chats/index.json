@@ -1,0 +1,110 @@
+[
+  {
+    "id": "completed",
+    "title": "Completed",
+    "mode": "agent",
+    "model": "fake",
+    "status": "COMPLETED",
+    "createdAt": "2026-10-05T16:40:57.243Z",
+    "updatedAt": "2026-10-05T16:40:57.243Z",
+    "messageCount": 0,
+    "jsonFile": "completed.json",
+    "markdownFile": "completed.md"
+  },
+  {
+    "id": "waiting",
+    "title": "Waiting",
+    "mode": "agent",
+    "model": "fake",
+    "status": "WAITING_FOR_APPROVAL",
+    "createdAt": "2026-10-05T16:40:57.242Z",
+    "updatedAt": "2026-10-05T16:40:57.242Z",
+    "messageCount": 0,
+    "jsonFile": "waiting.json",
+    "markdownFile": "waiting.md"
+  },
+  {
+    "id": "running",
+    "title": "Running",
+    "mode": "agent",
+    "model": "fake",
+    "status": "RUNNING",
+    "createdAt": "2026-10-05T16:40:57.241Z",
+    "updatedAt": "2026-10-05T16:40:57.241Z",
+    "messageCount": 0,
+    "jsonFile": "running.json",
+    "markdownFile": "running.md"
+  },
+  {
+    "id": "session-B",
+    "title": "Session B",
+    "mode": "agent",
+    "model": "test-model",
+    "status": "RUNNING",
+    "createdAt": "2026-10-05T16:40:53.789Z",
+    "updatedAt": "2026-10-05T16:40:53.789Z",
+    "messageCount": 0,
+    "jsonFile": "session-B.json",
+    "markdownFile": "session-B.md"
+  },
+  {
+    "id": "session-A",
+    "title": "Session A",
+    "mode": "agent",
+    "model": "test-model",
+    "status": "RUNNING",
+    "createdAt": "2026-10-05T16:40:53.787Z",
+    "updatedAt": "2026-10-05T16:40:53.787Z",
+    "messageCount": 0,
+    "jsonFile": "session-A.json",
+    "markdownFile": "session-A.md"
+  },
+  {
+    "id": "golden-session",
+    "title": "Fix calculator",
+    "mode": "agent",
+    "model": "deterministic",
+    "status": "RUNNING",
+    "createdAt": "2026-10-05T16:40:43.293Z",
+    "updatedAt": "2026-10-05T16:40:43.293Z",
+    "messageCount": 0,
+    "jsonFile": "golden-session.json",
+    "markdownFile": "golden-session.md"
+  },
+  {
+    "id": "session-crash-3",
+    "title": "Crash test 3",
+    "mode": "agent",
+    "model": "test-model",
+    "status": "RUNNING",
+    "createdAt": "2026-10-05T16:40:41.434Z",
+    "updatedAt": "2026-10-05T16:40:41.434Z",
+    "messageCount": 0,
+    "jsonFile": "session-crash-3.json",
+    "markdownFile": "session-crash-3.md"
+  },
+  {
+    "id": "session-crash-2",
+    "title": "Crash test 2",
+    "mode": "agent",
+    "model": "test-model",
+    "status": "RUNNING",
+    "createdAt": "2026-10-05T16:40:41.421Z",
+    "updatedAt": "2026-10-05T16:40:41.421Z",
+    "messageCount": 0,
+    "jsonFile": "session-crash-2.json",
+    "markdownFile": "session-crash-2.md"
+  },
+  {
+    "id": "session-crash-1",
+    "title": "Crash test 1",
+    "mode": "agent",
+    "model": "test-model",
+    "status": "RUNNING",
+    "createdAt": "2026-10-05T16:40:41.406Z",
+    "updatedAt": "2026-10-05T16:40:41.406Z",
+    "messageCount": 0,
+    "jsonFile": "session-crash-1.json",
+    "markdownFile": "session-crash-1.md"
+  }
+]

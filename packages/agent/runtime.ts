@@ -3,9 +3,31 @@ import { AIProvider, ChatMessage, ToolCall, ToolDefinition } from "../ai/types";
 import { globalModelCatalog } from "../ai/models";
 import { AgentTool, ToolContext, ToolRegistry } from "../tools/types";
 import { redactObject, redactSecrets } from "../security/redaction";
+import { AgentSession } from "./session";
+import { BoundedTextBuffer } from "./stream-buffer";
+import type { SessionLifecycleState } from "./lifecycle";
+
+/**
+ * User-facing activity taxonomy. The renderer uses this to render an accurate
+ * timeline instead of guessing from raw event types, and it deliberately has no
+ * "chain of thought" member: reasoning is reported as `thinking` (a status),
+ * never as content.
+ */
+export type AgentActivity =
+  | "thinking"
+  | "response"
+  | "tool"
+  | "command"
+  | "approval"
+  | "file_change"
+  | "verification"
+  | "result";
 
 export type AgentState =
   | "IDLE"
+  | "CREATED"
+  | "RUNNING"
+  | "CANCELLING"
   | "UNDERSTANDING"
   | "ANALYZING"
   | "PLANNING"
@@ -30,13 +52,20 @@ export type AgentEvent = {
   at: string;
   type:
     | "state"
+    | "lifecycle"
+    | "activity"
     | "text"
     | "tool"
     | "approval"
     | "error"
     | "done"
     | "command"
+    | "verification"
     | "notice";
+  /** Lifecycle state at the time of the event (see ./lifecycle.ts). */
+  lifecycle?: SessionLifecycleState;
+  /** User-facing activity classification used by the timeline UI. */
+  activity?: AgentActivity;
   state?: AgentState;
   message?: string;
   detail?: string;
@@ -178,7 +207,7 @@ async function buildSystemPrompt(
 export class AgentRuntime {
   private state: AgentState = "IDLE";
   private stopped = false;
-  private cancelled = false;
+  private cancelledByUser = false;
   private toolCalls = 0;
   constructor(
     private readonly provider: AIProvider,
@@ -225,6 +254,105 @@ export class AgentRuntime {
   ) {}
   private repairAttempts = 0;
   private eventSequence = 0;
+  private session?: AgentSession;
+  /**
+   * Permission decisions for the current run, keyed by tool call id.
+   *
+   * The runtime asks the permission authority *before* executing any
+   * non-read-only tool and caches the answer, so a tool that also calls
+   * `context.approve` cannot cause a second prompt and, more importantly, a
+   * tool can never bypass the permission layer by simply not asking.
+   */
+  private readonly toolDecisions = new Map<string, boolean>();
+  /**
+   * Coalesces streamed text so a chatty provider cannot create one persistence
+   * row (and one renderer event) per token. Flushed on tool calls, on
+   * completion, and on cancellation.
+   */
+  private assistantBuffer = new BoundedTextBuffer(4096, (text) => {
+    this.emitText(text);
+  });
+  private iterations = 0;
+  private callCount = 0;
+  private streamedCharacters = 0;
+
+  /**
+   * Phase 4: the manager creates the session (and therefore the AbortController
+   * and the cleanup registry) and attaches it here before `run`. Attaching is
+   * separate from the constructor so the runtime keeps working standalone in
+   * tests and older call sites.
+   */
+  attachSession(session: AgentSession) {
+    this.session = session;
+  }
+
+  iterationCount() {
+    return this.iterations;
+  }
+  toolCallCount() {
+    return this.callCount;
+  }
+  get cancelled(): boolean {
+    return this.session
+      ? this.session.lifecycle.cancelRequested
+      : this.stopped || this.cancelledByUser;
+  }
+  private get signal(): AbortSignal | undefined {
+    return this.session?.signal;
+  }
+  /** Emit a lifecycle event and keep the runtime's own flag in sync. */
+  private setLifecycle(state: SessionLifecycleState, reason?: string) {
+    this.event({ type: "lifecycle", lifecycle: state, message: reason });
+  }
+
+  private isCancelled(signal?: AbortSignal): boolean {
+    return Boolean(signal?.aborted) || this.stopped || this.cancelled;
+  }
+
+  private transitionCancellation(signal?: AbortSignal) {
+    const byUser = this.cancelledByUser || this.session?.lifecycle.cancelRequested;
+    if (this.session) {
+      this.setLifecycle("cancelling", "cancellation observed by runtime");
+      this.session.markCancelled("cancelled by user");
+      this.setLifecycle("cancelled", "cancelled by user");
+      this.state = "CANCELLED";
+      this.event({
+        type: "state",
+        state: "CANCELLED",
+        activity: "result",
+        message: byUser ? "Agent cancelled by user" : "Agent stopped by user",
+      });
+      return;
+    }
+    this.transition(
+      byUser ? "CANCELLED" : "STOPPED",
+      byUser ? "Agent cancelled by user" : "Agent stopped by user",
+    );
+  }
+
+  /** Terminal bookkeeping shared by every exit path. */
+  private finishSession(
+    outcome: "completed" | "failed" | "cancelled",
+    reason?: string,
+  ) {
+    this.wakeDecisionWaiters();
+    this.flushAssistantBuffer();
+    if (!this.session) return;
+    if (outcome === "completed") this.session.markCompleted(reason);
+    else if (outcome === "failed") this.session.markFailed(reason);
+    else this.session.markCancelled(reason);
+    this.setLifecycle(outcome, reason);
+  }
+
+  private flushAssistantBuffer() {
+    const flushed = this.assistantBuffer.drain();
+    if (flushed) this.emitText(flushed);
+  }
+
+  private emitText(text: string) {
+    if (!text) return;
+    this.event({ type: "text", activity: "response", message: text });
+  }
   /**
    * Approval callbacks normally live in the main process and are released by
    * the session manager. Keeping a local wake-up set as well makes the runtime
@@ -233,9 +361,24 @@ export class AgentRuntime {
    */
   private readonly pendingDecisionWakeups = new Set<() => void>();
 
+  /**
+   * Idempotent stop. With an attached session this requests cancellation
+   * through the lifecycle (which aborts the signal, kills tracked children, and
+   * runs cleanups); repeated calls are no-ops.
+   */
   stop() {
     this.stopped = true;
-    this.cancelled = true;
+    this.cancelledByUser = true;
+    if (this.session) {
+      if (!this.session.lifecycle.cancelRequested) {
+        this.session.requestCancel("stopped by user");
+        this.setLifecycle("cancelling", "stopped by user");
+      }
+    }
+    this.wakeDecisionWaiters();
+  }
+
+  private wakeDecisionWaiters() {
     for (const wakeup of [...this.pendingDecisionWakeups]) wakeup();
     this.pendingDecisionWakeups.clear();
   }
@@ -260,6 +403,7 @@ export class AgentRuntime {
       const onAbort = () => finish(cancelledValue);
 
       this.pendingDecisionWakeups.add(cancel);
+      const unregister = this.session?.register(() => finish(cancelledValue));
       if (signal) {
         if (signal.aborted) {
           finish(cancelledValue);
@@ -269,8 +413,100 @@ export class AgentRuntime {
       }
 
       decision.then(finish).catch(() => finish(cancelledValue));
+
+      if (this.session) {
+        // Belt and braces: releasing the global waiter set must also unregister
+        // this wake-up so a cancelled session leaves nothing behind.
+        this.session.register(() => {
+          this.pendingDecisionWakeups.delete(cancel);
+          finish(cancelledValue);
+        });
+      }
+      void unregister;
     });
   }
+  /**
+   * Mandatory pre-execution permission check.
+   *
+   * `safe` tools (reads) run directly. Every other tool goes through the
+   * approval callback, which is backed by the permission policy in the server.
+   */
+  private async ensurePermission(
+    tool: AgentTool,
+    input: unknown,
+    toolCallId: string,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    if (tool.permission === "safe") return true;
+    const cached = this.toolDecisions.get(toolCallId);
+    if (cached !== undefined) return cached;
+
+    const applyWaiter = async () => {
+      if (!this.approve) return true;
+      this.transition(
+        "WAITING_FOR_APPROVAL",
+        `Waiting for approval of ${tool.name}`,
+      );
+      if (this.session && !this.session.terminal) {
+        this.session.lifecycle.transition(
+          "waiting_for_approval",
+          `approval requested for ${tool.name}`,
+        );
+        this.setLifecycle(
+          "waiting_for_approval",
+          `approval requested for ${tool.name}`,
+        );
+      }
+      this.event({
+        type: "approval",
+        toolCallId,
+        toolName: tool.name,
+        input: redactObject(input),
+        action: "requested",
+        activity: "approval",
+        message: `Approval required for ${tool.name}`,
+      });
+      let promise: Promise<boolean>;
+      try {
+        promise = Promise.resolve(this.approve(tool, input, toolCallId));
+      } catch {
+        promise = Promise.resolve(false);
+      }
+      const allowed = await this.waitForDecision(promise, signal, false);
+      const cancelled = this.stopped || Boolean(signal?.aborted);
+      const decided = allowed && !cancelled;
+      this.event({
+        type: "approval",
+        toolCallId,
+        toolName: tool.name,
+        input: redactObject(input),
+        action: "resolved",
+        activity: "approval",
+        result: { status: decided ? "APPROVED" : "REJECTED", approved: decided },
+        message: cancelled
+          ? `Approval cancelled for ${tool.name}`
+          : decided
+            ? `${tool.name} approved`
+            : `${tool.name} rejected or denied by policy`,
+      });
+      if (!cancelled) {
+        this.transition(
+          "EXECUTING",
+          decided ? `${tool.name} approved` : `${tool.name} denied`,
+        );
+        if (this.session && this.session.state === "waiting_for_approval") {
+          this.session.lifecycle.transition("running", "approval resolved");
+          this.setLifecycle("running", "approval resolved");
+        }
+      }
+      return decided;
+    };
+
+    const allowed = await applyWaiter();
+    this.toolDecisions.set(toolCallId, allowed);
+    return allowed;
+  }
+
   private transition(state: AgentState, message: string) {
     this.state = state;
     this.event({ type: "state", state, message });
@@ -293,12 +529,25 @@ export class AgentRuntime {
     conversationHistory: ChatMessage[] = [],
   ) {
     const started = Date.now();
+    // A session owns cancellation for its whole lifetime; the legacy booleans
+    // below still support manager-less (test) usage.
     this.stopped = false;
-    this.cancelled = false;
+    this.cancelledByUser = false;
     this.toolCalls = 0;
+    this.callCount = 0;
+    this.iterations = 0;
+    this.streamedCharacters = 0;
     this.repairAttempts = 0;
     this.eventSequence = 0;
+    this.toolDecisions.clear();
     this.pendingDecisionWakeups.clear();
+    const effectiveSignal = this.session?.signal ?? signal;
+    if (this.session) {
+      this.session.lifecycle.transition("running", "run started");
+      this.setLifecycle("running", "run started");
+    } else {
+      this.state = "RUNNING";
+    }
 
     // Capability check: If model explicitly does not support tools in agent mode
     if (
@@ -312,6 +561,7 @@ export class AgentRuntime {
         type: "error",
         message: `Model '${this.model}' does not support tool calls. Switch to a Tools-capable model or use Ask mode.`,
       });
+      this.finishSession("failed", "Model does not support tools");
       return;
     }
 
@@ -369,11 +619,8 @@ export class AgentRuntime {
       iteration < this.limits.maxIterations;
       iteration += 1
     ) {
-      if (this.stopped || signal?.aborted) {
-        this.transition(
-          this.cancelled ? "CANCELLED" : "STOPPED",
-          this.cancelled ? "Agent cancelled by user" : "Agent stopped by user",
-        );
+      if (this.isCancelled(effectiveSignal)) {
+        this.transitionCancellation(effectiveSignal);
         return;
       }
       if (
@@ -383,11 +630,14 @@ export class AgentRuntime {
         this.transition("FAILED", "Task execution budget reached");
         this.event({
           type: "error",
+          activity: "result",
           message: `The agent reached the safety budget for this task (${this.toolCalls} tool calls). You can prompt it to continue from where it left off.`,
         });
+        this.finishSession("failed", "execution budget reached");
         return;
       }
       if (iteration > 0) this.transition("OBSERVING", "Reviewing tool results");
+      this.iterations += 1;
       let text = "";
       const calls = new Map<string, ToolCall>();
       let streamSucceeded = false;
@@ -396,6 +646,10 @@ export class AgentRuntime {
       for (let attempt = 0; attempt < maxStreamAttempts; attempt++) {
         text = "";
         calls.clear();
+        let attemptText = "";
+        // Reasoning deltas are never persisted or displayed; the UI only needs
+        // to know that the model is thinking so it can show an activity state.
+        let reasoningChars = 0;
         try {
           for await (const chunk of this.provider.streamChat({
             model: activeModel,
@@ -403,24 +657,32 @@ export class AgentRuntime {
             tools: definitions,
             temperature: 0.2,
             maxTokens: 4096,
-            signal,
+            signal: effectiveSignal,
           })) {
+            if (chunk.reasoning) {
+              reasoningChars += chunk.reasoning.length;
+              if (reasoningChars > 0 && !text) {
+                this.event({
+                  type: "activity",
+                  activity: "thinking",
+                  message: "Model is reasoning about the task",
+                  detail: `${reasoningChars} reasoning characters received (content is not stored)`,
+                });
+              }
+            }
             if (chunk.content) {
-              text += chunk.content;
-              this.event({ type: "text", message: chunk.content });
+              attemptText += chunk.content;
+              this.streamedCharacters += chunk.content.length;
+              this.assistantBuffer.push(chunk.content);
             }
             for (const call of chunk.toolCalls ?? []) calls.set(call.id, call);
           }
+          text = attemptText;
           streamSucceeded = true;
           break;
         } catch (error) {
-          if (signal?.aborted || this.stopped) {
-            this.transition(
-              this.cancelled ? "CANCELLED" : "STOPPED",
-              this.cancelled
-                ? "Agent cancelled by user"
-                : "Agent stopped by user",
-            );
+          if (this.isCancelled(effectiveSignal)) {
+            this.transitionCancellation(effectiveSignal);
             return;
           }
 
@@ -453,11 +715,18 @@ export class AgentRuntime {
             }
           }
 
+          if (attemptText) {
+            // Preserve the assistant text that did arrive before the failure.
+            text = attemptText;
+            this.flushAssistantBuffer();
+          }
           this.transition("FAILED", "Provider request failed");
           this.event({
             type: "error",
-            message: errorMsg,
+            activity: "result",
+            message: `${maxStreamAttempts > 1 ? `Stream terminated unexpectedly after ${attempt + 1}/${maxStreamAttempts} attempts: ` : ""}${errorMsg}`,
           });
+          this.finishSession("failed", "provider stream failed");
           return;
         }
       }
@@ -470,9 +739,14 @@ export class AgentRuntime {
         // No tool calls — push a plain assistant message (no toolCalls field)
         messages.push({ role: "assistant", content: text });
         this.transition("COMPLETED", "Task completed");
-        this.event({ type: "done", message: text });
+        this.flushAssistantBuffer();
+        this.event({ type: "done", activity: "result", message: text });
+        this.finishSession("completed", "task completed");
         return;
       }
+      // Tool calls present: flush coalesced assistant text before the tool
+      // activity begins so the timeline order is preserved.
+      this.flushAssistantBuffer();
       // Tool calls present — include them in the assistant message
       messages.push({ role: "assistant", content: text, toolCalls });
       this.transition(
@@ -504,6 +778,7 @@ export class AgentRuntime {
           continue;
         }
         this.toolCalls += 1;
+        this.callCount += 1;
         const argumentError = validateToolArguments(tool, call.arguments);
         if (argumentError) {
           this.event({
@@ -525,62 +800,47 @@ export class AgentRuntime {
           toolCallId: call.id,
           toolName: call.name,
           input: sanitizedInput,
+          activity: "tool",
           message: `Running ${call.name}`,
         });
+        // The runtime — not the tool — decides whether a call may proceed.
+        const permitted = await this.ensurePermission(
+          tool,
+          call.arguments,
+          call.id,
+          signal,
+        );
+        if (!permitted) {
+          if (this.isCancelled(signal)) {
+            this.transitionCancellation(signal);
+            return;
+          }
+          const denial = `Permission denied for tool '${call.name}'. Do not retry it; ask the user to enable the required permission or choose a read-only approach.`;
+          this.event({
+            type: "tool",
+            toolCallId: call.id,
+            toolName: call.name,
+            activity: "tool",
+            result: { isError: true, content: denial },
+            message: `${call.name} was not permitted`,
+          });
+          messages.push({
+            role: "tool",
+            toolCallId: call.id,
+            content: JSON.stringify({ isError: true, error: denial }),
+          });
+          continue;
+        }
+
         const context: ToolContext = {
           workspace: this.workspace,
           toolCallId: call.id,
           approve: async (requested, input) => {
-            this.transition(
-              "WAITING_FOR_APPROVAL",
-              `Waiting for approval of ${requested.name}`,
-            );
-            this.event({
-              type: "approval",
-              toolCallId: call.id,
-              toolName: requested.name,
-              input: redactObject(input),
-              action: "requested",
-              message: `Approval required for ${requested.name}`,
-            });
-            let approvalPromise: Promise<boolean>;
-            try {
-              approvalPromise = Promise.resolve(
-                this.approve(requested, input, call.id),
-              );
-            } catch {
-              approvalPromise = Promise.resolve(false);
-            }
-            const allowed = await this.waitForDecision(
-              approvalPromise,
-              signal,
-              false,
-            );
-            const cancelled = this.stopped || signal?.aborted;
-            this.event({
-              type: "approval",
-              toolCallId: call.id,
-              toolName: requested.name,
-              input: redactObject(input),
-              action: "resolved",
-              result: {
-                status: allowed && !cancelled ? "APPROVED" : "REJECTED",
-                approved: allowed && !cancelled,
-              },
-              message: cancelled
-                ? `Approval cancelled for ${requested.name}`
-                : allowed
-                  ? `${requested.name} approved`
-                  : `${requested.name} rejected`,
-            });
-            if (!cancelled)
-              this.transition(
-                "EXECUTING",
-                allowed
-                  ? `${requested.name} approved`
-                  : `${requested.name} rejected`,
-              );
-            return allowed && !cancelled;
+            // A tool's own approval request reuses the cached, authoritative
+            // decision for this call instead of prompting twice.
+            const cached = this.toolDecisions.get(call.id);
+            if (cached !== undefined) return cached;
+            return this.ensurePermission(requested, input, call.id, signal);
           },
           emit: (event) =>
             this.event({
@@ -588,7 +848,18 @@ export class AgentRuntime {
                 event.type.toLowerCase().includes("command") ||
                 event.type === "command"
                   ? "command"
-                  : "tool",
+                  : event.type === "verification"
+                    ? "verification"
+                    : "tool",
+              activity:
+                event.type === "CHANGE_PROPOSED"
+                  ? "file_change"
+                  : event.type.toLowerCase().includes("command") ||
+                      event.type === "command"
+                    ? "command"
+                    : event.type === "verification"
+                      ? "verification"
+                      : "tool",
               toolName: call.name,
               toolCallId: event.toolCallId || call.id,
               command: event.command,
@@ -600,11 +871,17 @@ export class AgentRuntime {
               message: redactSecrets(event.message),
               detail: event.detail ? redactSecrets(event.detail) : undefined,
             }),
-          signal,
+          signal: effectiveSignal,
           commandTimeoutMs: this.limits.commandTimeoutMs,
           toolTimeoutMs: this.limits.toolTimeoutMs,
           changeService: this.changeService,
           sessionId: this.sessionId,
+          registerCleanup: (cleanup) => {
+            this.session?.register(cleanup);
+          },
+          trackProcess: (child) => {
+            this.session?.trackChild(child);
+          },
           recordTestRun: (run) => this.contextRecordTestRun?.(run),
         };
         try {
@@ -615,15 +892,29 @@ export class AgentRuntime {
             toolCallId: call.id,
             toolName: call.name,
             result: sanitizedResult,
+            activity:
+              result.status === "pending_approval" ? "file_change" : "tool",
             message: result.isError
               ? `${call.name} failed`
-              : `${call.name} completed`,
+              : result.status === "pending_approval"
+                ? `${call.name} proposed a change for review`
+                : `${call.name} completed`,
           });
           if (result.status === "pending_approval" && result.changeId) {
             this.transition(
               "WAITING_FOR_CHANGE_APPROVAL",
               `Waiting for approval of ${result.path ?? result.changeId}`,
             );
+            if (this.session && !this.session.terminal) {
+              this.session.lifecycle.transition(
+                "waiting_for_approval",
+                `change ${result.path ?? result.changeId} awaiting approval`,
+              );
+              this.setLifecycle(
+                "waiting_for_approval",
+                `change ${result.path ?? result.changeId} awaiting approval`,
+              );
+            }
             this.event({
               type: "approval",
               toolCallId: call.id,
@@ -659,7 +950,13 @@ export class AgentRuntime {
                 ? "Change approval cancelled."
                 : decision.message,
             });
-            if (!cancelled) this.transition("EXECUTING", decision.message);
+            if (!cancelled) {
+              this.transition("EXECUTING", decision.message);
+              if (this.session && this.session.state === "waiting_for_approval") {
+                this.session.lifecycle.transition("running", "change resolved");
+                this.setLifecycle("running", "change resolved");
+              }
+            }
             messages.push({
               role: "tool",
               toolCallId: call.id,
@@ -688,12 +985,18 @@ export class AgentRuntime {
               `Tests failed; diagnosing repair attempt ${this.repairAttempts}/${this.limits.maxRepairAttempts}`,
             );
             this.event({
-              type: "error",
+              type: "verification",
+              activity: "verification",
               toolName: call.name,
               message:
                 this.repairAttempts >= this.limits.maxRepairAttempts
                   ? "Self-repair limit reached."
                   : "Tests failed. The agent must diagnose the failure before proposing a repair.",
+              result: {
+                attempt: this.repairAttempts,
+                limit: this.limits.maxRepairAttempts,
+                status: "FAILED",
+              },
             });
             if (this.repairAttempts >= this.limits.maxRepairAttempts) {
               this.transition("FAILED", "Self-repair limit reached");
@@ -736,7 +1039,9 @@ export class AgentRuntime {
     this.transition("FAILED", "Iteration budget reached");
     this.event({
       type: "error",
+      activity: "result",
       message: `The agent completed its allotted execution turns (${this.limits.maxIterations} iterations). You can prompt it to continue with the next step.`,
     });
+    this.finishSession("failed", "iteration budget reached");
   }
 }

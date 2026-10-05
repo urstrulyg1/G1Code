@@ -7,6 +7,9 @@ export type StreamingProviderPayload = {
     delta?: {
       content?: string;
       role?: string;
+      /** OpenAI-compatible reasoning extensions, passed through when present. */
+      reasoning_content?: string;
+      reasoning?: string;
       tool_calls?: Array<{
         index?: number;
         id?: string;
@@ -111,6 +114,7 @@ export async function* parseSSEStream(
 
         yield {
           content: delta?.content,
+          reasoning: delta?.reasoning_content ?? delta?.reasoning,
           toolCalls: currentToolCalls,
           usage,
         };

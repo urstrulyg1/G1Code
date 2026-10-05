@@ -4,6 +4,33 @@ import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { safeRealPath } from "../../../packages/tools/workspace";
+import { validateIpcPayload } from "./ipc-schemas";
+import { spawnCommand } from "../../../packages/tools/command";
+
+/**
+ * Every IPC handler goes through a schema. `handle` is the only registration
+ * helper in this file so it is not possible to add an unvalidated channel by
+ * accident (see ./ipc-schemas.ts).
+ */
+function handle<T = unknown, R = unknown>(
+  channel: string,
+  fn: (input: T) => R | Promise<R>,
+) {
+  ipcMain.handle(channel, async (_event, value) =>
+    fn(validateIpcPayload<T>(channel, value)),
+  );
+}
+
+/** Fire-and-forget channels (the renderer does not await a result). */
+function handleNotify<T = unknown>(channel: string, fn: (input: T) => void) {
+  ipcMain.on(channel, (_event, value) => {
+    try {
+      fn(validateIpcPayload<T>(channel, value));
+    } catch (error) {
+      console.error(`[IPC] Rejected ${channel}:`, error);
+    }
+  });
+}
 
 const execFileAsync = promisify(execFile);
 const root = __dirname;
@@ -141,6 +168,66 @@ async function ensureBackendServer() {
   }
 }
 
+/**
+ * Phase 4: when the renderer disappears, any live agent session must unwind
+ * immediately. Without this the backend would keep a pending approval waiter
+ * alive until its 15-minute timeout because nothing told it the window is gone.
+ */
+async function notifyRendererClosed(sessionIds?: string[]) {
+  try {
+    await fetch(`${API_BASE}/api/agent/renderer-closed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionIds }),
+    });
+  } catch (err) {
+    console.error("[RendererClosed] Failed to notify backend:", err);
+  }
+}
+
+/**
+ * Phase 4 human-editor write path.
+ *
+ * The editor is a privileged operation: it writes user content directly. It now
+ * (1) stays inside the workspace, (2) refuses to follow a symlink out of the
+ * workspace, (3) writes atomically via a temporary file, and (4) refuses to
+ * overwrite a file that changed on disk since the renderer last read it when
+ * the renderer supplies the hash it holds.
+ */
+async function writeWorkspaceFile(
+  filePath: string,
+  contents: string,
+  expectedHash?: string,
+): Promise<{ written: boolean; hash: string; conflict?: boolean }> {
+  const target = await safeRealPath(
+    selectedWorkspace!,
+    path.relative(selectedWorkspace!, filePath),
+  );
+  const current = await fs.readFile(target, "utf8").catch(() => null);
+  const currentHash = current === null ? null : fileContentHash(current);
+  if (expectedHash && currentHash !== null && expectedHash !== currentHash) {
+    return { written: false, hash: currentHash, conflict: true };
+  }
+  const temporary = `${target}.g1code-tmp-${process.pid}-${Date.now()}`;
+  await fs.writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
+  await fs.rename(temporary, target);
+  return { written: true, hash: fileContentHash(contents) };
+}
+
+/** Currently running human terminal processes, keyed by command text. */
+const terminalProcesses = new Map<
+  string,
+  { cancel: () => Promise<void>; process: { pid?: number } }
+>();
+function terminalRunId(command: string) {
+  return `${process.pid}:${command}`;
+}
+function fileContentHash(content: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { createHash } = require("node:crypto") as typeof import("node:crypto");
+  return createHash("sha256").update(content).digest("hex");
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1480,
@@ -176,6 +263,15 @@ function createWindow() {
   }
 
   startEventBridge(window);
+
+  // A crashed renderer must cancel sessions too, not just a clean close.
+  window.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[Renderer] Process gone:", details.reason);
+    void notifyRendererClosed();
+  });
+  window.on("closed", () => {
+    void notifyRendererClosed();
+  });
 
   if (process.argv.includes("--smoke")) {
     window.webContents.on("did-finish-load", () => {
@@ -217,11 +313,12 @@ async function applyWorkspace(targetPath: string): Promise<string> {
 }
 
 // Programmatic workspace selection (manual path entry from the renderer).
-ipcMain.handle("workspace:set", async (_event, targetPath: string) => {
+handle<{ path: string }>("workspace:set", async ({ path: targetPath }) => {
   return applyWorkspace(targetPath);
 });
 
 ipcMain.handle("workspace:choose", async (event) => {
+  validateIpcPayload("workspace:choose", undefined);
   // Native OS folder picker — the same mechanism VS Code uses.
   //   macOS   → NSOpenPanel in folder mode: select the folder itself, click "Open"
   //   Windows → standard open dialog in folder mode: select the folder itself,
@@ -248,12 +345,13 @@ ipcMain.handle("workspace:choose", async (event) => {
     return null;
   }
 });
-ipcMain.handle("workspace:get-current", () => {
+handle("workspace:get-current", () => {
   return selectedWorkspace || null;
 });
-ipcMain.handle(
+handle<{ path?: string }>(
   "workspace:open-native-folder",
-  async (_event, targetPath?: string) => {
+  async (input) => {
+    const targetPath = input?.path;
     const dir = targetPath || selectedWorkspace || process.cwd();
     if (dir) {
       const resolved = path.resolve(dir);
@@ -270,13 +368,7 @@ ipcMain.handle(
     return { success: false, error: "No directory specified" };
   },
 );
-ipcMain.handle("workspace:list", async (_event, directory: string) => {
-  if (
-    typeof directory !== "string" ||
-    directory.length === 0 ||
-    directory.length > 4096
-  )
-    throw new Error("Invalid workspace directory");
+handle<{ directory: string }>("workspace:list", async ({ directory }) => {
   if (!selectedWorkspace) throw new Error("Open a workspace first");
   const entries = await fs.readdir(
     selectedWorkspace
@@ -299,13 +391,7 @@ ipcMain.handle("workspace:list", async (_event, directory: string) => {
         a.name.localeCompare(b.name),
     );
 });
-ipcMain.handle("file:read", async (_event, filePath: string) => {
-  if (
-    typeof filePath !== "string" ||
-    filePath.length === 0 ||
-    filePath.length > 4096
-  )
-    throw new Error("Invalid file path");
+handle<{ path: string }>("file:read", async ({ path: filePath }) => {
   if (!selectedWorkspace) throw new Error("Open a workspace first");
   return fs.readFile(
     await safeRealPath(
@@ -315,60 +401,56 @@ ipcMain.handle("file:read", async (_event, filePath: string) => {
     "utf8",
   );
 });
-ipcMain.handle(
+handle<{ path: string; contents: string; expectedHash?: string }>(
   "file:write",
-  async (_event, filePath: string, contents: string) => {
-    if (
-      typeof filePath !== "string" ||
-      filePath.length === 0 ||
-      filePath.length > 4096
-    )
-      throw new Error("Invalid file path");
+  async ({ path: filePath, contents, expectedHash }) => {
     if (!selectedWorkspace) throw new Error("Open a workspace first");
-    if (typeof contents !== "string" || contents.length > 10_000_000)
-      throw new Error("Invalid file contents");
-    await fs.writeFile(
-      await safeRealPath(
-        selectedWorkspace,
-        path.relative(selectedWorkspace, filePath),
-      ),
-      contents,
-      "utf8",
-    );
-    return true;
+    return writeWorkspaceFile(filePath, contents, expectedHash);
   },
 );
-ipcMain.handle("terminal:run", async (_event, command: string, cwd: string) => {
-  if (typeof command !== "string" || command.length > 10_000)
-    throw new Error("Invalid command");
-  if (typeof cwd !== "string" || cwd.length === 0 || cwd.length > 4096)
-    throw new Error("Invalid working directory");
-  if (!selectedWorkspace) throw new Error("Open a workspace first");
-  const workingDirectory = await safeRealPath(
-    selectedWorkspace,
-    path.relative(selectedWorkspace, cwd),
-  );
-  try {
-    const result = await execFileAsync(
-      process.platform === "win32" ? "cmd.exe" : "sh",
-      process.platform === "win32"
-        ? ["/d", "/s", "/c", command]
-        : ["-lc", command],
-      { cwd: workingDirectory, timeout: 120000, maxBuffer: 2 * 1024 * 1024 },
+handle<{ command: string; cwd?: string }>(
+  "terminal:run",
+  async ({ command, cwd }) => {
+    if (!selectedWorkspace) throw new Error("Open a workspace first");
+    const workingDirectory = await safeRealPath(
+      selectedWorkspace,
+      path.relative(selectedWorkspace, cwd || selectedWorkspace),
     );
-    return { output: `${result.stdout}${result.stderr}`, exitCode: 0 };
-  } catch (error) {
-    const failure = error as {
-      stdout?: string;
-      stderr?: string;
-      code?: number;
+    // Phase 4: the human terminal uses the same spawned, cancellable,
+    // process-tree-aware implementation as agent commands instead of a
+    // completion-only execFile with a different output limit.
+    const execution = spawnCommand(command, workingDirectory, undefined, 120_000);
+    terminalProcesses.set(terminalRunId(command), execution);
+    const MAX_OUTPUT = 2 * 1024 * 1024;
+    let output = "";
+    const drain = async (stream: AsyncIterable<string>) => {
+      for await (const chunk of stream) {
+        if (output.length >= MAX_OUTPUT) continue;
+        output += chunk.slice(0, MAX_OUTPUT - output.length);
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed())
+            window.webContents.send("terminal:output", {
+              command,
+              chunk,
+            });
+        }
+      }
     };
+    const [result] = await Promise.all([
+      execution.wait(),
+      drain(execution.stdout),
+      drain(execution.stderr),
+    ]);
+    terminalProcesses.delete(terminalRunId(command));
     return {
-      output: `${failure.stdout ?? ""}${failure.stderr ?? String(error)}`,
-      exitCode: failure.code ?? 1,
+      output,
+      exitCode: result.exitCode,
+      signal: null,
+      truncated: result.truncated,
+      duration: result.duration,
     };
-  }
-});
+  },
+);
 const API_BASE = "http://127.0.0.1:3131";
 
 async function api(pathname: string, options?: RequestInit) {
@@ -392,166 +474,272 @@ async function api(pathname: string, options?: RequestInit) {
 }
 
 function registerApiBridgeHandlers() {
-  ipcMain.handle("settings:get", async () => api("/api/settings"));
-  ipcMain.handle("settings:save", async (_e, input) =>
+  handle("settings:get", () => api("/api/settings"));
+  handle("settings:save", (input) =>
     api("/api/settings", { method: "POST", body: JSON.stringify(input) }),
   );
   const providerQuery = (input?: { provider?: string }) =>
     input?.provider ? `?provider=${encodeURIComponent(input.provider)}` : "";
-  ipcMain.handle("provider:models", async (_e, input) =>
+  handle<{ provider?: string }>("provider:models", (input) =>
     api(`/api/provider/models${providerQuery(input)}`),
   );
-  ipcMain.handle("provider:models:free", async (_e, input) =>
+  handle<{ provider?: string }>("provider:models:free", (input) =>
     api(`/api/provider/models/free${providerQuery(input)}`),
   );
-  // preload sends a single `{ model, provider }` object
-  ipcMain.handle("provider:test", async (_e, input) =>
+  handle<{ model?: string; provider?: string }>("provider:test", (input) =>
     api("/api/provider/test", {
       method: "POST",
-      body: JSON.stringify(
-        input && typeof input === "object" ? input : { model: input },
-      ),
+      body: JSON.stringify(input ?? {}),
     }),
   );
-  ipcMain.handle("provider:verify", async (_e, input) =>
+  handle<{ provider?: string }>("provider:verify", (input) =>
     api("/api/provider/verify", {
       method: "POST",
       body: JSON.stringify(input ?? {}),
     }),
   );
-  ipcMain.handle("provider:refresh", async (_e, input) =>
+  handle<{ provider?: string }>("provider:refresh", (input) =>
     api("/api/provider/refresh", {
       method: "POST",
       body: JSON.stringify(input ?? {}),
     }),
   );
-  ipcMain.handle("provider:usage-limits", async () =>
-    api("/api/provider/usage-limits"),
-  );
-  ipcMain.handle("provider:usage-limits:simulate", async (_e, input) =>
+  handle("provider:usage-limits", () => api("/api/provider/usage-limits"));
+  handle<{ modelId: string }>("provider:usage-limits:simulate", (input) =>
     api("/api/provider/usage-limits/simulate", {
       method: "POST",
       body: JSON.stringify(input ?? {}),
     }),
   );
 
-  ipcMain.handle("agent:start", async (_e, input) =>
+  handle("agent:start", (input) =>
     api("/api/agent/start", { method: "POST", body: JSON.stringify(input) }),
   );
-  ipcMain.handle("agent:session-model", async (_e, input) =>
+  handle("agent:session-model", (input) =>
     api("/api/agent/session-model", {
       method: "POST",
       body: JSON.stringify(input),
     }),
   );
-  ipcMain.on("agent:stop", (_e, sessionId) => {
+  handleNotify<{ sessionId: string }>("agent:stop", ({ sessionId }) => {
     api("/api/agent/stop", {
       method: "POST",
       body: JSON.stringify({ sessionId }),
     }).catch((err) => console.error("[IPC] agent:stop failed:", err));
   });
-  ipcMain.handle("agent:sessions", async (_e, ws) =>
-    api(
-      `/api/agent/sessions?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}`,
-    ),
+  const workspaceOf = (value?: string) => value || selectedWorkspace || "";
+  handle<{ workspace: string }>("agent:sessions", ({ workspace }) =>
+    api(`/api/agent/sessions?workspace=${encodeURIComponent(workspaceOf(workspace))}`),
   );
-  ipcMain.handle("agent:session", async (_e, { workspace, sessionId }) =>
-    api(
-      `/api/agent/session?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&sessionId=${encodeURIComponent(sessionId)}`,
-    ),
+  handle<{ workspace: string; sessionId: string }>(
+    "agent:session",
+    ({ workspace, sessionId }) =>
+      api(
+        `/api/agent/session?workspace=${encodeURIComponent(workspaceOf(workspace))}&sessionId=${encodeURIComponent(sessionId)}`,
+      ),
   );
-  ipcMain.handle("agent:events", async (_e, { workspace, sessionId }) =>
-    api(
-      `/api/agent/events-history?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&sessionId=${encodeURIComponent(sessionId)}`,
-    ),
+  handle<{ workspace: string; sessionId: string; action: string; title?: string }>(
+    "agent:session:update",
+    ({ workspace, sessionId, action, title }) =>
+      api("/api/agent/session-update", {
+        method: "POST",
+        body: JSON.stringify({
+          workspace: workspaceOf(workspace),
+          sessionId,
+          action,
+          title,
+        }),
+      }),
   );
-  ipcMain.handle("agent:changes", async (_e, { workspace, sessionId }) =>
-    api(
-      `/api/agent/changes?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
-    ),
+  handle<{ workspace: string; sessionId: string }>(
+    "agent:events",
+    ({ workspace, sessionId }) =>
+      api(
+        `/api/agent/events-history?workspace=${encodeURIComponent(workspaceOf(workspace))}&sessionId=${encodeURIComponent(sessionId)}`,
+      ),
   );
-  ipcMain.handle("agent:change", async (_e, input) =>
-    api("/api/agent/change", {
-      method: "POST",
-      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
-    }),
+  handle<{ workspace: string; sessionId?: string }>(
+    "agent:changes",
+    ({ workspace, sessionId }) =>
+      api(
+        `/api/agent/changes?workspace=${encodeURIComponent(workspaceOf(workspace))}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
+      ),
   );
-  ipcMain.handle("agent:approve-all-changes", async (_e, input) =>
-    api("/api/agent/approve-all", {
-      method: "POST",
-      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
-    }),
+  handle<{ workspace?: string; sessionId: string; id: string; action: string }>(
+    "agent:change",
+    (input) =>
+      api("/api/agent/change", {
+        method: "POST",
+        body: JSON.stringify({
+          workspace: workspaceOf(input.workspace),
+          ...input,
+        }),
+      }),
   );
-  ipcMain.handle("agent:reject-all-changes", async (_e, input) =>
-    api("/api/agent/reject-all", {
-      method: "POST",
-      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
-    }),
+  handle<{ workspace?: string; sessionId: string }>(
+    "agent:approve-all-changes",
+    (input) =>
+      api("/api/agent/approve-all", {
+        method: "POST",
+        body: JSON.stringify({
+          workspace: workspaceOf(input.workspace),
+          ...input,
+        }),
+      }),
   );
-  ipcMain.handle("agent:discard-session", async (_e, input) =>
-    api("/api/agent/discard", {
-      method: "POST",
-      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
-    }),
+  handle<{ workspace?: string; sessionId: string }>(
+    "agent:reject-all-changes",
+    (input) =>
+      api("/api/agent/reject-all", {
+        method: "POST",
+        body: JSON.stringify({
+          workspace: workspaceOf(input.workspace),
+          ...input,
+        }),
+      }),
   );
-  ipcMain.handle("permission:response", async (_e, input) =>
+  handle<{ workspace?: string; sessionId: string }>(
+    "agent:discard-session",
+    (input) =>
+      api("/api/agent/discard", {
+        method: "POST",
+        body: JSON.stringify({
+          workspace: workspaceOf(input.workspace),
+          ...input,
+        }),
+      }),
+  );
+  handle("permission:response", (input) =>
     api("/api/agent/permission", {
       method: "POST",
       body: JSON.stringify(input),
     }),
   );
-  ipcMain.handle("agent:get-pending-permissions", async (_e, sessionId) => {
+  handle<string | undefined>("agent:get-pending-permissions", (sessionId) => {
     const query = sessionId
       ? `?sessionId=${encodeURIComponent(sessionId)}`
       : "";
     return api(`/api/agent/permissions/pending${query}`);
   });
-  ipcMain.handle("agent:get-session", async (_e, input) => {
-    const ws = input?.workspace || selectedWorkspace;
-    return api(
-      `/api/agent/session?workspace=${encodeURIComponent(ws)}&sessionId=${encodeURIComponent(input.sessionId)}`,
-    );
-  });
+  handle<{ workspace?: string; sessionId: string }>(
+    "agent:get-session",
+    ({ workspace, sessionId }) =>
+      api(
+        `/api/agent/session?workspace=${encodeURIComponent(workspaceOf(workspace))}&sessionId=${encodeURIComponent(sessionId)}`,
+      ),
+  );
 
   // Git / search / diagnostics
-  ipcMain.handle("git:commit", async (_e, input) =>
+  handle<{ workspace?: string; message: string }>("git:commit", (input) =>
     api("/api/git/commit", {
       method: "POST",
-      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+      body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
     }),
   );
-  ipcMain.handle("git:generate-commit-msg", async (_e, input) =>
-    api("/api/git/generate-commit-msg", {
-      method: "POST",
-      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
-    }),
+  handle<{ workspace?: string; model?: string }>(
+    "git:generate-commit-msg",
+    (input) =>
+      api("/api/git/generate-commit-msg", {
+        method: "POST",
+        body: JSON.stringify({
+          workspace: workspaceOf(input.workspace),
+          ...input,
+        }),
+      }),
   );
-  ipcMain.handle("git:status", async (_e, ws) =>
+  handle<{ workspace?: string }>("git:status", ({ workspace }) =>
     api(
-      `/api/git/status?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}&limit=5000`,
+      `/api/git/status?workspace=${encodeURIComponent(workspaceOf(workspace))}&limit=5000`,
     ),
   );
-  ipcMain.handle("problems:get", async (_e, ws) =>
-    api(
-      `/api/problems?workspace=${encodeURIComponent(ws || selectedWorkspace || "")}`,
-    ),
+  handle<{ workspace?: string; path: string; startLine?: number; endLine?: number }>(
+    "git:blame",
+    ({ workspace, path: filePath, startLine, endLine }) =>
+      api(
+        `/api/git/blame?workspace=${encodeURIComponent(workspaceOf(workspace))}&path=${encodeURIComponent(filePath)}${startLine ? `&startLine=${startLine}` : ""}${endLine ? `&endLine=${endLine}` : ""}`,
+      ),
   );
-  ipcMain.handle("workspace:search", async (_e, { workspace, query }) =>
-    api(
-      `/api/workspace/search?workspace=${encodeURIComponent(workspace || selectedWorkspace || "")}&query=${encodeURIComponent(query ?? "")}`,
-    ),
+  handle<{ workspace?: string; path: string; limit?: number }>(
+    "git:file-history",
+    ({ workspace, path: filePath, limit }) =>
+      api(
+        `/api/git/file-history?workspace=${encodeURIComponent(workspaceOf(workspace))}&path=${encodeURIComponent(filePath)}&limit=${limit ?? 20}`,
+      ),
+  );
+  handle<{ workspace?: string }>("problems:get", ({ workspace }) =>
+    api(`/api/problems?workspace=${encodeURIComponent(workspaceOf(workspace))}`),
+  );
+  handle<{ workspace?: string; query: string }>(
+    "workspace:search",
+    ({ workspace, query }) =>
+      api(
+        `/api/workspace/search?workspace=${encodeURIComponent(workspaceOf(workspace))}&query=${encodeURIComponent(query ?? "")}`,
+      ),
   );
 
-  ipcMain.handle("index:rebuild", async (_e, input) =>
-    api("/api/index/rebuild", {
+  // Phase 4 repository intelligence, context assembly, verification, diagnostics
+  handle<{ workspace?: string; query: string; limit?: number; kind?: string }>(
+    "repository:search",
+    (input) =>
+      api("/api/repository/search", {
+        method: "POST",
+        body: JSON.stringify({
+          workspace: workspaceOf(input.workspace),
+          ...input,
+        }),
+      }),
+  );
+  handle<{ workspace?: string }>("repository:status", ({ workspace }) =>
+    api(
+      `/api/repository/status?workspace=${encodeURIComponent(workspaceOf(workspace))}`,
+    ),
+  );
+  handle("repository:index", () =>
+    api("/api/repository/index", {
       method: "POST",
-      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+      body: JSON.stringify({ workspace: workspaceOf(undefined) }),
     }),
   );
-  ipcMain.handle("index:search", async (_e, input) =>
+  handle<{
+    workspace?: string;
+    prompt: string;
+    openFile?: string;
+    selection?: string;
+    budget?: number;
+  }>("context:assemble", (input) =>
+    api("/api/context/assemble", {
+      method: "POST",
+      body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
+    }),
+  );
+  handle<{ workspace?: string; sessionId?: string; paths?: string[]; level?: string }>(
+    "verification:run",
+    (input) =>
+      api("/api/verification/run", {
+        method: "POST",
+        body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
+      }),
+  );
+  handle<{ workspace?: string; sessionId?: string }>(
+    "verification:list",
+    ({ workspace, sessionId }) =>
+      api(
+        `/api/verification/list?workspace=${encodeURIComponent(workspaceOf(workspace))}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
+      ),
+  );
+  handle<{ workspace?: string }>("diagnostics:get", ({ workspace }) =>
+    api(`/api/diagnostics?workspace=${encodeURIComponent(workspaceOf(workspace))}`),
+  );
+  handle<{ workspace?: string }>("index:rebuild", (input) =>
+    api("/api/index/rebuild", {
+      method: "POST",
+      body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
+    }),
+  );
+  handle<{ workspace?: string; query: string }>("index:search", (input) =>
     api("/api/index/search", {
       method: "POST",
-      body: JSON.stringify({ workspace: selectedWorkspace, ...input }),
+      body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
     }),
   );
 }
@@ -605,6 +793,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  void notifyRendererClosed();
   if (serverProcess) {
     serverProcess.kill("SIGTERM");
   }
@@ -612,6 +801,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  void notifyRendererClosed();
   if (serverProcess) {
     serverProcess.kill("SIGTERM");
   }

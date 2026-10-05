@@ -71,6 +71,10 @@ export function testingTools(): AgentTool[] {
               message: redactedChunk,
             });
           },
+          (execution) => {
+            context.trackProcess?.(execution.process);
+            context.registerCleanup?.(() => void execution.cancel());
+          },
         );
         const cleanStdout = redactSecrets(run.result?.stdout || "");
         const cleanStderr = redactSecrets(run.result?.stderr || "");
@@ -85,7 +89,7 @@ export function testingTools(): AgentTool[] {
           duration: run.result?.duration,
         });
         context.emit({
-          type: "command",
+          type: "verification",
           toolCallId: context.toolCallId,
           action: run.passed ? "completed" : "failed",
           command: run.command,

@@ -1,0 +1,12 @@
+{
+  "id": "running",
+  "workspaceId": "/tmp/g1code-db-xUragP",
+  "title": "Running",
+  "mode": "agent",
+  "model": "fake",
+  "provider": "fake",
+  "status": "RUNNING",
+  "createdAt": "2026-10-05T16:40:57.241Z",
+  "updatedAt": "2026-10-05T16:40:57.241Z",
+  "messages": []
+}

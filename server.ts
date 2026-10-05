@@ -16,6 +16,12 @@ import { gitTools } from "./packages/tools/git";
 import { testingTools } from "./packages/testing/tool";
 import { ToolRegistry, type AgentTool } from "./packages/tools/types";
 import {
+  decidePermission,
+  type PermissionVerdict,
+} from "./packages/security/permission-policy";
+import type { SessionLifecycleState } from "./packages/agent/lifecycle";
+import { redactObject } from "./packages/security/redaction";
+import {
   AgentRuntime,
   type AgentEvent,
   type ChangeApprovalResult,
@@ -323,6 +329,51 @@ function checkedWorkspace(inputWorkspace: string | undefined): string {
     throw new Error("Workspace mismatch; refusing cross-workspace access");
   }
   return candidate;
+}
+
+/**
+ * Phase 4: one permission decision for every tool call.
+ *
+ * The previous inline branch returned `false` for every non-dangerous tool in
+ * `review` mode (the default), which silently disabled edits, tests and
+ * commands. The decision now comes from `packages/security/permission-policy`
+ * so it is testable, documented, and identical for every entry point.
+ */
+async function evaluateToolPermission(input: {
+  tool: AgentTool;
+  value: unknown;
+  executionMode: "review" | "auto" | "plan" | "readonly";
+  permissions: Settings["toolPermissions"];
+  workspace: string;
+}): Promise<PermissionVerdict> {
+  const { tool, value, executionMode, permissions, workspace } = input;
+  const command =
+    tool.name === "run_command" && value && typeof value === "object"
+      ? String((value as { command?: unknown }).command ?? "")
+      : undefined;
+  let targetExists: boolean | undefined;
+  if (tool.name === "write_file" && value && typeof value === "object") {
+    const requestedPath = String((value as { path?: unknown }).path ?? "");
+    if (requestedPath) {
+      try {
+        const safeTarget = await safeRealPath(workspace, requestedPath);
+        await fs.stat(safeTarget);
+        targetExists = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT")
+          targetExists = false;
+        else targetExists = true; // fail closed: treat as an existing file
+      }
+    }
+  }
+  return decidePermission({
+    toolName: tool.name,
+    input: value,
+    executionMode,
+    permissions,
+    command,
+    targetExists,
+  });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -1384,8 +1435,25 @@ const server = http.createServer(async (req, res) => {
       );
       store.addMessage(sessionId, "user", body.prompt);
 
+      /**
+       * Lifecycle states observed for *this* run. Scoped per request so two
+       * concurrent sessions can never observe each other's lifecycle.
+       */
+      const sessionLifecycle: SessionLifecycleState[] = [];
       const emit = (agentEvent: AgentEvent) => {
         store.addEvent(sessionId, agentEvent.type, agentEvent);
+        if (agentEvent.type === "lifecycle" && agentEvent.lifecycle) {
+          sessionLifecycle.push(agentEvent.lifecycle);
+          const statusMap: Partial<Record<SessionLifecycleState, string>> = {
+            running: "RUNNING",
+            waiting_for_approval: "WAITING_FOR_APPROVAL",
+            completed: "COMPLETED",
+            failed: "FAILED",
+            cancelled: "CANCELLED",
+          };
+          const mapped = statusMap[agentEvent.lifecycle];
+          if (mapped) store.updateSessionStatus(sessionId, mapped as never);
+        }
         if (agentEvent.type === "state" && agentEvent.state) {
           console.log(`[Agent] State -> ${agentEvent.state}`);
         } else if (agentEvent.type === "tool" && agentEvent.toolName) {
@@ -1552,77 +1620,33 @@ const server = http.createServer(async (req, res) => {
         workspace,
         emit,
         async (tool, value, toolCallId) => {
-          const permissions = settings.toolPermissions;
-          const commandText =
-            tool.name === "run_command" && value && typeof value === "object"
-              ? String((value as { command?: unknown }).command ?? "")
-              : "";
-          const isTestCommand =
-            /(^|\s)(npm\s+(run\s+)?test|npx\s+(jest|vitest)|pytest|go\s+test|cargo\s+test|make\s+test)(\s|$)/i.test(
-              commandText,
-            );
-          const isBuildCommand =
-            /(^|\s)(npm\s+(run\s+)?build|tsc(\s|$)|vite\s+build|electron-builder|go\s+build|cargo\s+build|make)(\s|$)/i.test(
-              commandText,
-            );
-          let permissionAllowed =
-            tool.name === "run_command"
-              ? isTestCommand
-                ? permissions.runTests
-                : isBuildCommand
-                  ? permissions.runBuilds
-                  : permissions.runCommands
-              : /^(read_file|list_directory|list_files|get_project_info|search_files|search_repository_context|git_status|git_diff|git_branch|git_log)$/.test(
-                    tool.name,
-                  )
-                ? tool.name.startsWith("search")
-                  ? permissions.searchRepository
-                  : permissions.readFiles
-                : /^(write_file|apply_patch)$/.test(tool.name)
-                  ? permissions.editFiles
-                  : tool.name === "delete_file"
-                    ? permissions.deleteFiles
-                    : tool.name === "rename_file"
-                      ? permissions.renameFiles
-                      : tool.permission !== "dangerous";
-          if (
-            tool.name === "write_file" &&
-            value &&
-            typeof value === "object"
-          ) {
-            const requestedPath = String(
-              (value as { path?: unknown }).path ?? "",
-            );
-            if (requestedPath) {
-              const safeTarget = await safeRealPath(workspace, requestedPath);
-              try {
-                await fs.stat(safeTarget);
-                permissionAllowed = permissionAllowed && permissions.editFiles;
-              } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === "ENOENT")
-                  permissionAllowed = permissions.createFiles;
-                else throw error;
-              }
-            }
-          }
-          if (!permissionAllowed) return false;
+          const verdict = await evaluateToolPermission({
+            tool,
+            value,
+            executionMode,
+            permissions: settings.toolPermissions,
+            workspace,
+          });
 
-          // Plan and read-only modes are enforced at the privileged boundary,
-          // not just by prompt instructions.
-          if (executionMode === "plan" || executionMode === "readonly") {
-            if (tool.permission !== "safe") return false;
-          }
-          // Dangerous operations always require explicit approval, even when
-          // ordinary coding actions are configured for automatic execution.
-          if (tool.permission === "dangerous") {
-            // fall through to the approval waiter
-          } else if (executionMode === "auto") {
-            return true;
-          } else {
-            // review mode intentionally pauses for an explicit user decision.
+          if (verdict.decision === "deny") {
+            // Denials are auditable: the renderer and the persisted event log
+            // both show why a tool never ran.
+            persistAndBroadcastEvent(sessionId, "approval", {
+              type: "approval",
+              toolCallId,
+              toolName: tool.name,
+              input: redactObject(value),
+              action: "denied",
+              activity: "approval",
+              result: { status: "DENIED", reason: verdict.reason },
+              message: verdict.summary,
+            });
             return false;
           }
 
+          if (verdict.decision === "allow") return true;
+
+          // decision === "ask": wait for an explicit user decision.
           const key = `${sessionId}:${requestId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
           return new Promise<boolean>((resolve) => {
             const timer = setTimeout(() => {
@@ -1637,6 +1661,7 @@ const server = http.createServer(async (req, res) => {
                 toolName: tool.name,
                 input: value,
                 action: "timeout",
+                activity: "approval" as const,
                 result: { status: "REJECTED", approved: false },
                 message: `Approval timed out for ${tool.name}`,
               };
@@ -1656,7 +1681,10 @@ const server = http.createServer(async (req, res) => {
               type: "permission:request",
               requestId: key,
               tool: tool.name,
-              input: value,
+              input: redactObject(value),
+              reason: verdict.reason,
+              risks: verdict.risks,
+              summary: verdict.summary,
               sessionId,
             });
           });
@@ -1734,7 +1762,11 @@ const server = http.createServer(async (req, res) => {
         requestId,
       );
 
-      manager.startSession(sessionId, runtime, async (signal) => {
+      manager.startSession(sessionId, runtime, async (signal, session) => {
+        // The session owns the AbortController and the cleanup registry; the
+        // runtime reads the signal from it so cancellation, child-process
+        // cleanup, and lifecycle transitions all use one source of truth.
+        runtime.attachSession(session);
         try {
           await runtime.run(
             `${instructions ? `Project instructions:\n${instructions}\n\n` : ""}${body.prompt}`,
@@ -1766,14 +1798,62 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { sessionId, requestId, executionMode });
     }
 
+    // Renderer/window closed while sessions may still be live. Cancelling here
+    // is what prevents a pending approval from suspending the runtime until the
+    // 15-minute timeout after the user closed the window.
+    if (pathname === "/api/agent/renderer-closed" && req.method === "POST") {
+      const body = await parseJsonBody<{ sessionIds?: string[] }>(req).catch(
+        () => ({}) as { sessionIds?: string[] },
+      );
+      const requested = Array.isArray(body.sessionIds)
+        ? body.sessionIds.filter((id): id is string => typeof id === "string")
+        : [];
+      const targets = requested.length
+        ? requested
+        : Array.from(manager.activeSessions(), (session) => session.sessionId);
+      for (const sessionId of targets) {
+        // Release waiters first so the runtime observes a decision immediately,
+        // then request cancellation through the lifecycle.
+        releaseSessionWaiters(sessionId);
+        if (manager.cancelSession(sessionId) === "not-found") {
+          store.updateSessionStatus(sessionId, "STOPPED");
+        }
+        store.addEvent(sessionId, "SESSION_CANCELLED", {
+          message: "Renderer closed while the task was running.",
+          reason: "renderer_closed",
+        });
+      }
+      // Any permission request that belongs to a now-dead renderer must not
+      // keep a promise alive.
+      for (const [key, waiter] of [...permissionWaiters]) {
+        if (targets.length === 0 || targets.includes(waiter.sessionId)) {
+          permissionWaiters.delete(key);
+          if (waiter.timer) clearTimeout(waiter.timer);
+          waiter.resolve(false);
+        }
+      }
+      return sendJson(res, 200, { cancelled: targets });
+    }
+
     // Stop agent
     if (pathname === "/api/agent/stop" && req.method === "POST") {
       const body = await parseJsonBody<{ sessionId: string }>(req);
-      if (body.sessionId) {
-        releaseSessionWaiters(body.sessionId);
-        manager.cancelSession(body.sessionId);
+      if (!body.sessionId || typeof body.sessionId !== "string") {
+        return sendError(res, 400, "sessionId required");
       }
-      return sendJson(res, 200, { success: true });
+      releaseSessionWaiters(body.sessionId);
+      const outcome = manager.cancelSession(body.sessionId);
+      if (outcome === "not-found") {
+        // Repeated stops and stops after completion are not errors: report the
+        // current persisted state so the UI can reconcile.
+        const session = store.getSession(body.sessionId);
+        return sendJson(res, 200, {
+          success: true,
+          outcome,
+          status: session?.status ?? null,
+        });
+      }
+      return sendJson(res, 200, { success: true, outcome });
     }
 
     // Switch model for existing session

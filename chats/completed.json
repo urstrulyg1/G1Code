@@ -1,0 +1,12 @@
+{
+  "id": "completed",
+  "workspaceId": "/tmp/g1code-db-xUragP",
+  "title": "Completed",
+  "mode": "agent",
+  "model": "fake",
+  "provider": "fake",
+  "status": "COMPLETED",
+  "createdAt": "2026-10-05T16:40:57.243Z",
+  "updatedAt": "2026-10-05T16:40:57.243Z",
+  "messages": []
+}

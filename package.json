@@ -33,7 +33,15 @@
     "electron:all": "electron-builder --mac --win --linux --x64 --arm64 --ia32",
     "build:desktop": "node scripts/run-build.cjs",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,html,md}\" \"!package-lock.json\"",
-    "verify": "npm run preflight:electron && npm test && npm run build && npm run e2e"
+    "verify": "npm run typecheck && npm run format:check && npm test && npm run build && npm run e2e",
+    "electron:ensure": "tsx scripts/ensure-electron.ts",
+    "preflight:electron:strict": "tsx scripts/preflight-electron.ts --strict",
+    "typecheck": "tsc -p apps/desktop/tsconfig.json --noEmit && tsc -p apps/desktop/tsconfig.electron.json --noEmit",
+    "lint": "npm run typecheck && npm run format:check",
+    "test:unit": "tsx --test tests/*.test.ts",
+    "test:security": "tsx --test tests/security.test.ts tests/security-hardening.test.ts tests/ipc-validation.test.ts tests/permission-policy.test.ts tests/validation.test.ts",
+    "test:integration": "tsx --test tests/e2e/backend-suite.ts",
+    "e2e:backend": "tsx tests/e2e/backend-suite.ts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

@@ -75,12 +75,50 @@ function findCachedZip(
   return null;
 }
 
+/**
+ * Phase 4: installing dependencies must never fail because an Electron binary
+ * cannot be fetched (offline machines, restricted networks, CI caches, or a
+ * sandbox without access to the Electron release CDN).
+ *
+ * Default behaviour is therefore best-effort: report the problem, explain how
+ * to fix it, and exit 0 so `npm install` completes. Consumers that genuinely
+ * require a runnable binary (packaging, Electron smoke tests) call this with
+ * `G1CODE_REQUIRE_ELECTRON=1` or `--strict`, which restores the hard failure.
+ */
+function strictMode(): boolean {
+  return (
+    process.env.G1CODE_REQUIRE_ELECTRON === "1" ||
+    process.argv.includes("--strict")
+  );
+}
+
+function abort(message: string): void {
+  if (strictMode()) {
+    console.error(message);
+    process.exit(1);
+  }
+  console.warn(message);
+  console.warn(
+    "[ensure-electron] Continuing without the Electron binary. TypeScript checks, " +
+      "unit tests, the backend server, and the Vite renderer build do not need it. " +
+      "Run `npm run electron:ensure -- --strict` once a binary is available.",
+  );
+  console.warn(
+    "[ensure-electron] To install it: run `npm rebuild electron` (or `npm install` with " +
+      "network access to https://github.com/electron/electron/releases), or place " +
+      `electron-v<version>-${process.platform}-${process.arch}.zip in the Electron cache ` +
+      "(`~/.cache/electron` on Linux, `~/Library/Caches/electron` on macOS, " +
+      "`%LOCALAPPDATA%\\electron\\Cache` on Windows) and re-run this script.",
+  );
+  process.exit(0);
+}
+
 export function ensureElectron(): void {
   const root = process.cwd();
   const electronDir = path.join(root, "node_modules", "electron");
   if (!existsSync(electronDir)) {
-    console.error("ensure-electron: node_modules/electron is not installed.");
-    process.exit(1);
+    abort("ensure-electron: node_modules/electron is not installed.");
+    return;
   }
 
   const pkgPath = path.join(electronDir, "package.json");
@@ -129,13 +167,10 @@ export function ensureElectron(): void {
 
   const zipPath = findCachedZip(version, platform, arch);
   if (!zipPath) {
-    console.error(
+    abort(
       `[ensure-electron] ERROR: Cached binary electron-v${version}-${platform}-${arch}.zip was not found.`,
     );
-    console.error(
-      "Please ensure the Electron download artifact is available in your system cache.",
-    );
-    process.exit(1);
+    return;
   }
 
   console.log(`[ensure-electron] Extracting ${zipPath} to ${distDir}...`);
@@ -183,19 +218,17 @@ export function ensureElectron(): void {
 
   // Verification test
   if (!existsSync(execPath)) {
-    console.error(
-      `[ensure-electron] Extraction failed: ${execPath} does not exist.`,
-    );
-    process.exit(1);
+    abort(`[ensure-electron] Extraction failed: ${execPath} does not exist.`);
+    return;
   }
 
   const check = spawnSync(execPath, ["-v"], { encoding: "utf8" });
   const output = (check.stdout || "").trim();
   if (output !== `v${version}`) {
-    console.error(
+    abort(
       `[ensure-electron] Verification failed. Expected v${version}, got: ${output}`,
     );
-    process.exit(1);
+    return;
   }
 
   console.log(
