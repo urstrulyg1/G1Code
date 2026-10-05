@@ -50,9 +50,7 @@ export type ExecutionMode = "review" | "auto" | "plan" | "readonly";
 type ToolRule = {
   category: ToolCategory;
   /** Permission switch that must be enabled for the tool to be usable at all. */
-  switch:
-    | keyof ToolPermissionSettings
-    | Array<keyof ToolPermissionSettings>;
+  switch: keyof ToolPermissionSettings | Array<keyof ToolPermissionSettings>;
   /** `dangerous` forces an approval prompt in every execution mode. */
   dangerous?: boolean;
   /** `write_file` may edit an existing file or create a missing one. */
@@ -76,6 +74,7 @@ const TOOL_RULES: Record<string, ToolRule> = {
   },
   lookup_symbol: { category: "read_only", switch: "searchRepository" },
   repository_metadata: { category: "read_only", switch: "searchRepository" },
+  related_tests: { category: "read_only", switch: "searchRepository" },
   git_status: { category: "read_only", switch: "readFiles" },
   git_diff: { category: "read_only", switch: "readFiles" },
   git_diff_staged: { category: "read_only", switch: "readFiles" },
@@ -184,18 +183,16 @@ function switchEnabled(
  * independent settings switches keep working exactly as the settings UI
  * describes them.
  */
-export function decidePermission(
-  request: {
-    toolName: string;
-    input?: unknown;
-    executionMode: ExecutionMode;
-    permissions: ToolPermissionSettings;
-    /** Result of a workspace-contained existence check for mutating tools. */
-    targetExists?: boolean;
-    /** Command text when the tool executes a shell command. */
-    command?: string;
-  },
-  ): PermissionVerdict {
+export function decidePermission(request: {
+  toolName: string;
+  input?: unknown;
+  executionMode: ExecutionMode;
+  permissions: ToolPermissionSettings;
+  /** Result of a workspace-contained existence check for mutating tools. */
+  targetExists?: boolean;
+  /** Command text when the tool executes a shell command. */
+  command?: string;
+}): PermissionVerdict {
   const { toolName, input, executionMode, permissions } = request;
   const rule = TOOL_RULES[toolName];
 
@@ -373,7 +370,8 @@ export function decidePermission(
       reason: "review-mode-proposes-change",
       category: rule.category,
       risks,
-      summary: "The tool may propose a change; applying it still needs approval.",
+      summary:
+        "The tool may propose a change; applying it still needs approval.",
     };
   }
 

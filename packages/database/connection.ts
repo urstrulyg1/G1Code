@@ -73,6 +73,40 @@ export function openDatabase(customDir?: string) {
   database.exec(
     "CREATE TABLE IF NOT EXISTS execution_checkpoints (session_id TEXT PRIMARY KEY, state TEXT NOT NULL, iteration INTEGER NOT NULL, tool_calls INTEGER NOT NULL, checkpoint TEXT NOT NULL, updated_at TEXT NOT NULL)",
   );
+  // Phase 4 repository intelligence: dependency edges + git state + verification.
+  database.exec(`CREATE TABLE IF NOT EXISTS file_imports (
+      workspace_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      module TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      line INTEGER NOT NULL,
+      resolved_path TEXT,
+      names TEXT,
+      PRIMARY KEY (workspace_id, path, module, kind, line)
+    );
+    CREATE INDEX IF NOT EXISTS idx_file_imports_resolved ON file_imports(workspace_id, resolved_path);
+    CREATE TABLE IF NOT EXISTS file_git_meta (
+      workspace_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      status TEXT NOT NULL,
+      last_commit TEXT,
+      last_commit_at TEXT,
+      last_commit_subject TEXT,
+      PRIMARY KEY (workspace_id, path)
+    );
+    CREATE TABLE IF NOT EXISTS verification_runs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      workspace_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      level TEXT NOT NULL,
+      changed_files TEXT NOT NULL,
+      steps TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_verification_session ON verification_runs(session_id, created_at);`);
   database.exec(`CREATE TABLE IF NOT EXISTS change_batches (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, workspace_id TEXT NOT NULL, status TEXT NOT NULL, failure_reason TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT);
      CREATE TABLE IF NOT EXISTS change_batch_items (batch_id TEXT NOT NULL, change_id TEXT NOT NULL, path TEXT NOT NULL, original_hash TEXT NOT NULL, proposed_hash TEXT NOT NULL, original_content TEXT NOT NULL, proposed_content TEXT NOT NULL, backup_content TEXT NOT NULL, status TEXT NOT NULL, PRIMARY KEY (batch_id, change_id));`);
   const version = (
@@ -127,6 +161,18 @@ export function openDatabase(customDir?: string) {
       if (!columns.some((column) => column.name === "target_path"))
         database.exec("ALTER TABLE file_changes ADD COLUMN target_path TEXT");
       database.prepare("UPDATE schema_version SET version = 3").run();
+    })();
+  }
+  if (version < 4) {
+    database.transaction(() => {
+      const sessionColumns = database
+        .prepare("PRAGMA table_info(sessions)")
+        .all() as Array<{ name: string }>;
+      if (!sessionColumns.some((column) => column.name === "archived"))
+        database.exec(
+          "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+        );
+      database.prepare("UPDATE schema_version SET version = 4").run();
     })();
   }
   return database;

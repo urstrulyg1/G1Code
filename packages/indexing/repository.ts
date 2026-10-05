@@ -89,7 +89,7 @@ export function extractSymbols(
 }
 export async function scanRepository(
   root: string,
-  onProgress?: (scanned: number) => void,
+  onProgress?: (scanned: number, currentPath?: string) => void,
 ): Promise<FileIndexEntry[]> {
   const result: FileIndexEntry[] = [];
   let scanned = 0;
@@ -193,7 +193,8 @@ export async function scanRepository(
       modifiedTime: stat.mtime.toISOString(),
       hash: createHash("sha256").update(content).digest("hex"),
     });
-    onProgress?.(++scanned);
+    scanned += 1;
+    onProgress?.(scanned, relativePath);
   }
 
   result.sort((a, b) => a.path.localeCompare(b.path));
