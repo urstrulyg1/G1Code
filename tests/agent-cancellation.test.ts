@@ -28,7 +28,12 @@ class StreamingProvider implements AIProvider {
     await new Promise<void>((resolve) => {
       const signal = request.signal;
       if (!signal) return resolve();
-      if (signal.aborted) return resolve();
+      if (signal.aborted) {
+        // Cancellation arrived before this stream attached its listener: the
+        // stream still observes an aborted signal, so record it.
+        this.aborted = true;
+        return resolve();
+      }
       signal.addEventListener(
         "abort",
         () => {
@@ -54,6 +59,25 @@ function collect() {
   return { events, emit: (event: AgentEvent) => events.push(event) };
 }
 
+/**
+ * Wait for an observable condition instead of sleeping for a fixed number of
+ * milliseconds. CI runners are slow and shared, so fixed sleeps make
+ * cancellation tests flaky; polling keeps the same assertions but removes the
+ * scheduling assumption.
+ */
+async function waitFor(
+  condition: () => boolean,
+  description: string,
+  timeoutMs = 10_000,
+) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail(`timed out after ${timeoutMs}ms waiting for ${description}`);
+}
+
 test("cancellation during provider streaming aborts the request and ends the session", async () => {
   const provider = new StreamingProvider();
   const { events, emit } = collect();
@@ -70,7 +94,10 @@ test("cancellation during provider streaming aborts the request and ends the ses
   runtime.attachSession(session);
 
   const run = runtime.run("long task", "ask");
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await waitFor(
+    () => provider.started && provider.seenSignals.length > 0,
+    "the provider stream to start",
+  );
   assert.equal(provider.started, true);
   assert.equal(session.state, "running");
 
@@ -100,12 +127,14 @@ test("cancellation during tool execution stops the tool through the session sign
   };
   const registry = new ToolRegistry();
   let cancelled = false;
+  let toolStarted = false;
   registry.register({
     name: "slow_tool",
     description: "Waits for cancellation.",
     permission: "safe",
     inputSchema: { type: "object" },
     execute: async (_input, context) => {
+      toolStarted = true;
       await new Promise<void>((resolve) => {
         const signal = context.signal;
         if (!signal || signal.aborted) return resolve();
@@ -135,7 +164,7 @@ test("cancellation during tool execution stops the tool through the session sign
   const session = new AgentSession("tool-session");
   runtime.attachSession(session);
   const run = runtime.run("use a tool", "agent");
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await waitFor(() => toolStarted, "the tool to start");
 
   session.requestCancel("stop during tool");
   await run;
@@ -181,7 +210,7 @@ test("cancellation while waiting for approval resolves the waiter and never hang
   runtime.attachSession(session);
 
   const run = runtime.run("delete something", "agent");
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => approvalRequested, "the approval request");
   assert.equal(approvalRequested, true);
   assert.equal(session.state, "waiting_for_approval");
 
@@ -189,7 +218,10 @@ test("cancellation while waiting for approval resolves the waiter and never hang
   await Promise.race([
     run,
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("approval wait did not unwind")), 500),
+      setTimeout(
+        () => reject(new Error("approval wait did not unwind")),
+        10_000,
+      ),
     ),
   ]);
 
@@ -221,7 +253,7 @@ test("repeated stop requests during a run are safe and produce a single terminal
   const session = new AgentSession("repeat-session");
   runtime.attachSession(session);
   const run = runtime.run("task", "ask");
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await waitFor(() => provider.started, "the provider stream to start");
 
   runtime.stop();
   runtime.stop();
@@ -254,10 +286,13 @@ test("manager cancellation during an in-flight run unwinds provider and tools", 
     runtime.attachSession(session);
     await runtime.run("task", "ask", signal);
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await waitFor(() => provider.started, "the provider stream to start");
 
   assert.equal(manager.cancelSession("manager-session"), "requested");
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await waitFor(
+    () => manager.size() === 0,
+    "the manager to release the cancelled session",
+  );
 
   assert.equal(manager.size(), 0, "no session handle is leaked");
   assert.equal(provider.aborted, true);

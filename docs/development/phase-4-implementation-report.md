@@ -67,7 +67,7 @@ Key properties:
 | Session history   | `/api/agent/sessions` returns sidebar metadata (title, status, timestamps, change/applied/conflict counts, latest verification status, archived) plus rename/archive/unarchive/delete endpoints.                                                                                                       |
 | Diagnostics       | `/api/diagnostics` reports runtime state, active sessions, provider state (masked credential), index freshness, recent tool calls, recent errors, and recent verification runs — never secrets.                                                                                                        |
 | Renderer          | Agent event model extracted into `apps/desktop/src/agent-events.ts` (pure, unit-tested); automatic context assembly rendered as a readable summary; terminal-state handling shared.                                                                                                                    |
-| DX                | `postinstall` verifies Electron without breaking installs; `preflight:electron[:strict]`; `typecheck`, `lint`, `test:unit`, `test:security`, `e2e:backend`, `e2e:electron`, `verify`; CI runs unit/security/build on Node 20/22/24 and the headless E2E on Linux/macOS/Windows.                        |
+| DX                | `postinstall` verifies Electron without breaking installs; `preflight:electron[:strict]`; `typecheck`, `lint`, `test:unit`, `test:security`, `e2e:backend`, `e2e:electron`, `verify`; CI runs unit/security/build on Node 22/24 and the headless E2E on Linux/macOS/Windows.                           |
 
 ## 3. Security improvements
 
@@ -201,6 +201,10 @@ Honest state of what is **not** finished:
   declarations and imports, not a full type graph.
 - **Provider support** is the repository's existing OpenAI-compatible provider;
   no additional provider APIs or models were invented.
+- **Node 22 is the minimum.** `better-sqlite3` v13 declares `engines.node >= 22`
+  and publishes no Node 20 prebuilds, so a Node 20 job cannot load the database
+  layer; `package.json`, the README and the CI matrix now state Node 22+ instead
+  of claiming Node 20 support the dependency does not provide.
 - **Local environment limits:** the Electron binary cannot be downloaded in this
   sandbox and there is no X server, so `npm run e2e:electron`, `e2e:smoke` and
   packaging were not executed here; CI covers them on runners with a display.

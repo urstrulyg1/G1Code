@@ -7,8 +7,10 @@ index, provider credentials, and every filesystem or command operation.
 
 ## Development
 
-Requirements: Node.js 20+ and npm 10+. Git is optional (repository intelligence
-degrades gracefully outside a repository).
+Requirements: Node.js 22+ and npm 10+. Node 22 is the floor because the database
+layer (`better-sqlite3` v13) declares `engines.node >= 22` and ships no Node 20
+prebuilds. Git is optional (repository intelligence degrades gracefully outside
+a repository).
 
 ```bash
 npm install          # installs dependencies and verifies the Electron binary

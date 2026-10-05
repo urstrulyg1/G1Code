@@ -68,5 +68,9 @@
   },
   "allowScripts": {
     "electron@32.3.3": true
+  },
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
   }
 }
