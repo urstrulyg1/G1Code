@@ -40,8 +40,15 @@ jobs:
       - run: npm run preflight:electron
       - run: npm run typecheck
       - run: npm run format:check
-      - run: npm test
-      - run: npm run test:security
+      - name: Unit + integration tests
+        run: |
+          set -o pipefail
+          npx tsx --test-reporter=tap --test tests/*.test.ts 2>&1 | tee /tmp/g1code-test.log
+      - name: Publish test failures as annotations
+        if: failure()
+        run: npx tsx scripts/ci-test-annotations.ts /tmp/g1code-test.log
+      - name: Security suites
+        run: npm run test:security
       - run: npm run build
       - name: Electron smoke test (Linux, xvfb)
         if: matrix.node == 22
