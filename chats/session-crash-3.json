@@ -1,12 +1,12 @@
 {
   "id": "session-crash-3",
-  "workspaceId": "/tmp/g1code-crash-3-WNboJW",
+  "workspaceId": "/tmp/g1code-crash-3-FUpZiF",
   "title": "Crash test 3",
   "mode": "agent",
   "model": "test-model",
   "provider": "test-provider",
   "status": "RUNNING",
-  "createdAt": "2026-10-05T16:51:58.020Z",
-  "updatedAt": "2026-10-05T16:51:58.020Z",
+  "createdAt": "2026-10-05T16:53:59.919Z",
+  "updatedAt": "2026-10-05T16:53:59.919Z",
   "messages": []
 }
