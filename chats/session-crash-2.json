@@ -1,12 +1,12 @@
 {
   "id": "session-crash-2",
-  "workspaceId": "/tmp/g1code-crash-2-slKGa4",
+  "workspaceId": "/tmp/g1code-crash-2-MzUvgV",
   "title": "Crash test 2",
   "mode": "agent",
   "model": "test-model",
   "provider": "test-provider",
   "status": "RUNNING",
-  "createdAt": "2026-10-05T16:40:41.421Z",
-  "updatedAt": "2026-10-05T16:40:41.421Z",
+  "createdAt": "2026-10-05T16:51:58.007Z",
+  "updatedAt": "2026-10-05T16:51:58.007Z",
   "messages": []
 }

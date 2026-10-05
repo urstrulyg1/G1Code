@@ -1,12 +1,12 @@
 {
   "id": "waiting",
-  "workspaceId": "/tmp/g1code-db-xUragP",
+  "workspaceId": "/tmp/g1code-db-xzGpv4",
   "title": "Waiting",
   "mode": "agent",
   "model": "fake",
   "provider": "fake",
   "status": "WAITING_FOR_APPROVAL",
-  "createdAt": "2026-10-05T16:40:57.242Z",
-  "updatedAt": "2026-10-05T16:40:57.242Z",
+  "createdAt": "2026-10-05T16:52:14.340Z",
+  "updatedAt": "2026-10-05T16:52:14.340Z",
   "messages": []
 }

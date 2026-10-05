@@ -1,12 +1,12 @@
 {
   "id": "golden-session",
-  "workspaceId": "/tmp/g1code-golden-pHWRmL",
+  "workspaceId": "/tmp/g1code-golden-54JMQz",
   "title": "Fix calculator",
   "mode": "agent",
   "model": "deterministic",
   "provider": "test",
   "status": "RUNNING",
-  "createdAt": "2026-10-05T16:40:43.293Z",
-  "updatedAt": "2026-10-05T16:40:43.293Z",
+  "createdAt": "2026-10-05T16:51:59.853Z",
+  "updatedAt": "2026-10-05T16:51:59.853Z",
   "messages": []
 }

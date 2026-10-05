@@ -286,6 +286,11 @@ function setCorsHeaders(res: http.ServerResponse, origin?: string) {
   res.setHeader("Access-Control-Max-Age", "600");
 }
 
+function sha256(content: string): string {
+  const { createHash } = require("node:crypto") as typeof import("node:crypto");
+  return createHash("sha256").update(content).digest("hex");
+}
+
 function sendJson(res: http.ServerResponse, status: number, data: unknown) {
   setCorsHeaders(res, res.getHeader("X-G1Code-Origin") as string | undefined);
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -907,9 +912,12 @@ const server = http.createServer(async (req, res) => {
 
     // File write
     if (pathname === "/api/file/write" && req.method === "POST") {
-      const body = await parseJsonBody<{ filePath: string; contents: string }>(
-        req,
-      );
+      const body = await parseJsonBody<{
+        filePath: string;
+        contents: string;
+        /** sha256 of the content the caller believes is on disk. */
+        expectedHash?: string;
+      }>(req);
       if (!body.filePath || typeof body.contents !== "string") {
         return sendError(res, 400, "filePath and contents required");
       }
@@ -917,8 +925,37 @@ const server = http.createServer(async (req, res) => {
         ? path.relative(selectedWorkspace, body.filePath)
         : body.filePath;
       const safePath = await safeRealPath(selectedWorkspace, relPath);
-      await fs.writeFile(safePath, body.contents, "utf8");
-      return sendJson(res, 200, { success: true });
+
+      // Never silently overwrite: when the caller supplies the hash it read,
+      // a mismatch is reported as a conflict instead of clobbering the file.
+      const currentHash = await fs
+        .readFile(safePath, "utf8")
+        .then((content) => sha256(content))
+        .catch(() => null);
+      if (
+        typeof body.expectedHash === "string" &&
+        body.expectedHash &&
+        currentHash &&
+        body.expectedHash !== currentHash
+      ) {
+        return sendJson(res, 409, {
+          success: false,
+          written: false,
+          conflict: true,
+          currentHash,
+        });
+      }
+
+      // Atomic replace so a crash cannot leave a half-written file behind.
+      const temporary = `${safePath}.g1code-write-${randomUUID().slice(0, 8)}`;
+      await fs.writeFile(temporary, body.contents, { mode: 0o600 });
+      await fs.rename(temporary, safePath);
+      return sendJson(res, 200, {
+        success: true,
+        written: true,
+        conflict: false,
+        hash: sha256(body.contents),
+      });
     }
 
     // Terminal run
@@ -1195,8 +1232,14 @@ const server = http.createServer(async (req, res) => {
       const workspace = checkedWorkspace(
         url.searchParams.get("workspace") || undefined,
       );
-      const sessions = store.recentSessions(workspace);
-      return sendJson(res, 200, sessions);
+      // Rich session metadata for the session sidebar: title, timestamps,
+      // status, changed-file counts and the latest verification result.
+      const includeArchived = url.searchParams.get("includeArchived") === "1";
+      return sendJson(
+        res,
+        200,
+        store.sessionHistory(workspace, 50, includeArchived),
+      );
     }
 
     // Session details
@@ -1270,6 +1313,17 @@ const server = http.createServer(async (req, res) => {
         const session = store.getSession(sessionId);
         if (!session || !matchesWorkspace(session.workspaceId, workspace))
           return sendError(res, 403, "Session does not belong to workspace");
+      }
+      // The renderer's diff viewer and session sidebar need resolved changes
+      // too (APPLIED / REJECTED / REVERTED / CONFLICT), not only pending ones.
+      if (url.searchParams.get("includeResolved") === "1") {
+        if (!sessionId)
+          return sendError(
+            res,
+            400,
+            "sessionId is required for the full change history",
+          );
+        return sendJson(res, 200, store.changeHistory(sessionId));
       }
       return sendJson(res, 200, store.pendingChanges(sessionId));
     }
@@ -1817,15 +1871,21 @@ const server = http.createServer(async (req, res) => {
       if (startLine > 0 && endLine >= startLine)
         args.push("-L", `${startLine},${endLine}`);
       args.push("--", relative);
-      const { stdout } = await execFileAsync("git", args, {
+      const stdout = await execFileAsync("git", args, {
         maxBuffer: 8_000_000,
-      }).catch((error: unknown) => {
-        throw new Error(
-          `git blame failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
+      })
+        .then((result) => result.stdout)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          if (/not a git repository/i.test(message)) return null;
+          throw new Error(`git blame failed: ${message}`);
+        });
+      if (stdout === null)
+        return sendJson(res, 200, { path: relative, isRepo: false, lines: [] });
       return sendJson(res, 200, {
         path: relative,
+        isRepo: true,
         lines: parseBlameOutput(stdout),
       });
     }
@@ -1845,7 +1905,7 @@ const server = http.createServer(async (req, res) => {
         1,
         Math.min(200, Number(url.searchParams.get("limit") ?? 20) || 20),
       );
-      const { stdout } = await execFileAsync(
+      const stdout = await execFileAsync(
         "git",
         [
           "-C",
@@ -1859,11 +1919,22 @@ const server = http.createServer(async (req, res) => {
           relative,
         ],
         { maxBuffer: 4_000_000 },
-      ).catch((error: unknown) => {
-        throw new Error(
-          `git log failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
+      )
+        .then((result) => result.stdout)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          // A workspace that is not a git repository is a valid state, not a
+          // server error: the renderer shows "no history" instead of failing.
+          if (/not a git repository/i.test(message)) return null;
+          throw new Error(`git log failed: ${message}`);
+        });
+      if (stdout === null)
+        return sendJson(res, 200, {
+          path: relative,
+          isRepo: false,
+          commits: [],
+        });
       const commits = stdout
         .split("\n")
         .filter(Boolean)
@@ -1877,7 +1948,7 @@ const server = http.createServer(async (req, res) => {
             subject,
           };
         });
-      return sendJson(res, 200, { path: relative, commits });
+      return sendJson(res, 200, { path: relative, isRepo: true, commits });
     }
 
     // Session history management: rename / archive / unarchive / delete.

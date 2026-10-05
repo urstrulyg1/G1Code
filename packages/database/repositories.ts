@@ -467,6 +467,15 @@ export class DatabaseStore {
       )
       .all(sessionId) as Array<{ path: string; status: string }>;
   }
+  /** Full change history for one session, including resolved changes. */
+  changeHistory(sessionId: string) {
+    return this.db
+      .prepare(
+        "SELECT id, session_id as sessionId, path, operation, target_path as targetPath, original_hash as originalHash, proposed_hash as proposedHash, original_content as originalContent, proposed_content as proposedContent, applied_content as appliedContent, patch, status, created_at as createdAt, updated_at as updatedAt FROM file_changes WHERE session_id = ? ORDER BY created_at",
+      )
+      .all(sessionId) as FileChange[];
+  }
+
   sessionSummaryData(sessionId: string) {
     return {
       session: this.getSession(sessionId),
