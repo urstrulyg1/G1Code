@@ -19,7 +19,9 @@ export class AgentSession {
   readonly lifecycle: SessionLifecycle;
   private controller = new AbortController();
   private readonly disposables = new Set<Disposable>();
-  private readonly children = new Set<{ kill: (signal?: NodeJS.Signals) => void }>();
+  private readonly children = new Set<{
+    kill: (signal?: NodeJS.Signals) => void;
+  }>();
   private readonly completionResolvers = new Set<() => void>();
   private finished = false;
 

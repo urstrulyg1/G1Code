@@ -348,26 +348,23 @@ ipcMain.handle("workspace:choose", async (event) => {
 handle("workspace:get-current", () => {
   return selectedWorkspace || null;
 });
-handle<{ path?: string }>(
-  "workspace:open-native-folder",
-  async (input) => {
-    const targetPath = input?.path;
-    const dir = targetPath || selectedWorkspace || process.cwd();
-    if (dir) {
-      const resolved = path.resolve(dir);
-      try {
-        if (!existsSync(resolved)) {
-          await fs.mkdir(resolved, { recursive: true });
-        }
-      } catch {
-        // ignore
+handle<{ path?: string }>("workspace:open-native-folder", async (input) => {
+  const targetPath = input?.path;
+  const dir = targetPath || selectedWorkspace || process.cwd();
+  if (dir) {
+    const resolved = path.resolve(dir);
+    try {
+      if (!existsSync(resolved)) {
+        await fs.mkdir(resolved, { recursive: true });
       }
-      await shell.openPath(resolved);
-      return { success: true, path: resolved };
+    } catch {
+      // ignore
     }
-    return { success: false, error: "No directory specified" };
-  },
-);
+    await shell.openPath(resolved);
+    return { success: true, path: resolved };
+  }
+  return { success: false, error: "No directory specified" };
+});
 handle<{ directory: string }>("workspace:list", async ({ directory }) => {
   if (!selectedWorkspace) throw new Error("Open a workspace first");
   const entries = await fs.readdir(
@@ -419,7 +416,12 @@ handle<{ command: string; cwd?: string }>(
     // Phase 4: the human terminal uses the same spawned, cancellable,
     // process-tree-aware implementation as agent commands instead of a
     // completion-only execFile with a different output limit.
-    const execution = spawnCommand(command, workingDirectory, undefined, 120_000);
+    const execution = spawnCommand(
+      command,
+      workingDirectory,
+      undefined,
+      120_000,
+    );
     terminalProcesses.set(terminalRunId(command), execution);
     const MAX_OUTPUT = 2 * 1024 * 1024;
     let output = "";
@@ -529,7 +531,9 @@ function registerApiBridgeHandlers() {
   });
   const workspaceOf = (value?: string) => value || selectedWorkspace || "";
   handle<{ workspace: string }>("agent:sessions", ({ workspace }) =>
-    api(`/api/agent/sessions?workspace=${encodeURIComponent(workspaceOf(workspace))}`),
+    api(
+      `/api/agent/sessions?workspace=${encodeURIComponent(workspaceOf(workspace))}`,
+    ),
   );
   handle<{ workspace: string; sessionId: string }>(
     "agent:session",
@@ -538,18 +542,21 @@ function registerApiBridgeHandlers() {
         `/api/agent/session?workspace=${encodeURIComponent(workspaceOf(workspace))}&sessionId=${encodeURIComponent(sessionId)}`,
       ),
   );
-  handle<{ workspace: string; sessionId: string; action: string; title?: string }>(
-    "agent:session:update",
-    ({ workspace, sessionId, action, title }) =>
-      api("/api/agent/session-update", {
-        method: "POST",
-        body: JSON.stringify({
-          workspace: workspaceOf(workspace),
-          sessionId,
-          action,
-          title,
-        }),
+  handle<{
+    workspace: string;
+    sessionId: string;
+    action: string;
+    title?: string;
+  }>("agent:session:update", ({ workspace, sessionId, action, title }) =>
+    api("/api/agent/session-update", {
+      method: "POST",
+      body: JSON.stringify({
+        workspace: workspaceOf(workspace),
+        sessionId,
+        action,
+        title,
       }),
+    }),
   );
   handle<{ workspace: string; sessionId: string }>(
     "agent:events",
@@ -633,7 +640,10 @@ function registerApiBridgeHandlers() {
   handle<{ workspace?: string; message: string }>("git:commit", (input) =>
     api("/api/git/commit", {
       method: "POST",
-      body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
+      body: JSON.stringify({
+        workspace: workspaceOf(input.workspace),
+        ...input,
+      }),
     }),
   );
   handle<{ workspace?: string; model?: string }>(
@@ -652,12 +662,15 @@ function registerApiBridgeHandlers() {
       `/api/git/status?workspace=${encodeURIComponent(workspaceOf(workspace))}&limit=5000`,
     ),
   );
-  handle<{ workspace?: string; path: string; startLine?: number; endLine?: number }>(
-    "git:blame",
-    ({ workspace, path: filePath, startLine, endLine }) =>
-      api(
-        `/api/git/blame?workspace=${encodeURIComponent(workspaceOf(workspace))}&path=${encodeURIComponent(filePath)}${startLine ? `&startLine=${startLine}` : ""}${endLine ? `&endLine=${endLine}` : ""}`,
-      ),
+  handle<{
+    workspace?: string;
+    path: string;
+    startLine?: number;
+    endLine?: number;
+  }>("git:blame", ({ workspace, path: filePath, startLine, endLine }) =>
+    api(
+      `/api/git/blame?workspace=${encodeURIComponent(workspaceOf(workspace))}&path=${encodeURIComponent(filePath)}${startLine ? `&startLine=${startLine}` : ""}${endLine ? `&endLine=${endLine}` : ""}`,
+    ),
   );
   handle<{ workspace?: string; path: string; limit?: number }>(
     "git:file-history",
@@ -667,7 +680,9 @@ function registerApiBridgeHandlers() {
       ),
   );
   handle<{ workspace?: string }>("problems:get", ({ workspace }) =>
-    api(`/api/problems?workspace=${encodeURIComponent(workspaceOf(workspace))}`),
+    api(
+      `/api/problems?workspace=${encodeURIComponent(workspaceOf(workspace))}`,
+    ),
   );
   handle<{ workspace?: string; query: string }>(
     "workspace:search",
@@ -709,16 +724,25 @@ function registerApiBridgeHandlers() {
   }>("context:assemble", (input) =>
     api("/api/context/assemble", {
       method: "POST",
-      body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
+      body: JSON.stringify({
+        workspace: workspaceOf(input.workspace),
+        ...input,
+      }),
     }),
   );
-  handle<{ workspace?: string; sessionId?: string; paths?: string[]; level?: string }>(
-    "verification:run",
-    (input) =>
-      api("/api/verification/run", {
-        method: "POST",
-        body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
+  handle<{
+    workspace?: string;
+    sessionId?: string;
+    paths?: string[];
+    level?: string;
+  }>("verification:run", (input) =>
+    api("/api/verification/run", {
+      method: "POST",
+      body: JSON.stringify({
+        workspace: workspaceOf(input.workspace),
+        ...input,
       }),
+    }),
   );
   handle<{ workspace?: string; sessionId?: string }>(
     "verification:list",
@@ -728,18 +752,26 @@ function registerApiBridgeHandlers() {
       ),
   );
   handle<{ workspace?: string }>("diagnostics:get", ({ workspace }) =>
-    api(`/api/diagnostics?workspace=${encodeURIComponent(workspaceOf(workspace))}`),
+    api(
+      `/api/diagnostics?workspace=${encodeURIComponent(workspaceOf(workspace))}`,
+    ),
   );
   handle<{ workspace?: string }>("index:rebuild", (input) =>
     api("/api/index/rebuild", {
       method: "POST",
-      body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
+      body: JSON.stringify({
+        workspace: workspaceOf(input.workspace),
+        ...input,
+      }),
     }),
   );
   handle<{ workspace?: string; query: string }>("index:search", (input) =>
     api("/api/index/search", {
       method: "POST",
-      body: JSON.stringify({ workspace: workspaceOf(input.workspace), ...input }),
+      body: JSON.stringify({
+        workspace: workspaceOf(input.workspace),
+        ...input,
+      }),
     }),
   );
 }

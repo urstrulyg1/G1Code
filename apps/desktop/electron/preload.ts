@@ -14,11 +14,15 @@ contextBridge.exposeInMainWorld("g1code", {
   chooseWorkspace: () =>
     ipcRenderer.invoke("workspace:choose") as Promise<string | null>,
   setWorkspace: (targetPath: string) =>
-    ipcRenderer.invoke("workspace:set", { path: targetPath }) as Promise<string>,
+    ipcRenderer.invoke("workspace:set", {
+      path: targetPath,
+    }) as Promise<string>,
   getCurrentWorkspace: () =>
     ipcRenderer.invoke("workspace:get-current") as Promise<string | null>,
   openNativeFolder: (targetPath?: string) =>
-    ipcRenderer.invoke("workspace:open-native-folder", { path: targetPath }) as Promise<{
+    ipcRenderer.invoke("workspace:open-native-folder", {
+      path: targetPath,
+    }) as Promise<{
       success: boolean;
       path?: string;
     }>,
@@ -169,8 +173,12 @@ contextBridge.exposeInMainWorld("g1code", {
     ipcRenderer.invoke("git:commit", { workspace, message }),
   generateCommitMsg: (workspace: string, model?: string) =>
     ipcRenderer.invoke("git:generate-commit-msg", { workspace, model }),
-  blameFile: (workspace: string, path: string, startLine?: number, endLine?: number) =>
-    ipcRenderer.invoke("git:blame", { workspace, path, startLine, endLine }),
+  blameFile: (
+    workspace: string,
+    path: string,
+    startLine?: number,
+    endLine?: number,
+  ) => ipcRenderer.invoke("git:blame", { workspace, path, startLine, endLine }),
   fileHistory: (workspace: string, path: string, limit?: number) =>
     ipcRenderer.invoke("git:file-history", { workspace, path, limit }),
   loadSessionEvents: (workspace: string, sessionId: string) =>

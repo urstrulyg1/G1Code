@@ -12,7 +12,11 @@ test("lifecycle enforces legal transitions and rejects illegal ones", () => {
   assert.equal(lifecycle.transition("running"), true);
   assert.equal(lifecycle.transition("completed"), true);
   assert.equal(lifecycle.terminal, true);
-  assert.equal(lifecycle.transition("running"), false, "terminal states are final");
+  assert.equal(
+    lifecycle.transition("running"),
+    false,
+    "terminal states are final",
+  );
   assert.throws(
     () => new SessionLifecycle("s2").transition("cancelled"),
     /Illegal session transition/,
@@ -49,15 +53,27 @@ test("cancellation aborts the signal, runs cleanups once, and kills children", (
   session.requestCancel("test");
   session.requestCancel("test again");
 
-  assert.equal(aborted, true, "abort signal fires for provider streams and tools");
-  assert.equal(cleanups, 1, "cleanup runs exactly once even with repeated stops");
+  assert.equal(
+    aborted,
+    true,
+    "abort signal fires for provider streams and tools",
+  );
+  assert.equal(
+    cleanups,
+    1,
+    "cleanup runs exactly once even with repeated stops",
+  );
   assert.deepEqual(kills, ["SIGTERM"]);
 });
 
 test("manager rejects duplicate session ids instead of sharing state", async () => {
   const manager = new AgentRuntimeManager();
   const runtime = { stop() {} } as never;
-  const session = manager.startSession("dup", runtime, () => new Promise<void>(() => {}));
+  const session = manager.startSession(
+    "dup",
+    runtime,
+    () => new Promise<void>(() => {}),
+  );
   assert.throws(
     () => manager.startSession("dup", runtime, () => Promise.resolve()),
     /already running/,
@@ -88,7 +104,10 @@ test("manager releases the handle and marks a cancelled session cancelled", asyn
   });
 
   await new Promise((resolve) => setTimeout(resolve, 5));
-  assert.deepEqual(manager.activeSessions().map((s) => s.sessionId), ["run"]);
+  assert.deepEqual(
+    manager.activeSessions().map((s) => s.sessionId),
+    ["run"],
+  );
   assert.equal(manager.activeSessions()[0].toolCalls, 5);
   manager.cancelSession("run");
   await new Promise((resolve) => setTimeout(resolve, 20));

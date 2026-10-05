@@ -43,7 +43,11 @@ test("review mode lets the agent propose changes instead of silently denying the
   assert.equal(write.reason, "review-mode-proposes-change");
 
   const tests = decide("run_tests", {}, "review");
-  assert.equal(tests.decision, "ask", "execution still needs an explicit approval");
+  assert.equal(
+    tests.decision,
+    "ask",
+    "execution still needs an explicit approval",
+  );
 
   const read = decide("read_file", {}, "review");
   assert.equal(read.decision, "allow");
@@ -51,7 +55,10 @@ test("review mode lets the agent propose changes instead of silently denying the
 
 test("auto mode allows permitted edits and commands but always asks for dangerous ones", () => {
   assert.equal(decide("apply_patch", {}, "auto").decision, "allow");
-  assert.equal(decide("run_command", {}, "auto", { command: "npm test" }).decision, "allow");
+  assert.equal(
+    decide("run_command", {}, "auto", { command: "npm test" }).decision,
+    "allow",
+  );
   assert.equal(
     decide("run_command", {}, "auto", { command: "rm -rf build" }).decision,
     "ask",
@@ -61,8 +68,14 @@ test("auto mode allows permitted edits and commands but always asks for dangerou
 
 test("plan and readonly modes never allow a mutating or executing tool", () => {
   for (const mode of ["plan", "readonly"] as const) {
-    assert.equal(decide("write_file", {}, mode, { targetExists: true }).decision, "deny");
-    assert.equal(decide("run_command", {}, mode, { command: "npm test" }).decision, "deny");
+    assert.equal(
+      decide("write_file", {}, mode, { targetExists: true }).decision,
+      "deny",
+    );
+    assert.equal(
+      decide("run_command", {}, mode, { command: "npm test" }).decision,
+      "deny",
+    );
     assert.equal(decide("run_tests", {}, mode).decision, "deny");
     assert.equal(decide("read_file", {}, mode).decision, "allow");
     assert.equal(decide("search_repository", {}, mode).decision, "allow");
@@ -70,18 +83,16 @@ test("plan and readonly modes never allow a mutating or executing tool", () => {
 });
 
 test("settings switches are a hard stop, not a suggestion", () => {
-  assert.equal(
-    decide("read_file", { readFiles: false }).decision,
-    "deny",
-  );
+  assert.equal(decide("read_file", { readFiles: false }).decision, "deny");
   assert.equal(
     decide("write_file", { editFiles: false }, "auto", { targetExists: true })
       .decision,
     "deny",
   );
   assert.equal(
-    decide("write_file", { createFiles: false }, "auto", { targetExists: false })
-      .decision,
+    decide("write_file", { createFiles: false }, "auto", {
+      targetExists: false,
+    }).decision,
     "deny",
   );
   assert.equal(
@@ -103,8 +114,9 @@ test("settings switches are a hard stop, not a suggestion", () => {
 
 test("write_file distinguishes edit from create permissions", () => {
   assert.equal(
-    decide("write_file", { createFiles: false }, "auto", { targetExists: false })
-      .decision,
+    decide("write_file", { createFiles: false }, "auto", {
+      targetExists: false,
+    }).decision,
     "deny",
   );
   assert.equal(

@@ -28,11 +28,11 @@ const fail = (channel: string, message: string): never => {
 };
 
 /** Absolute path, bounded, no control characters. */
-export const absolutePath = (
-  maxLength = 4096,
-): Validator<string> =>
+export const absolutePath =
+  (maxLength = 4096): Validator<string> =>
   (value, channel) => {
-    if (typeof value !== "string") return fail(channel, "expected a string path");
+    if (typeof value !== "string")
+      return fail(channel, "expected a string path");
     if (value.length === 0) return fail(channel, "path is empty");
     if (value.length > maxLength) return fail(channel, "path is too long");
     // eslint-disable-next-line no-control-regex
@@ -41,11 +41,12 @@ export const absolutePath = (
     return value;
   };
 
-export const boundedString = (
-  name: string,
-  maxLength: number,
-  options: { allowEmpty?: boolean } = {},
-): Validator<string> =>
+export const boundedString =
+  (
+    name: string,
+    maxLength: number,
+    options: { allowEmpty?: boolean } = {},
+  ): Validator<string> =>
   (value, channel) => {
     if (typeof value !== "string")
       return fail(channel, `${name} must be a string`);
@@ -56,23 +57,22 @@ export const boundedString = (
     return value;
   };
 
-export const optional = <T>(
-  validator: Validator<T>,
-): Validator<T | undefined> =>
+export const optional =
+  <T>(validator: Validator<T>): Validator<T | undefined> =>
   (value, channel) =>
-    value === undefined || value === null ? undefined : validator(value, channel);
+    value === undefined || value === null
+      ? undefined
+      : validator(value, channel);
 
-export const boolean = (name: string): Validator<boolean> =>
+export const boolean =
+  (name: string): Validator<boolean> =>
   (value, channel) =>
     typeof value === "boolean"
       ? value
       : fail(channel, `${name} must be a boolean`);
 
-export const boundedNumber = (
-  name: string,
-  min: number,
-  max: number,
-): Validator<number> =>
+export const boundedNumber =
+  (name: string, min: number, max: number): Validator<number> =>
   (value, channel) => {
     if (typeof value !== "number" || !Number.isFinite(value))
       return fail(channel, `${name} must be a finite number`);
@@ -81,10 +81,8 @@ export const boundedNumber = (
     return value;
   };
 
-export const oneOf = <T extends string>(
-  name: string,
-  allowed: readonly T[],
-): Validator<T> =>
+export const oneOf =
+  <T extends string>(name: string, allowed: readonly T[]): Validator<T> =>
   (value, channel) =>
     typeof value === "string" && (allowed as readonly string[]).includes(value)
       ? (value as T)
@@ -120,11 +118,8 @@ export function object<T extends Record<string, unknown>>(
   };
 }
 
-export const arrayOf = <T>(
-  item: Validator<T>,
-  name: string,
-  maxItems = 256,
-): Validator<T[]> =>
+export const arrayOf =
+  <T>(item: Validator<T>, name: string, maxItems = 256): Validator<T[]> =>
   (value, channel) => {
     if (!Array.isArray(value)) return fail(channel, `${name} must be an array`);
     if (value.length > maxItems)
@@ -154,7 +149,9 @@ export function assertPayloadSize(
   let size = 0;
   try {
     size =
-      typeof value === "string" ? value.length : (JSON.stringify(value)?.length ?? 0);
+      typeof value === "string"
+        ? value.length
+        : (JSON.stringify(value)?.length ?? 0);
   } catch {
     throw new IpcValidationError(channel, "payload is not serialisable");
   }
@@ -189,7 +186,9 @@ export const IPC_SCHEMAS = {
   }),
   "settings:get": none,
   "settings:save": object({}, { allowUnknown: true, name: "settings" }),
-  "provider:models": object({ provider: optional(boundedString("provider", 64)) }),
+  "provider:models": object({
+    provider: optional(boundedString("provider", 64)),
+  }),
   "provider:models:free": object({
     provider: optional(boundedString("provider", 64)),
   }),
@@ -244,7 +243,12 @@ export const IPC_SCHEMAS = {
   "agent:session:update": object({
     workspace: absolutePath(),
     sessionId: boundedString("sessionId", 256),
-    action: oneOf("action", ["rename", "archive", "unarchive", "delete"] as const),
+    action: oneOf("action", [
+      "rename",
+      "archive",
+      "unarchive",
+      "delete",
+    ] as const),
     title: optional(boundedString("title", 200)),
   }),
   "agent:events": object({
@@ -327,9 +331,7 @@ export const IPC_SCHEMAS = {
   "verification:run": object({
     workspace: optional(absolutePath()),
     sessionId: optional(boundedString("sessionId", 256)),
-    paths: optional(
-      arrayOf(boundedString("changed path", 4096), "paths", 500),
-    ),
+    paths: optional(arrayOf(boundedString("changed path", 4096), "paths", 500)),
     level: optional(
       oneOf("level", ["targeted", "full", "typecheck", "build"] as const),
     ),
@@ -356,14 +358,17 @@ export function validateIpcPayload<T = unknown>(
   channel: string,
   value: unknown,
 ): T {
-  const schema = (IPC_SCHEMAS as Record<string, Validator<unknown> | undefined>)[
-    channel
-  ];
+  const schema = (
+    IPC_SCHEMAS as Record<string, Validator<unknown> | undefined>
+  )[channel];
   assertPayloadSize(value, channel);
   if (!schema) {
     // Failing closed is the whole point: an unregistered channel is a bug, not
     // permission to forward raw renderer input.
-    throw new IpcValidationError(channel, "no schema registered for this channel");
+    throw new IpcValidationError(
+      channel,
+      "no schema registered for this channel",
+    );
   }
   return schema(value, channel) as T;
 }

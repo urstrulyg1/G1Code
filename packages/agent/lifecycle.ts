@@ -43,7 +43,10 @@ export function isTerminal(state: SessionLifecycleState): boolean {
  * and only ever exits to `cancelled`, which is what makes cancellation
  * idempotent and observable.
  */
-const TRANSITIONS: Record<SessionLifecycleState, readonly SessionLifecycleState[]> = {
+const TRANSITIONS: Record<
+  SessionLifecycleState,
+  readonly SessionLifecycleState[]
+> = {
   created: ["running", "cancelling", "failed", "completed"],
   running: ["waiting_for_approval", "cancelling", "completed", "failed"],
   waiting_for_approval: ["running", "cancelling", "completed", "failed"],
@@ -142,7 +145,8 @@ export class SessionLifecycle {
   /** Finish a cancellation that was previously requested. */
   markCancelled(reason?: string): boolean {
     if (this.current === "cancelled") return false;
-    if (this.current !== "cancelling") return this.requestCancel(reason) && this.markCancelled(reason);
+    if (this.current !== "cancelling")
+      return this.requestCancel(reason) && this.markCancelled(reason);
     return this.transition("cancelled", reason);
   }
 

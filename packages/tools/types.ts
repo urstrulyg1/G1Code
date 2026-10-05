@@ -27,9 +27,7 @@ export type ToolContext = {
    * instead of leaking them until the process exits.
    */
   registerCleanup?: (cleanup: () => void | Promise<void>) => void;
-  trackProcess?: (child: {
-    kill: (signal?: NodeJS.Signals) => void;
-  }) => void;
+  trackProcess?: (child: { kill: (signal?: NodeJS.Signals) => void }) => void;
   recordTestRun?: (run: {
     command: string;
     cwd: string;

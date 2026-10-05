@@ -57,7 +57,10 @@ export class AgentRuntimeManager {
         // A runtime is expected to translate failures into AgentEvents. If an
         // integration boundary throws anyway, keep the manager (and the
         // process) from producing an unhandled rejection.
-        console.error(`[AgentRuntimeManager] Session ${sessionId} failed:`, error);
+        console.error(
+          `[AgentRuntimeManager] Session ${sessionId} failed:`,
+          error,
+        );
         this.finish(session, "failed", "runtime threw unexpectedly");
       });
     return session;
@@ -82,14 +85,16 @@ export class AgentRuntimeManager {
   }
 
   activeSessions(): ActiveSessionSnapshot[] {
-    return [...this.sessions.values()].map(({ session, runtime, startedAt }) => ({
-      sessionId: session.id,
-      state: session.state,
-      startedAt,
-      turns: runtime?.iterationCount?.() ?? 0,
-      toolCalls: runtime?.toolCallCount?.() ?? 0,
-      cancelRequested: session.lifecycle.cancelRequested,
-    }));
+    return [...this.sessions.values()].map(
+      ({ session, runtime, startedAt }) => ({
+        sessionId: session.id,
+        state: session.state,
+        startedAt,
+        turns: runtime?.iterationCount?.() ?? 0,
+        toolCalls: runtime?.toolCallCount?.() ?? 0,
+        cancelRequested: session.lifecycle.cancelRequested,
+      }),
+    );
   }
 
   removeSession(sessionId: string) {

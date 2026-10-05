@@ -21,37 +21,37 @@ Electron main  ── IPC ──▶ HTTP 127.0.0.1:3131  ──▶ Agent runtime
                                                        better-sqlite3
 ```
 
-* `apps/desktop/electron/main.ts` — BrowserWindow creation, workspace selection, a thin HTTP
+- `apps/desktop/electron/main.ts` — BrowserWindow creation, workspace selection, a thin HTTP
   bridge, and an SSE relay into the renderer. All the real work is proxied to the backend.
-* `server.ts` — the privileged boundary. Owns the agent runtime, approval waiters, the
+- `server.ts` — the privileged boundary. Owns the agent runtime, approval waiters, the
   repository index, change batches, Git endpoints, settings, and the model catalog.
-* `packages/*` — the shared implementation used by `server.ts` (agent runtime, tools,
+- `packages/*` — the shared implementation used by `server.ts` (agent runtime, tools,
   indexing, context budget, database, testing, security).
-* `apps/desktop/src/main.tsx` — one 7 700-line React component that is the entire UI.
+- `apps/desktop/src/main.tsx` — one 7 700-line React component that is the entire UI.
 
 ## 2. Implemented vs. only documented
 
-| Area | State | Evidence |
-| --- | --- | --- |
-| Electron security baseline | Implemented | `contextIsolation`, `sandbox`, `nodeIntegration:false`, window-open denied |
-| Preload bridge | Implemented | narrow `window.g1code` surface (`preload.ts`) |
-| Workspace containment | Implemented | `safePath` / `safeRealPath` with real-path and symlink checks |
-| Command execution | Partial | `spawnCommand` is cancellable and streams, but streaming is not surfaced to the renderer and the Electron `terminal:run` path is still completion-only |
-| Agent runtime loop | Implemented | provider stream → tool calls → approval → persist |
-| Session cancellation | Partial | `agent:stop` releases waiters and aborts, but there is no explicit `cancelling` state and cleanup is best-effort |
-| Session persistence | Implemented | sessions / messages / tool calls / events / changes / batches in SQLite; restart marks sessions interrupted |
-| Session restore | Partial | persisted events and messages exist, but sessions cannot be renamed/archived/deleted and the list omits change + verification counts |
-| Streaming | Partial | assistant text and command chunks exist; no bounded buffering, no terminal-stream recovery, no explicit activity taxonomy |
-| File changes | Implemented | proposed/approved/applied states, SHA-256 original+proposed hashes, unified diff, conflict detection, safe revert, transactional batches |
-| Approvals | Implemented | server-side waiters with timeout, single-resolution guard, approve/reject all |
-| Repository indexing | Partial | incremental scan + symbol extraction exist, but imports/dependencies, git awareness, and ranked search are not wired into any route or tool |
-| Context assembly | Partial | `ContextBudgetManager` + hash dedupe exist, but nothing assembles real repository context per request |
-| Verification pipeline | Partial | project detection, test discovery and targeted commands exist; the pipeline is agent-driven, not deterministic |
-| Bounded self-repair | Partial | a repair counter exists in the runtime; verification-driven bounded repair does not |
-| Git | Partial | read-only status/diff/branch/log tools plus human-only commit; no blame, no staged diff, no history-aware context |
-| Observability | Partial | console logging only, no channels, no diagnostics view |
-| Renderer architecture | Not implemented | single component; sub-behaviours are not separately testable |
-| Tests | Implemented | 90 tests (89 pass, 1 skipped) before changes |
+| Area                       | State           | Evidence                                                                                                                                               |
+| -------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Electron security baseline | Implemented     | `contextIsolation`, `sandbox`, `nodeIntegration:false`, window-open denied                                                                             |
+| Preload bridge             | Implemented     | narrow `window.g1code` surface (`preload.ts`)                                                                                                          |
+| Workspace containment      | Implemented     | `safePath` / `safeRealPath` with real-path and symlink checks                                                                                          |
+| Command execution          | Partial         | `spawnCommand` is cancellable and streams, but streaming is not surfaced to the renderer and the Electron `terminal:run` path is still completion-only |
+| Agent runtime loop         | Implemented     | provider stream → tool calls → approval → persist                                                                                                      |
+| Session cancellation       | Partial         | `agent:stop` releases waiters and aborts, but there is no explicit `cancelling` state and cleanup is best-effort                                       |
+| Session persistence        | Implemented     | sessions / messages / tool calls / events / changes / batches in SQLite; restart marks sessions interrupted                                            |
+| Session restore            | Partial         | persisted events and messages exist, but sessions cannot be renamed/archived/deleted and the list omits change + verification counts                   |
+| Streaming                  | Partial         | assistant text and command chunks exist; no bounded buffering, no terminal-stream recovery, no explicit activity taxonomy                              |
+| File changes               | Implemented     | proposed/approved/applied states, SHA-256 original+proposed hashes, unified diff, conflict detection, safe revert, transactional batches               |
+| Approvals                  | Implemented     | server-side waiters with timeout, single-resolution guard, approve/reject all                                                                          |
+| Repository indexing        | Partial         | incremental scan + symbol extraction exist, but imports/dependencies, git awareness, and ranked search are not wired into any route or tool            |
+| Context assembly           | Partial         | `ContextBudgetManager` + hash dedupe exist, but nothing assembles real repository context per request                                                  |
+| Verification pipeline      | Partial         | project detection, test discovery and targeted commands exist; the pipeline is agent-driven, not deterministic                                         |
+| Bounded self-repair        | Partial         | a repair counter exists in the runtime; verification-driven bounded repair does not                                                                    |
+| Git                        | Partial         | read-only status/diff/branch/log tools plus human-only commit; no blame, no staged diff, no history-aware context                                      |
+| Observability              | Partial         | console logging only, no channels, no diagnostics view                                                                                                 |
+| Renderer architecture      | Not implemented | single component; sub-behaviours are not separately testable                                                                                           |
+| Tests                      | Implemented     | 90 tests (89 pass, 1 skipped) before changes                                                                                                           |
 
 ## 3. Duplicate or dead functionality
 
@@ -114,11 +114,12 @@ Severity ordering. Each item lists the concrete consequence.
 The plan is ordered exactly as required: P0 reliability/security first.
 
 ### P0 — Reliability and security
+
 1. Make `npm install` reliable without an Electron cache; make Electron preflight degrade to a
    clear warning and add a strict mode for CI.
 2. Delete the dead duplicate runtime; keep `server.ts` as the single privileged boundary.
 3. Introduce a real session lifecycle (`created → running → waiting_for_approval → cancelling →
-   completed | failed | cancelled`, plus `interrupted`) with a per-session `AbortController`
+completed | failed | cancelled`, plus `interrupted`) with a per-session `AbortController`
    owned by the manager, idempotent cancellation, guaranteed listener/child cleanup, and
    deterministic event ordering.
 4. Handle renderer/window close: notify the server so approval waits and streams unwind.
@@ -129,6 +130,7 @@ The plan is ordered exactly as required: P0 reliability/security first.
    command injection, renderer isolation.
 
 ### P1 — Core AI IDE
+
 8. Persist and incrementally maintain the repository index on workspace open, with
    imports/exports, git awareness, and file-change detection.
 9. Wire ranked repository search (filename/path/symbol/text/recent/git-aware) as a route and an
@@ -140,6 +142,7 @@ The plan is ordered exactly as required: P0 reliability/security first.
 12. Diff viewer, session sidebar (rename/archive/delete, counts), approval UX.
 
 ### P2 — Developer intelligence
+
 13. Deterministic verification pipeline (affected files → relevant tests → type-check/lint →
     build) with persisted results.
 14. Bounded self-repair driven by verification failures (default 2–3 attempts), always through
@@ -150,19 +153,21 @@ The plan is ordered exactly as required: P0 reliability/security first.
     indexing status, recent tools, errors, verification).
 
 ### P3 — UX and performance
+
 17. Renderer refactor into focused components with testable state boundaries, virtualized long
     lists, lazy loading, and bounded queues.
 
 ### P4 — Advanced
+
 18. Deeper symbol/dependency analysis and ranking improvements, richer Git workflows, and
     provider capabilities that the configured provider actually exposes.
 
 ## 6. Explicit non-goals
 
-* No new AI provider is invented. The configured OpenAI-compatible "Experiential Labs" provider
+- No new AI provider is invented. The configured OpenAI-compatible "Experiential Labs" provider
   is the only one, and its capabilities are read from the model catalog.
-* No automatic commit/push. Commit stays a human action; push is not implemented.
-* No claim of a real Electron E2E run in environments without an Electron binary; the suite
+- No automatic commit/push. Commit stays a human action; push is not implemented.
+- No claim of a real Electron E2E run in environments without an Electron binary; the suite
   reports the skip instead of failing silently.
 
 ## 7. Baseline test evidence (before Phase 4 changes)
@@ -180,3 +185,35 @@ $ npm run build   # tsc (renderer) + vite build + tsc (electron) — clean
 `npm install` fails without `--ignore-scripts` on a clean machine; the Electron binary cannot be
 downloaded in the audit sandbox (`objects.githubusercontent.com` unreachable), so Electron E2E
 was not executed there. Both facts are addressed in P0-1 and P3-17.
+
+---
+
+## Implementation status (updated)
+
+The audit above was the starting point. The following is now implemented and
+verified in this repository:
+
+| Item                                                                   | Status                               |
+| ---------------------------------------------------------------------- | ------------------------------------ |
+| Single privileged boundary (dead Electron runtime deleted)             | done                                 |
+| Session lifecycle + per-session cancellation + cleanup registry        | done                                 |
+| Permission authority (`decidePermission`) enforced in the runtime loop | done                                 |
+| IPC schema validation for every channel                                | done                                 |
+| Workspace containment / symlink-safe paths                             | done                                 |
+| Hash-guarded, atomic file writes (IPC + HTTP)                          | done                                 |
+| Durable incremental index (files, symbols, imports, git state)         | done                                 |
+| Ranked repository search with reasons                                  | done                                 |
+| Automatic context assembly with manifest                               | done                                 |
+| Repository intelligence tools (search/symbol/metadata/tests)           | done                                 |
+| Verification pipeline (typecheck/targeted tests/build) + persistence   | done                                 |
+| Git blame + per-file history endpoints                                 | done                                 |
+| Session history metadata + rename/archive/delete endpoints             | done                                 |
+| Diagnostics endpoint (no secrets)                                      | done                                 |
+| Headless end-to-end agent workflow test                                | done                                 |
+| Renderer event model extracted and unit tested                         | done                                 |
+| Full renderer component refactor                                       | not done (see implementation report) |
+| Session sidebar actions in the UI                                      | not done (backend ready)             |
+| Renderer terminal cancel channel                                       | not done                             |
+
+See `phase-4-implementation-report.md` for details, evidence and the remaining
+limitations.

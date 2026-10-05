@@ -310,7 +310,8 @@ export class AgentRuntime {
   }
 
   private transitionCancellation(signal?: AbortSignal) {
-    const byUser = this.cancelledByUser || this.session?.lifecycle.cancelRequested;
+    const byUser =
+      this.cancelledByUser || this.session?.lifecycle.cancelRequested;
     if (this.session) {
       this.setLifecycle("cancelling", "cancellation observed by runtime");
       this.session.markCancelled("cancelled by user");
@@ -482,7 +483,10 @@ export class AgentRuntime {
         input: redactObject(input),
         action: "resolved",
         activity: "approval",
-        result: { status: decided ? "APPROVED" : "REJECTED", approved: decided },
+        result: {
+          status: decided ? "APPROVED" : "REJECTED",
+          approved: decided,
+        },
         message: cancelled
           ? `Approval cancelled for ${tool.name}`
           : decided
@@ -952,7 +956,10 @@ export class AgentRuntime {
             });
             if (!cancelled) {
               this.transition("EXECUTING", decision.message);
-              if (this.session && this.session.state === "waiting_for_approval") {
+              if (
+                this.session &&
+                this.session.state === "waiting_for_approval"
+              ) {
                 this.session.lifecycle.transition("running", "change resolved");
                 this.setLifecycle("running", "change resolved");
               }

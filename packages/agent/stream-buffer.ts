@@ -15,7 +15,10 @@ export class BoundedTextBuffer {
 
   constructor(
     private readonly maxChars = 4096,
-    private readonly onFlush?: (text: string, meta: { droppedChars: number }) => void,
+    private readonly onFlush?: (
+      text: string,
+      meta: { droppedChars: number },
+    ) => void,
   ) {}
 
   get pending(): number {

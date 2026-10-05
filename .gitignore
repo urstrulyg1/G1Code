@@ -12,3 +12,7 @@ G1Code/
 release/
 .icon-tmp/
 .icon-gen-tmp/
+
+# Test-generated chat transcripts (fixtures under chats/ stay tracked)
+chats/[0-9]*-*.json
+chats/[0-9]*-*.md
